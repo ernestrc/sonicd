@@ -1,0 +1,31 @@
+[package]
+name = "sonicd"
+version = "0.3.0"
+authors = ["Ernest Romero <ernest@unstable.build>"]
+
+[lib]
+name = "sonicd"
+path = "lib/rust/src/lib.rs"
+
+[[bin]]
+name = "sonic"
+path = "cli/src/main.rs"
+
+[dependencies]
+serde = "*"
+serde_json = "*"
+serde_macros = "*"
+byteorder = "*"
+curl = "*"
+nix = "*"
+log = "*"
+
+regex = "*"
+docopt = "0.6"
+docopt_macros = "0.6"
+rustc-serialize = "0.3"
+env_logger = "*"
+pbr = "*"
+
+#[profile.release]
+#debug = true

@@ -1,0 +1,15 @@
+language: scala
+scala:
+  - 2.11.8
+branches:
+  only:
+    - master
+notifications:
+  email:
+    recipients:
+      - ernest@unstable.build
+script: scripts/test.sh
+deploy:
+  provider: bintray
+  user: "ernestrc"
+  key: "8844ab2067e5b3f2c7f30b3075b1091f9e151c18"

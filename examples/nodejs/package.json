@@ -1,0 +1,15 @@
+{
+  "name": "sonic-example",
+  "version": "0.2.4",
+  "description": "",
+  "main": "example.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "ernest@unstable.build",
+  "license": "ISC",
+  "dependencies": {
+    "sonicd": "^0.2.5",
+    "websocket": "^1.0.22"
+  }
+}
