@@ -54,7 +54,7 @@ object TcpHandlerSpec {
 
   //it doesn't matter as it's handled by controller anyway
   val query =
-    SonicSource.lengthPrefixEncode(Query("10", """{"class":"SyntheticSource"}""".parseJson.asJsObject).toBytes)
+    SonicdSource.lengthPrefixEncode(Query("10", """{"class":"SyntheticSource"}""".parseJson.asJsObject).toBytes)
 }
 
 class TcpHandlerSpec(_system: ActorSystem) extends TestKit(_system)
@@ -100,7 +100,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   def progressFlowNoAck(tcpHandler: ActorRef): Tcp.Write = {
     val prog = QueryProgress(Some(100), None)
     val ack = TcpHandler.Ack(1)
-    val w = Tcp.Write(SonicSource.lengthPrefixEncode(prog.toBytes), ack)
+    val w = Tcp.Write(SonicdSource.lengthPrefixEncode(prog.toBytes), ack)
     tcpHandler ! prog
     expectMsg(w)
     w
@@ -109,7 +109,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   def sendOutputNoAck(tcpHandler: ActorRef, ack: Int): Tcp.Write = {
     val out = OutputChunk(Vector("1"))
     val ack2 = TcpHandler.Ack(2)
-    val w = Tcp.Write(SonicSource.lengthPrefixEncode(out.toBytes), ack2)
+    val w = Tcp.Write(SonicdSource.lengthPrefixEncode(out.toBytes), ack2)
     tcpHandler ! out
     expectMsg(w)
     w
@@ -118,14 +118,14 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   def sendDoneNoAck(tcpHandler: ActorRef, ack: Int): Tcp.Write = {
     val done = DoneWithQueryExecution(success = true)
     val a = TcpHandler.Ack(ack)
-    val w = Tcp.Write(SonicSource.lengthPrefixEncode(done.toBytes), a)
+    val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), a)
     tcpHandler ! done
     expectMsg(w)
     w
   }
 
   def clientAcknowledge(tcpHandler: ActorRef) = {
-    val ack = SonicSource.lengthPrefixEncode(ClientAcknowledge.toBytes)
+    val ack = SonicdSource.lengthPrefixEncode(ClientAcknowledge.toBytes)
     tcpHandler ! Tcp.Received(ack)
     expectMsg(Tcp.ConfirmedClose)
     expectMsg(Tcp.ResumeReading)
@@ -166,7 +166,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     val ack = TcpHandler.Ack(1)
     expectMsg(Tcp.ResumeReading)
-    expectMsg(Tcp.Write(SonicSource.lengthPrefixEncode(done.toBytes), ack))
+    expectMsg(Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack))
 
     tcpHandler ! ack
 
@@ -222,7 +222,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     val ack2 = TcpHandler.Ack(2)
     tcpHandler ! ack
-    expectMsg(Tcp.Write(SonicSource.lengthPrefixEncode(out.toBytes), ack2))
+    expectMsg(Tcp.Write(SonicdSource.lengthPrefixEncode(out.toBytes), ack2))
 
   }
 
@@ -330,10 +330,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     val done = DoneWithQueryExecution(success = true)
 
     val ack1 = TcpHandler.Ack(1)
-    val w1 = Tcp.Write(SonicSource.lengthPrefixEncode(done.toBytes), ack1)
+    val w1 = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack1)
 
     val ack2 = TcpHandler.Ack(2)
-    val w2 = Tcp.Write(SonicSource.lengthPrefixEncode(done.toBytes), ack2)
+    val w2 = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack2)
 
     tcpHandler ! done
     expectMsg(w1)
@@ -411,7 +411,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     //send done before ack2
     val ack3 = TcpHandler.Ack(3)
     val done = DoneWithQueryExecution(success = true)
-    val w = Tcp.Write(SonicSource.lengthPrefixEncode(done.toBytes), ack3)
+    val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack3)
     tcpHandler ! done
     expectNoMsg()
 

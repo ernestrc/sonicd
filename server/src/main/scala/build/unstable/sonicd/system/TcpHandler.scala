@@ -137,7 +137,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   def buffer(t: SonicMessage) = {
     currentOffset += 1
     //length prefix framing
-    val w = Write(SonicSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
+    val w = Write(SonicdSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
     storage.append(w)
     //log.debug("buffered {}", w)
     w

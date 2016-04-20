@@ -5,7 +5,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{DataSource, SonicMessage}
-import spray.json.{JsNumber, JsObject}
+import spray.json.{JsArray, JsString, JsNumber, JsObject}
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
@@ -48,7 +48,7 @@ class SyntheticPublisher(seed: Int, size: Option[Int], progressWait: Int,
   private def stream(demand: Long): Unit = {
     if (totalDemand > 0) {
       if (indexed) {
-        onNext(OutputChunk(Vector(streamed, rdm.nextInt())))
+        onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(rdm.nextInt()))))
       } else onNext(OutputChunk(Vector(rdm.nextInt())))
       streamed += 1
       stream(demand - 1L)

@@ -26,10 +26,10 @@ object AkkaExample extends App {
     ActorMaterializer(ActorMaterializerSettings(system))
 
   val stream: Future[DoneWithQueryExecution] =
-    SonicSource.stream(addr, query).to(Sink.ignore).run()
+    SonicdSource.stream(addr, query).to(Sink.ignore).run()
 
   val future: Future[Vector[SonicMessage]] =
-    SonicSource.run(addr, query)
+    SonicdSource.run(addr, query)
 
   val fDone = Await.result(future, 20.seconds)
   val sDone = Await.result(stream, 20.seconds)

@@ -11,7 +11,7 @@ import akka.util.ByteString
 
 import scala.concurrent.Future
 
-object SonicSource {
+object SonicdSource {
 
   class IncompleteStreamException extends Exception("stream was closed before completion")
 

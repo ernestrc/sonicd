@@ -66,16 +66,18 @@ package object model {
     override val eventType = Some("P")
   }
 
-  case class DoneWithQueryExecution(success: Boolean, errors: Vector[Throwable] = Vector.empty) extends SonicMessage {
+  case class DoneWithQueryExecution(success: Boolean, errors: Vector[Exception] = Vector.empty) extends SonicMessage {
 
     override val eventType = Some("D")
     override val variation: Option[String] = if (success) Some("success") else Some("error")
 
     override val payload: Option[JsValue] = Some(JsArray(errors.map(e ⇒ JsString(e.toString))))
+
   }
 
   object DoneWithQueryExecution {
-    def error(e: Throwable): DoneWithQueryExecution = DoneWithQueryExecution(success = false, Vector(e))
+    def error(e: Exception): DoneWithQueryExecution = DoneWithQueryExecution(success = false, Vector(e))
+    def error(e: Throwable): DoneWithQueryExecution = error(new Exception(e))
   }
 
   //events sent by the client to the server

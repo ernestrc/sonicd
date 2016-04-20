@@ -7,7 +7,7 @@ import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.util.ByteString
-import build.unstable.sonicd.model.SonicSource.{IncompleteStreamException, SonicProtocolStage}
+import build.unstable.sonicd.model.SonicdSource.{IncompleteStreamException, SonicProtocolStage}
 import org.scalatest.concurrent._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
@@ -82,7 +82,7 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
     "fail if upstream connection closes before Done event" in {
       val tcpFlow: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
         Flow.fromSinkAndSource[ByteString, ByteString](
-        Sink.ignore, Source.single(SonicSource.lengthPrefixEncode(QueryProgress(Some(100), None).toBytes)))
+        Sink.ignore, Source.single(SonicdSource.lengthPrefixEncode(QueryProgress(Some(100), None).toBytes)))
           .mapMaterializedValue(_ ⇒ Future.successful(
             Tcp.OutgoingConnection(new InetSocketAddress(1), new InetSocketAddress(2))))
 
@@ -95,12 +95,12 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
 
   "run graph method" should {
     "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicSource.run(Fixture.query, tcpFailure1)
+      val f1 = SonicdSource.run(Fixture.query, tcpFailure1)
       whenReady(f1.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
       }
-      val f2 = SonicSource.run(Fixture.query, tcpFailure2)
+      val f2 = SonicdSource.run(Fixture.query, tcpFailure2)
       whenReady(f2.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
@@ -110,12 +110,12 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
 
   "stream graph method" should {
     "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicSource.stream(Fixture.query, tcpFailure1).to(Sink.ignore).run()
+      val f1 = SonicdSource.stream(Fixture.query, tcpFailure1).to(Sink.ignore).run()
       whenReady(f1.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
       }
-      val f2 = SonicSource.stream(Fixture.query, tcpFailure2).to(Sink.ignore).run()
+      val f2 = SonicdSource.stream(Fixture.query, tcpFailure2).to(Sink.ignore).run()
       whenReady(f2.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError

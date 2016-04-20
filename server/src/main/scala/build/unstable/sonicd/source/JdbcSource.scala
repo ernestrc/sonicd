@@ -120,26 +120,24 @@ class JdbcPublisher(queryId: String,
       while (i > 0 && (if (rs.next()) true else { last = true; false })) {
         val data = scala.collection.mutable.ListBuffer.empty[JsValue]
         var pos = 1
-        while (pos > 0) {
-          try {
-            val (_, typeHint) = metadata.typesHint(pos - 1)
-            val value = typeHint match {
-              case s: JsString ⇒ JsString(rs.getString(pos))
-              case b: JsBoolean ⇒ JsBoolean(rs.getBoolean(pos))
-              case n: JsNumber ⇒ JsNumber(rs.getLong(pos))
-              case o: JsObject ⇒ rs.getString(pos).parseJson.asJsObject
-              case a: JsArray ⇒
-                val data = rs.getArray(pos).getArray().asInstanceOf[Array[AnyRef]]
-                JsArray(data.map(parseArrayVal).toVector)
-              case e ⇒ JsString(rs.getString(pos))
-            }
-            if (rs.wasNull) {
-              data.append(JsNull)
-            } else data.append(value)
-            pos += 1
-          } catch {
-            case e: Exception ⇒ pos = -1
+        while (pos <= metadata.typesHint.size) {
+          val (_, typeHint) = metadata.typesHint(pos - 1)
+          val value = typeHint match {
+            case s: JsString ⇒ JsString(rs.getString(pos))
+            case b: JsBoolean ⇒ JsBoolean(rs.getBoolean(pos))
+            case n: JsNumber ⇒ JsNumber(rs.getLong(pos))
+            case o: JsObject ⇒
+              val raw = rs.getString(pos)
+              Try(raw.parseJson).getOrElse(JsString(raw))
+            case a: JsArray ⇒
+              val data = rs.getArray(pos).getArray().asInstanceOf[Array[AnyRef]]
+              JsArray(data.map(parseArrayVal).toVector)
+            case e ⇒ JsString(rs.getString(pos))
           }
+          if (rs.wasNull) {
+            data.append(JsNull)
+          } else data.append(value)
+          pos += 1
         }
         if (data.isEmpty) {
           throw new Exception("could not extract any column from row. this is most likely an error in sonicd's JdbcSource")
