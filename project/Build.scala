@@ -12,7 +12,7 @@ object Sonic extends Build {
 
   val scalaV = "2.11.7"
   val akkaV = "2.4.2"
-  val sonicdV = "0.3.0"
+  val sonicdV = "0.3.1"
   val sparkV = "1.6.1"
 
   val commonSettings = Seq(

@@ -186,7 +186,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
     case CompletedStream ⇒
       val msg = "completed stream without done msg"
       log.error(msg)
-      context.become(closing(DoneWithQueryExecution(success = false, Vector(new ProtocolException(msg)))))
+      context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
 
     case PeerClosed => log.debug("peer closed")
   }

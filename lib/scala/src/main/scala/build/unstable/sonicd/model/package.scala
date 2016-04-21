@@ -71,13 +71,16 @@ package object model {
     override val eventType = Some("D")
     override val variation: Option[String] = if (success) Some("success") else Some("error")
 
-    override val payload: Option[JsValue] = Some(JsArray(errors.map(e ⇒ JsString(e.toString))))
+    override val payload: Option[JsValue] =
+      Some(JsArray(errors.map(e ⇒ JsString(e.toString + ": " + e.getCause))))
 
   }
 
   object DoneWithQueryExecution {
-    def error(e: Exception): DoneWithQueryExecution = DoneWithQueryExecution(success = false, Vector(e))
-    def error(e: Throwable): DoneWithQueryExecution = error(new Exception(e))
+    def error(e: Exception): DoneWithQueryExecution =
+      DoneWithQueryExecution(success = false, Vector(e))
+    def error(e: Throwable): DoneWithQueryExecution =
+      error(new Exception(e.getMessage, e.getCause))
   }
 
   //events sent by the client to the server
@@ -148,7 +151,7 @@ package object model {
     override val eventType: Option[String] = Some("Q")
 
     @transient
-    val clazzName = config.fields.getOrElse("class",
+    lazy val clazzName = config.fields.getOrElse("class",
       throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
     def getSourceClass: Class[_] = Try(Query.clazzLoader.loadClass(clazzName))

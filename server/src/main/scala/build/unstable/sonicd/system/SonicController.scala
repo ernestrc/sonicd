@@ -73,7 +73,7 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
         case e: Exception ⇒
           val msg = "error when preparing stream materialization"
           log.error(e, msg)
-          handler ! DoneWithQueryExecution(success = false, Vector(e))
+          handler ! DoneWithQueryExecution.error(e)
       }
 
 

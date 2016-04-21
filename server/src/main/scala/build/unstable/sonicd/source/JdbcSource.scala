@@ -117,7 +117,10 @@ class JdbcPublisher(queryId: String,
     try {
       var i = n
       var last = false
-      while (i > 0 && (if (rs.next()) true else { last = true; false })) {
+      while (i > 0 && (if (rs.next()) true
+      else {
+        last = true; false
+      })) {
         val data = scala.collection.mutable.ListBuffer.empty[JsValue]
         var pos = 1
         while (pos <= metadata.typesHint.size) {
@@ -151,7 +154,7 @@ class JdbcPublisher(queryId: String,
       }
     } catch {
       case e: Exception ⇒
-        onNext(DoneWithQueryExecution(success = false, Vector(e)))
+        onNext(DoneWithQueryExecution.error(e))
         onCompleteThenStop()
     }
   }
@@ -250,7 +253,7 @@ class JdbcPublisher(queryId: String,
             case e: Exception ⇒
               val msg = "there was an error when running query"
               log.error(e, msg)
-              self ! DoneWithQueryExecution(success = false, Vector(e))
+              self ! DoneWithQueryExecution.error(e)
           } finally {
             isDone = true
           }
@@ -337,7 +340,7 @@ class JdbcConnectionsHandler extends Actor with ActorLogging {
       } catch {
         case e: Exception ⇒
           log.error(e, "error when preparing connection/statement")
-          sender() ! DoneWithQueryExecution(success = false, Vector(e))
+          sender() ! DoneWithQueryExecution.error(e)
       }
   }
 }

@@ -192,7 +192,7 @@ class SparkPublisher(queryId: String, query: String, printColNames: Boolean, jar
         case e: Exception ⇒
           val msg = "there was an error when starting spark sql instance"
           log.error(e, msg)
-          onNext(DoneWithQueryExecution(success = false, Vector(e)))
+          onNext(DoneWithQueryExecution.error(e))
           onCompleteThenStop()
       }
     case Cancel ⇒
