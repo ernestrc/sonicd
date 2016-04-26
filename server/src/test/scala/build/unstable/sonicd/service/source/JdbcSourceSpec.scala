@@ -139,6 +139,54 @@ class JdbcSourceSpec(_system: ActorSystem)
       expectDone
     }
 
+    "encode/decode arrays correctly" in {
+      val createUsers = """CREATE TABLE `arrays_test`(`int_id` ARRAY)""".stripMargin
+      runQuery(createUsers)()
+      runQuery(s"INSERT INTO arrays_test VALUES (1)")()
+      runQuery(s"INSERT INTO arrays_test VALUES (NULL)")()
+
+      implicit val pub = newPublisher("select * from arrays_test")
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsArray(Vector(JsString("1")))))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNull))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone
+    }
+
+    "encode/decode numbers correctly" in {
+      val createNumbers =
+        """
+          | CREATE TABLE `numbers_test`(
+          |  `int_id` int,
+          |  `double_id` double,
+          |  `float_id` float,
+          |  `long_id` bigint)
+        """.stripMargin
+      runQuery(createNumbers)()
+      runQuery(s"INSERT INTO numbers_test VALUES (1, 1.123456789, 1.123456789, ${Long.MaxValue})")()
+      runQuery(s"INSERT INTO numbers_test  VALUES (2, NULL, 2.123456789, ${Long.MaxValue})")()
+      runQuery(s"INSERT INTO numbers_test  VALUES (3, 3.123456789, NULL, ${Long.MaxValue})")()
+      runQuery(s"INSERT INTO numbers_test  VALUES (NULL, 4.123456789, 4.123456789, NULL)")()
+
+      implicit val pub = newPublisher("select * from numbers_test")
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+      pub ! ActorPublisherMessage.Request(1)
+      val l: Long = Long.MaxValue
+      expectMsg(OutputChunk(JsArray(Vector(JsNumber(1), JsNumber(1.123456789), JsNumber(1.123456789), JsNumber(BigInt.apply(l))))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNumber(2), JsNull, JsNumber(2.123456789), JsNumber(BigInt.apply(l))))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNumber(3), JsNumber(3.123456789), JsNull, JsNumber(BigInt.apply(l))))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNull, JsNumber(4.123456789), JsNumber(4.123456789), JsNull))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone
+    }
+
     "should send type metadata" in {
       runQuery("CREATE TABLE test4(id VARCHAR, a BIGINT)")()
       runQuery("INSERT INTO test4 (id, a) VALUES ('1234', 1234)")()

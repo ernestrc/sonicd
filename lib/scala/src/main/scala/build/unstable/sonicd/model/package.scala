@@ -5,7 +5,6 @@ import java.nio.charset.Charset
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
-import org.slf4j.LoggerFactory
 import spray.json._
 
 import scala.util.Try

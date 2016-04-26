@@ -102,12 +102,13 @@ class JdbcPublisher(queryId: String,
 
   var handle: JdbcHandle = null
   var rs: ResultSet = null
-  var metadata: TypeMetadata = null
+  var classMeta: Vector[Class[_]] = null
   var isDone: Boolean = false
 
   def parseArrayVal: PartialFunction[Any, JsValue] = {
     case s: String ⇒ JsString(s)
-    case n: java.lang.Number ⇒ JsNumber(n.longValue)
+    case n if n.getClass.isAssignableFrom(classOf[java.lang.Number]) ⇒
+      JsNumber(n.asInstanceOf[java.lang.Number].doubleValue())
     case b: java.lang.Boolean ⇒ JsBoolean(b)
     case a: Array[_] ⇒ JsArray(a.map(parseArrayVal).toVector)
     case el ⇒ JsString(el.toString)
@@ -123,16 +124,14 @@ class JdbcPublisher(queryId: String,
       while (i > 0 && (if (rs.next()) true else { last = true; false })) {
         val data = scala.collection.mutable.ListBuffer.empty[JsValue]
         var pos = 1
-        while (pos <= metadata.typesHint.size) {
-          val (_, typeHint) = metadata.typesHint(pos - 1)
+        while (pos <= classMeta.size) {
+          val typeHint = classMeta(pos - 1)
           val value = typeHint match {
-            case s: JsString ⇒ extractValue(rs.getString(pos))(JsString.apply)
-            case b: JsBoolean ⇒ extractValue(rs.getBoolean(pos))(JsBoolean.apply)
-            case n: JsNumber ⇒ extractValue(rs.getLong(pos))(JsNumber.apply)
-            case o: JsObject ⇒
-              val raw = rs.getString(pos)
-              Try(raw.parseJson).getOrElse(extractValue(raw)(JsString.apply))
-            case a: JsArray ⇒
+            case clazz if classOf[String].isAssignableFrom(clazz) ⇒ extractValue(rs.getString(pos))(JsString.apply)
+            case clazz if classOf[Boolean].isAssignableFrom(clazz) ⇒ extractValue(rs.getBoolean(pos))(JsBoolean.apply)
+            case clazz if classOf[Double].isAssignableFrom(clazz) ⇒ extractValue(rs.getDouble(pos))(JsNumber.apply)
+            case clazz if classOf[Long].isAssignableFrom(clazz) ⇒ extractValue(rs.getLong(pos))(JsNumber.apply)
+            case clazz if classOf[Array[_]].isAssignableFrom(clazz) ⇒
               extractValue(rs.getArray(pos)) { value ⇒
                 JsArray(
                   value
@@ -140,7 +139,9 @@ class JdbcPublisher(queryId: String,
                     .asInstanceOf[Array[AnyRef]]
                     .map(parseArrayVal).toVector)
               }
-            case e ⇒ extractValue(rs.getString(pos))(JsString.apply)
+            case clazz if classOf[AnyRef].isAssignableFrom(clazz) ⇒
+              extractValue(rs.getString(pos))(value ⇒ value.parseJson)
+            case clazz ⇒ extractValue(rs.getString(pos))(JsString.apply)
           }
           if (rs.wasNull) {
             data.append(JsNull)
@@ -228,30 +229,33 @@ class JdbcPublisher(queryId: String,
             //if multiple statements, don't bother with ResultSets
             if (statements.length > 1) {
               statements.foreach(stmt.execute)
-              context.become(updating(n.toInt, List(DoneWithQueryExecution(success = true, Vector.empty))))
+              context.become(updating(n.toInt, List(TypeMetadata(Vector.empty), DoneWithQueryExecution(success = true, Vector.empty))))
             } else {
               if (stmt.execute(query.replace(";", ""))) {
                 rs = stmt.getResultSet
                 val rsmd = rs.getMetaData
                 val columnCount = rsmd.getColumnCount
-                metadata = TypeMetadata(
-                  // The column count starts from 1
-                  (1 to rsmd.getColumnCount).foldLeft(Vector.empty[(String, JsValue)]) { (columns, i) ⇒
-                    val typeHint = rsmd.getColumnClassName(i) match {
-                      case "java.lang.String" ⇒ JsString("")
-                      case "java.lang.Boolean" ⇒ JsBoolean(true)
-                      case "java.lang.Object" ⇒ JsObject.empty
-                      case "java.sql.Array" ⇒ JsArray.empty
-                      case num if Try(classLoader.loadClass(num).getSuperclass.equals(classOf[Number])).getOrElse(false) ⇒ JsNumber(0)
-                      case e ⇒ JsString(rsmd.getColumnClassName(i))
+                // The column count starts from 1
+                val m = (1 to columnCount).foldLeft(Vector.empty[(String, JsValue)] → Vector.empty[Class[_]]) {
+                  case ((columns, met), i) ⇒
+                    val (typeHint, clazz) = rsmd.getColumnClassName(i) match {
+                      case "java.lang.String" ⇒ JsString("") → classOf[String]
+                      case "java.lang.Boolean" ⇒ JsBoolean(true) → classOf[Boolean]
+                      case "java.lang.Object" ⇒ JsObject.empty → classOf[AnyRef]
+                      case "java.sql.Array" ⇒ JsArray.empty → classOf[Array[_]]
+                      case "java.lang.Double" | "java.lang.Float" | "java.math.BigDecimal" ⇒ JsNumber(0.0) → classOf[Double]
+                      case num if Try(classLoader.loadClass(num).getSuperclass.equals(classOf[Number])).getOrElse(false) ⇒
+                        JsNumber(0) → classOf[Long]
+                      case e ⇒ JsString(rsmd.getColumnClassName(i)) → classOf[Any]
                     }
-                    columns :+ (rsmd.getColumnLabel(i) → typeHint)
-                  })
-                onNext(metadata)
+                    (columns :+(rsmd.getColumnLabel(i), typeHint), met :+ clazz)
+                }
+                classMeta = m._2
+                onNext(TypeMetadata(m._1))
                 context.become(streaming(n.toInt - 1))
               } else {
-                metadata = TypeMetadata(Vector.empty)
-                onNext(metadata)
+                classMeta = Vector.empty
+                onNext(TypeMetadata(Vector.empty))
                 context.become(updating(n.toInt - 1, DoneWithQueryExecution(success = true, Vector.empty) :: Nil))
               }
             }
