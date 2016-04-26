@@ -71,16 +71,23 @@ package object model {
     override val eventType = Some("D")
     override val variation: Option[String] = if (success) Some("success") else Some("error")
 
-    override val payload: Option[JsValue] =
-      Some(JsArray(errors.map(e ⇒ JsString(e.toString + ": " + e.getCause))))
+    override val payload: Option[JsValue] = {
+      Some(JsArray(errors.map { e ⇒
+        val cause = e.getCause
+        val rr = Receipt.getStackTrace(e)
+        JsString(if (cause != null) rr + "\ncause: " + Receipt.getStackTrace(e.getCause) else rr)
+      }))
+    }
 
   }
 
   object DoneWithQueryExecution {
     def error(e: Exception): DoneWithQueryExecution =
       DoneWithQueryExecution(success = false, Vector(e))
-    def error(e: Throwable): DoneWithQueryExecution =
+
+    def error(e: Throwable): DoneWithQueryExecution = {
       error(new Exception(e.getMessage, e.getCause))
+    }
   }
 
   //events sent by the client to the server

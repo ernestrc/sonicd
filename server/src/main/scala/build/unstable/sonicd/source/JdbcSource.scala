@@ -113,29 +113,34 @@ class JdbcPublisher(queryId: String,
     case el ⇒ JsString(el.toString)
   }
 
+  def extractValue[T](v: T)(c: (T) ⇒ JsValue): JsValue =
+    if (v != null) c(v) else JsNull
+
   def stream(n: Int) = {
     try {
       var i = n
       var last = false
-      while (i > 0 && (if (rs.next()) true
-      else {
-        last = true; false
-      })) {
+      while (i > 0 && (if (rs.next()) true else { last = true; false })) {
         val data = scala.collection.mutable.ListBuffer.empty[JsValue]
         var pos = 1
         while (pos <= metadata.typesHint.size) {
           val (_, typeHint) = metadata.typesHint(pos - 1)
           val value = typeHint match {
-            case s: JsString ⇒ JsString(rs.getString(pos))
-            case b: JsBoolean ⇒ JsBoolean(rs.getBoolean(pos))
-            case n: JsNumber ⇒ JsNumber(rs.getLong(pos))
+            case s: JsString ⇒ extractValue(rs.getString(pos))(JsString.apply)
+            case b: JsBoolean ⇒ extractValue(rs.getBoolean(pos))(JsBoolean.apply)
+            case n: JsNumber ⇒ extractValue(rs.getLong(pos))(JsNumber.apply)
             case o: JsObject ⇒
               val raw = rs.getString(pos)
-              Try(raw.parseJson).getOrElse(JsString(raw))
+              Try(raw.parseJson).getOrElse(extractValue(raw)(JsString.apply))
             case a: JsArray ⇒
-              val data = rs.getArray(pos).getArray().asInstanceOf[Array[AnyRef]]
-              JsArray(data.map(parseArrayVal).toVector)
-            case e ⇒ JsString(rs.getString(pos))
+              extractValue(rs.getArray(pos)) { value ⇒
+                JsArray(
+                  value
+                    .getArray()
+                    .asInstanceOf[Array[AnyRef]]
+                    .map(parseArrayVal).toVector)
+              }
+            case e ⇒ extractValue(rs.getString(pos))(JsString.apply)
           }
           if (rs.wasNull) {
             data.append(JsNull)
@@ -154,6 +159,7 @@ class JdbcPublisher(queryId: String,
       }
     } catch {
       case e: Exception ⇒
+        log.error(e, "jdbc source error")
         onNext(DoneWithQueryExecution.error(e))
         onCompleteThenStop()
     }

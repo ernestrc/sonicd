@@ -30,14 +30,16 @@ object Receipt {
     )
   }
 
+  def getStackTrace(e: Throwable): String = {
+    val sw = new StringWriter()
+    val pw = new PrintWriter(sw)
+    e.printStackTrace(pw)
+    sw.toString
+  }
+
   def error(e: Throwable, message: String, requestId: Option[String] = None): Receipt = {
     val cause = Try(e.getCause.toString).toOption
-    val stackTrace = {
-      val sw = new StringWriter()
-      val pw = new PrintWriter(sw)
-      e.printStackTrace(pw)
-      sw.toString
-    }
+    val stackTrace = getStackTrace(e)
     val errors = stackTrace :: Nil
     Receipt(
       success = false,
