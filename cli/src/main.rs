@@ -113,10 +113,10 @@ fn _main(args: Args) -> Result<Receipt> {
     let fn_prog = |msg: SonicMessage| {
         let fields = msg.payload.unwrap();
         fields.find("progress").and_then(|p| {
-            p.as_i64().map(|pi| {
-                if pi >= 99 {
+            p.as_f64().map(|pi| {
+                if pi >= 99.0 {
                     pb.finish();
-                } else {
+                } else if pi >= 1.0 {
                     pb.add(pi as usize);
                 }
             })
