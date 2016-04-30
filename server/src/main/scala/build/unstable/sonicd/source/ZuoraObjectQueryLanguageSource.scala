@@ -14,7 +14,7 @@ import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import spray.json._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.ZuoraService.{QueryMore, QueryResult, RunQueryMore, ZuoraAuth}
+import build.unstable.sonicd.source.ZuoraService._
 import build.unstable.sonicd.{SonicdConfig, Sonicd}
 
 import scala.concurrent.duration._
@@ -27,6 +27,15 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
   extends DataSource(config, queryId, query, context) {
 
   val MIN_RECORDS = 100
+
+  def newConnectionPool: ConnectionPoolFactory = { implicit mat ⇒
+    host ⇒
+      Sonicd.http.newHostConnectionPoolHttps[String](host = host,
+          settings = ConnectionPoolSettings(SonicdConfig.ZUORA_CONNECTION_POOL_SETTINGS),
+        connectionContext = ConnectionContext.https(sslContext = Sonicd.sslContext,
+          enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
+          sslParameters = Some(Sonicd.sslContext.getDefaultSSLParameters)))
+  }
 
   override lazy val handlerProps: Props = {
     val user: String = getConfig[String]("username")
@@ -41,7 +50,7 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
 
     val auth = ZuoraAuth(user, password, host)
     val zuoraService = context.child(ZuoraService.actorName).getOrElse {
-      context.actorOf(Props[ZuoraService], ZuoraService.actorName)
+      context.actorOf(Props(classOf[ZuoraService], newConnectionPool), ZuoraService.actorName)
     }
 
     Props(classOf[ZOQLPublisher], query, queryId, zuoraService, auth, batchSize)
@@ -165,7 +174,8 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
           query.split(" ").lastOption.map { parsed ⇒
             ZuoraService.tables.find(t ⇒ t.name == parsed || t.nameLower == parsed)
               .map { table ⇒
-                buffer.enqueue(Vector(OutputChunk(table.description), DoneWithQueryExecution(success = true)): _*)
+                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution(success = true)
+                buffer.enqueue(msgs: _*)
                 nothing
               }.getOrElse {
               buffer.enqueue(DoneWithQueryExecution.error(new Exception(s"table '$parsed' not found")))
@@ -212,7 +222,7 @@ object ZuoraObjectQueryLanguageSource {
       .getOrElse(Vector.empty)
 }
 
-class ZuoraService extends Actor with ActorLogging {
+class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with ActorLogging {
 
   import ZuoraService._
   import context.dispatcher
@@ -233,8 +243,6 @@ class ZuoraService extends Actor with ActorLogging {
 
   implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))
 
-  type ConnectionPool = Flow[(HttpRequest, String), (Try[HttpResponse], String), Http.HostConnectionPool]
-
   //one connection pool for every host seen
   val connectionPools = scala.collection.mutable.Map.empty[String, ConnectionPool]
   val validSessions = scala.collection.mutable.Map.empty[ZuoraAuth, Future[Session]]
@@ -248,13 +256,7 @@ class ZuoraService extends Actor with ActorLogging {
 
   def memoizedConnectionPool(host: String) = connectionPools.getOrElse(host, {
     log.debug("instantiating new connection pool for host '{}'", host)
-
-    val pool = Sonicd.http.newHostConnectionPoolHttps[String](host = host,
-      settings = ConnectionPoolSettings(SonicdConfig.ZUORA_CONNECTION_POOL_SETTINGS),
-    connectionContext = ConnectionContext.https(sslContext = Sonicd.sslContext,
-      enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
-      sslParameters = Some(Sonicd.sslContext.getDefaultSSLParameters)))
-
+    val pool = newConnectionPool(materializer)(host)
     connectionPools.update(host, pool)
     pool
   })
@@ -339,6 +341,9 @@ class ZuoraService extends Actor with ActorLogging {
 }
 
 object ZuoraService {
+
+  type ConnectionPool = Flow[(HttpRequest, String), (Try[HttpResponse], String), Http.HostConnectionPool]
+  type ConnectionPoolFactory = (ActorMaterializer ⇒ String ⇒ ConnectionPool)
 
   case class Session(id: String, host: String)
 
