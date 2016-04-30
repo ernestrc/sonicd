@@ -3,21 +3,22 @@ package build.unstable.sonicd.source
 import java.io.IOException
 
 import akka.actor._
-import akka.http.scaladsl.ConnectionContext
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
+import akka.http.scaladsl.{ConnectionContext, Http}
+import akka.pattern.pipe
 import akka.stream.actor.ActorPublisher
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
+import spray.json._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.{Sonic, SonicConfig}
-import spray.json.{JsString, JsBoolean, JsObject}
+import build.unstable.sonicd.source.ZuoraService.{QueryMore, QueryResult, RunQueryMore, ZuoraAuth}
+import build.unstable.sonicd.{SonicConfig, Sonicd}
 
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
@@ -25,19 +26,33 @@ import scala.xml.parsing.XhtmlParser
 class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: String, context: ActorContext)
   extends DataSource(config, queryId, query, context) {
 
+  val MIN_RECORDS = 100
+
   override lazy val handlerProps: Props = {
-    val service = context.child(ZuoraService.actorName).getOrElse {
+    val user: String = getConfig[String]("username")
+    val password: String = getConfig[String]("password")
+    val host: String = getConfig[String]("host")
+    val batchSize: Int =
+      getOption[Int]("batch-size").map { i ⇒
+        if (i > SonicConfig.ZUORA_MAX_NUMBER_RECORDS || i <= MIN_RECORDS)
+          throw new Exception(s"'batch-size' must be between ${SonicConfig.ZUORA_MAX_NUMBER_RECORDS} and $MIN_RECORDS")
+        i
+      }.getOrElse(SonicConfig.ZUORA_MAX_NUMBER_RECORDS)
+
+    val auth = ZuoraAuth(user, password, host)
+    val zuoraService = context.child(ZuoraService.actorName).getOrElse {
       context.actorOf(Props[ZuoraService], ZuoraService.actorName)
     }
-    Props(classOf[ZOQLPublisher], query, queryId, service)
+
+    Props(classOf[ZOQLPublisher], query, queryId, zuoraService, auth, batchSize)
   }
 }
 
-class ZOQLPublisher(query: String, queryId: String, service: ActorRef)
+class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: ZuoraAuth, batchSize: Int)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
-  import akka.stream.actor.ActorPublisherMessage._
   import ZuoraObjectQueryLanguageSource._
+  import akka.stream.actor.ActorPublisherMessage._
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -64,41 +79,53 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef)
         throw new Exception(s"could not parse ZObject: ${e.getMessage}", e)
     }.get
 
-  def running(buffer: Vector[SonicMessage], completeBufEmpty: Boolean): Receive = {
+  def getEffectiveBatchSize(lim: Option[Int]): Int =
+    lim.map(i ⇒ Math.min(i, batchSize)).getOrElse(batchSize)
+
+  val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
+
+  def stream() {
+    while (buffer.nonEmpty && totalDemand > 0) {
+      onNext(buffer.dequeue())
+    }
+  }
+
+  def streaming(streamLimit: Option[Int], completeBufEmpty: Boolean, zoql: String, colNames: Vector[String]): Receive = {
+
     case Request(n) ⇒
-      val buf = ListBuffer.empty ++ buffer
-      while (buf.nonEmpty && totalDemand > 0) {
-        onNext(buf.remove(0))
-      }
-      if (completeBufEmpty && buf.isEmpty) {
+      stream()
+      if (completeBufEmpty && buffer.isEmpty) {
         onCompleteThenStop()
-      } else context.become(running(buf.toVector, completeBufEmpty))
+      }
 
-    case more: ZuoraService#QueryingForMore ⇒
-      log.debug("received query progress {}", more)
-      val msg = QueryProgress(Some(more.percCompletedLastIter), None)
-      if (totalDemand > 0) {
-        log.debug("sending progress downstream {}", msg)
-        onNext(msg)
-      } else context.become(running(buffer :+ msg, completeBufEmpty = false))
+    case res: QueryResult ⇒
+      val totalSize = res.size
+      val effectiveBatchSize = getEffectiveBatchSize(streamLimit)
+      if (!res.done && streamLimit.isDefined && effectiveBatchSize < streamLimit.get) {
+        val percPerBatch = 100.0 * effectiveBatchSize / totalSize
+        buffer.enqueue(QueryProgress(Some(percPerBatch), Some(s"querying for $effectiveBatchSize more objects")))
 
-    case res: ZuoraService#Records ⇒
+        //query-ahead
+        if (buffer.size < effectiveBatchSize * 5) {
+          service ! RunQueryMore(QueryMore(zoql, res.queryLocator.get, queryId), effectiveBatchSize, auth)
+          log.debug("querying ahead, buffer size is {}", buffer)
+        }
+      } else {
+        log.info(s"successfully fetched $totalSize zuora objects")
+        self ! DoneWithQueryExecution(success = true)
+      }
+
       try {
-        val size = res.size
-        log.info(s"successfully executed query and returned $size zuora objects")
-        val buf = ListBuffer.empty[SonicMessage] ++ buffer
-
-        val colNames = extractSelectColumnNames(query)
-        buf.appendAll(zObjectsToOutputChunk(colNames, res.records))
-        buf.append(DoneWithQueryExecution(success = true))
-
-        context.become(running(buf.toVector, completeBufEmpty = true))
-        self ! Request(totalDemand)
+        val toQueue =
+          if (streamLimit.isDefined) res.records.slice(0, streamLimit.get)
+          else res.records
+        buffer.enqueue(zObjectsToOutputChunk(colNames, toQueue): _*)
       } catch {
         case e: Exception ⇒
           log.error(e, "error when building output chunks")
           self ! DoneWithQueryExecution.error(e)
       }
+      stream()
 
     case res: ZuoraService#QueryFailed ⇒
       self ! DoneWithQueryExecution.error(res.error)
@@ -107,7 +134,10 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef)
       if (totalDemand > 0) {
         onNext(r)
         onCompleteThenStop()
-      } else context.become(running(Vector(r), completeBufEmpty = true))
+      } else {
+        buffer.enqueue(r)
+        context.become(streaming(streamLimit, completeBufEmpty = true, zoql, colNames))
+      }
 
     case Cancel ⇒
       log.debug("client canceled")
@@ -123,41 +153,51 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef)
     //first time client requests
     case r@Request(n) ⇒
       val trim = query.trim().toLowerCase
-      val (init, complete): (Vector[SonicMessage], Boolean) =
+      lazy val nothing = (true, Vector.empty, None)
+      val (isComplete, colNames, limit): (Boolean, Vector[String], Option[Int]) =
         if (trim.startsWith("show")) {
           log.debug("showing table names")
-          (ZuoraService.ShowTables.output :+ DoneWithQueryExecution(success = true)) → true
+          buffer.enqueue(ZuoraService.ShowTables.output: _*)
+          buffer.enqueue(DoneWithQueryExecution(success = true))
+          nothing
         } else if (trim.startsWith("desc") || trim.startsWith("describe")) {
           log.debug("describing table {}", trim)
           query.split(" ").lastOption.map { parsed ⇒
             ZuoraService.tables.find(t ⇒ t.name == parsed || t.nameLower == parsed)
               .map { table ⇒
-                Vector(OutputChunk(Vector(table.description)), DoneWithQueryExecution(success = true)) → true
-              }
-              .getOrElse {
-                val done = DoneWithQueryExecution.error(new Exception(s"table '$parsed' not found"))
-                Vector(done) → true
-              }
+                buffer.enqueue(Vector(OutputChunk(table.description), DoneWithQueryExecution(success = true)): _*)
+                nothing
+              }.getOrElse {
+              buffer.enqueue(DoneWithQueryExecution.error(new Exception(s"table '$parsed' not found")))
+              nothing
+            }
           }.getOrElse {
-            val done = DoneWithQueryExecution.error(new Exception(s"error parsing $query"))
-            Vector(done) → true
+            buffer.enqueue(DoneWithQueryExecution.error(new Exception(s"error parsing $query")))
+            nothing
           }
         } else {
           log.debug("running query with id '{}'", queryId)
-          val limit: Option[Int] =
+          val lim: Option[Int] =
             Try(ZuoraService.LIMIT.findFirstMatchIn(query).map(_.group("lim").toInt)) match {
-              case Success(i) ⇒ i
-              case Failure(e) ⇒
-                log.warning(s"could not parse limit: $query")
-                None
+              case Success(Some(i)) ⇒
+                log.debug("parsed query limit {}", i)
+                Some(i)
+              case _ ⇒ None
             }
-          service ! ZuoraService.RunZOQLQuery(queryId, query, limit)
-          Vector.empty → false
+
+          val col = extractSelectColumnNames(query)
+          log.debug("extracted column names: {}", col)
+
+          service ! ZuoraService.RunZOQLQuery(queryId, query, getEffectiveBatchSize(lim), auth)
+
+          (false, col, lim)
         }
+
       self ! r
-      context.become(running(init, completeBufEmpty = complete))
+      context.become(streaming(limit, completeBufEmpty = isComplete, query, colNames))
 
     case Cancel ⇒
+      log.debug("client cancelled")
       onCompleteThenStop()
   }
 }
@@ -177,11 +217,7 @@ class ZuoraService extends Actor with ActorLogging {
   import ZuoraService._
   import context.dispatcher
 
-  case object VoidLogin
-
-  case class Records(size: Int, records: Vector[RawZObject])
-
-  case class QueryingForMore(percCompletedLastIter: Int)
+  case class VoidSession(auth: ZuoraAuth)
 
   case class QueryFailed(error: Throwable)
 
@@ -197,17 +233,33 @@ class ZuoraService extends Actor with ActorLogging {
 
   implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))
 
-  lazy val connectionPool = Sonic.http.newHostConnectionPoolHttps[String](
-    host = SonicConfig.ZUORA_HOST,
-    settings = ConnectionPoolSettings(SonicConfig.ZUORA_CONNECTION_POOL_SETTINGS),
-    connectionContext = ConnectionContext.https(
-      sslContext = Sonic.sslContext,
-      enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
-      sslParameters = Some(Sonic.sslContext.getDefaultSSLParameters)
-    )
-  )
+  type ConnectionPool = Flow[(HttpRequest, String), (Try[HttpResponse], String), Http.HostConnectionPool]
 
-  def xmlRequest(payload: scala.xml.Node, queryId: String): Future[HttpResponse] = Future {
+  //one connection pool for every host seen
+  val connectionPools = scala.collection.mutable.Map.empty[String, ConnectionPool]
+  val validSessions = scala.collection.mutable.Map.empty[ZuoraAuth, Future[Session]]
+
+  def memoizedSession(auth: ZuoraAuth): Future[Session] =
+    validSessions.getOrElse(auth, {
+      val h = getLogin(auth)
+      validSessions.update(auth, h)
+      h
+    })
+
+  def memoizedConnectionPool(host: String) = connectionPools.getOrElse(host, {
+    log.debug("instantiating new connection pool for host '{}'", host)
+
+    val pool = Sonicd.http.newHostConnectionPoolHttps[String](host = host,
+      settings = ConnectionPoolSettings(SonicConfig.ZUORA_CONNECTION_POOL_SETTINGS),
+    connectionContext = ConnectionContext.https(sslContext = Sonicd.sslContext,
+      enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
+      sslParameters = Some(Sonicd.sslContext.getDefaultSSLParameters)))
+
+    connectionPools.update(host, pool)
+    pool
+  })
+
+  def xmlRequest(payload: scala.xml.Node, queryId: String, pool: ConnectionPool): Future[HttpResponse] = Future {
     val data = payload.buildString(true)
     HttpRequest(
       method = HttpMethods.POST,
@@ -215,7 +267,7 @@ class ZuoraService extends Actor with ActorLogging {
       entity = HttpEntity.Strict(ContentTypes.`text/xml(UTF-8)`, ByteString.fromString(data))
     )
   }.flatMap { request ⇒
-    Source.single(request → queryId).via(connectionPool).runWith(Sink.head).flatMap {
+    Source.single(request → queryId).via(pool).runWith(Sink.head).flatMap {
       case (Success(response), _) if response.status.isSuccess() =>
         log.debug("http req query {} is successful", queryId)
         Future.successful(response)
@@ -238,108 +290,61 @@ class ZuoraService extends Actor with ActorLogging {
     }
   }
 
-  def query(q: Query,
-            ses: Session,
-            batchSize: Int,
-            buf: Vector[RawZObject] = Vector.empty): Future[QueryResult] =
-    xmlRequest(q.xml(batchSize, ses.id), q.queryId).flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
-
-
   var loginN: Int = 0
 
-  def login: Future[Session] = {
+  def getLogin(auth: ZuoraAuth): Future[Session] = {
     loginN += 1
     log.debug("trying to login for the {} time", loginN)
-    xmlRequest(Login.xml, loginN.toString).flatMap(r ⇒ Session.fromHttpEntity(r.entity))
+    xmlRequest(auth.xml, loginN.toString, memoizedConnectionPool(auth.host))
+      .flatMap(r ⇒ Session.fromHttpEntity(r.entity, auth.host))
   }
 
-  //BLOCKING: we want to serialize all calls to zuora
-  def runQuery(queryId: String, zoql: String, requester: ActorRef, limit: Option[Int])
-              (sessionHeader: Session): Try[Vector[RawZObject]] = Try {
+  def runQueryMore(qMore: QueryMore, auth: ZuoraAuth, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
+    val xml = qMore.xml(batchSize, sessionHeader.id)
+    xmlRequest(xml, qMore.queryId, memoizedConnectionPool(sessionHeader.host))
+      .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
+  }
+
+  def runQuery(queryId: String, zoql: String, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
+    log.debug("running query '{}': {}", queryId, zoql)
+
     val q = FirstQuery(zoql, queryId)
-    log.debug("running query {}: {}", queryId, zoql)
+    val xml = q.xml(batchSize, sessionHeader.id)
 
-    var lastQuery: QueryResult = Await.result(query(q, sessionHeader,
-      limit.getOrElse(SonicConfig.ZUORA_MAX_NUMBER_RECORDS)), SonicConfig.ZUORA_QUERY_TIMEOUT)
-    val items = ListBuffer.empty ++ lastQuery.records
-    var batches = 1
-    val totalSize: Int = lastQuery.size
-    log.debug("query finished successfully, result total size is {}", totalSize)
-
-    lazy val percPerBatch = 100 * SonicConfig.ZUORA_MAX_NUMBER_RECORDS / totalSize
-
-    while (!lastQuery.done && limit.isEmpty) {
-
-      batches += 1
-
-      log.debug("{} querying for more batch {}; every batch completes {}", queryId, batches, percPerBatch)
-      requester ! QueryingForMore(percPerBatch)
-
-      val queryMore = QueryMore(zoql, lastQuery.queryLocator.get, queryId)
-
-      lastQuery = Await.result(query(queryMore, sessionHeader,
-        SonicConfig.ZUORA_MAX_NUMBER_RECORDS), SonicConfig.ZUORA_QUERY_TIMEOUT)
-      items.appendAll(lastQuery.records)
-    }
-
-    items.toVector
-  } match {
-    case s: Success[_] ⇒ s
-    case f @ Failure(e) ⇒
-      val msg = "ZOQL query failed: " + e.getMessage
-      log.error(e, msg)
-      f
-  }
-
-  var lastHeader: Option[Session] = None
-
-  //BLOCKING: we want to serialize all calls to zuora
-  def memoizedHeader: Try[Session] = {
-
-    def getNewHeader: Try[Session] = {
-
-      Try(Await.result(login, SonicConfig.ZUORA_QUERY_TIMEOUT)) match {
-        case t@Success(s) ⇒
-          log.debug("successfully generated zuora session header {}", s.id)
-          //void login after 10 minutes
-          lastHeader = Some(s)
-          context.system.scheduler.scheduleOnce(10.minutes, self, VoidLogin)
-          t
-        case t@Failure(e) ⇒
-          val msg = "zuora login failed: " + e.getMessage
-          log.error(e, msg)
-          Failure(new Exception(msg, e))
-      }
-    }
-
-    lastHeader.map(Success.apply).getOrElse(getNewHeader)
+    xmlRequest(xml, q.queryId, memoizedConnectionPool(sessionHeader.host))
+      .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
   override def receive: Actor.Receive = {
 
-    case VoidLogin ⇒
-      log.info(s"voiding last zuora header $lastHeader")
-      lastHeader = None
+    case VoidSession(auth) ⇒
+      log.info(s"voiding last zuora header $validSessions")
+      validSessions.remove(auth)
 
-    case RunZOQLQuery(queryId, zoql, limit) ⇒
-      val requester = sender()
-      memoizedHeader
-        .flatMap(runQuery(queryId, zoql, requester, limit))
-        .map(res ⇒ requester ! Records(res.size, res))
+    case RunQueryMore(queryMore, batchSize, auth) ⇒
+      memoizedSession(auth)
+        .flatMap(runQueryMore(queryMore, auth, batchSize))
         .recover {
-          case e: Exception ⇒ sender() ! QueryFailed(e)
-        }
+          case e: Exception ⇒ QueryFailed(e)
+        } pipeTo sender()
+
+    case RunZOQLQuery(queryId, zoql, batchSize, auth) ⇒
+      memoizedSession(auth)
+        .flatMap(runQuery(queryId, zoql, batchSize))
+        .recover {
+          case e: Exception ⇒ QueryFailed(e)
+        } pipeTo sender()
   }
 
 }
 
 object ZuoraService {
 
-  case class Session(id: String)
+  case class Session(id: String, host: String)
 
   object Session {
 
-    def fromHttpEntity(entity: HttpEntity)(implicit mat: ActorMaterializer, ctx: ExecutionContext): Future[Session] = {
+    def fromHttpEntity(entity: HttpEntity, host: String)(implicit mat: ActorMaterializer, ctx: ExecutionContext): Future[Session] = {
       entity.toStrict(10.seconds).map { e ⇒
         val xml = e.data.decodeString("UTF-8")
         val elem = XhtmlParser.apply(scala.io.Source.fromString(xml))
@@ -347,18 +352,18 @@ object ZuoraService {
         if (id == null || id.text == null || id.text == "") {
           throw new Exception(s"protocol error: session is empty: $id")
         }
-        Session(id.text)
+        Session(id.text, host)
       }
     }
   }
 
-  case object Login {
+  case class ZuoraAuth(user: String, pwd: String, host: String) {
     val xml: scala.xml.Node = {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Body>
           <ns1:login>
-            <ns1:username>{SonicConfig.ZUORA_USERNAME}</ns1:username>
-            <ns1:password>{SonicConfig.ZUORA_PASSWORD}</ns1:password>
+            <ns1:username>{user}</ns1:username>
+            <ns1:password>{pwd}</ns1:password>
           </ns1:login>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
@@ -435,37 +440,62 @@ object ZuoraService {
   //https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E_SOAP_API_Calls/query_call
   val MAX_NUMBER_RECORDS = 2000
 
-  case class RunZOQLQuery(queryId: String, zoql: String, limit: Option[Int])
+  case class RunZOQLQuery(queryId: String, zoql: String, batchSize: Int, user: ZuoraAuth)
+
+  case class RunQueryMore(q: QueryMore, batchSize: Int, auth: ZuoraAuth)
 
   sealed abstract class Table(desc: Vector[String]) {
     val name = this.getClass.getSimpleName.dropRight(1)
     val nameLower = name.toLowerCase()
-    val description = s"$desc\nMore info at https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E1_SOAP_API_Object_Reference/$name"
+    val description = desc :+ s"More info at https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E1_SOAP_API_Object_Reference/$name"
   }
 
   case object Account extends Table("AccountNumber\nAdditionalEmailAddresses\nAllowInvoiceEdit\nAutoPay\nBalance\nBatch\nBcdSettingOption\nBillCycleDay\nBillTold\nCommunicationProfileId\nCreateById\nCreatedDate\nCreditBalance\nCrmId\nCurrency\nDefaultPaymentMethodId\nGateway\nId\nInvoiceDeliveryPrefsEmail\nInvoiceDeliveryPrefsPrint\nInvoiceTemplateId\nLastInvoiceDate\nName\nNotes\nParentId\nPaymentGateway\nPaymentTerm\nPurchaseOrderNumber\nSalesRepName\nSoldTold\nStatus\nTaxCompanyCode\nTaxExemptCertificateID\nTaxExemptCertificateType\nTaxExemptDescription\nTaxExemptEffectiveDate\nTaxExemptExpirationDate\nTaxExemptIssuingJurisdiction\nTaxExemptStatus\nTotalInvoiceBalance\nUpdatedById\nUpdatedDate\nVATId".split('\n').toVector)
+
   case object AccountingPeriod extends Table(Vector.empty)
+
   case object Amendment extends Table(Vector.empty)
+
   case object CommunicationProfile extends Table(Vector.empty)
+
   case object Contact extends Table(Vector.empty)
+
   case object Import extends Table(Vector.empty)
+
   case object Invoice extends Table(Vector.empty)
+
   case object InvoiceAdjustment extends Table(Vector.empty)
+
   case object InvoiceItem extends Table(Vector.empty)
+
   case object InvoiceItemAdjustment extends Table(Vector.empty)
+
   case object InvoicePayment extends Table(Vector.empty)
+
   case object Payment extends Table(Vector.empty)
+
   case object PaymentMethod extends Table(Vector.empty)
+
   case object Product extends Table(Vector.empty)
+
   case object ProductRatePlan extends Table(Vector.empty)
+
   case object ProductRatePlanCharge extends Table(Vector.empty)
+
   case object ProductRatePlanChargeTier extends Table(Vector.empty)
+
   case object RatePlan extends Table(Vector.empty)
+
   case object RatePlanCharge extends Table(Vector.empty)
+
   case object RatePlanChargeTier extends Table(Vector.empty)
+
   case object Refund extends Table(Vector.empty)
+
   case object Subscription extends Table(Vector.empty)
+
   case object TaxationItem extends Table(Vector.empty)
+
   case object Usage extends Table(Vector.empty)
 
   import scala.reflect.runtime.universe._
@@ -473,7 +503,7 @@ object ZuoraService {
   val mirror = runtimeMirror(this.getClass.getClassLoader)
 
   val tables: Vector[Table] = {
-    val symbol = typeOf[Table] .typeSymbol
+    val symbol = typeOf[Table].typeSymbol
     val internal = symbol.asInstanceOf[scala.reflect.internal.Symbols#Symbol]
     (internal.sealedDescendants.map(_.asInstanceOf[Symbol]) - symbol)
       .map(t ⇒ mirror.runtimeClass(t.asClass).getConstructors()(0).newInstance().asInstanceOf[Table])
