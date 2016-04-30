@@ -8,7 +8,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.StreamConverters.fromInputStream
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
-import build.unstable.sonicd.SonicConfig
+import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.model._
 import org.apache.commons.io.IOUtils
 import org.apache.spark.launcher.SparkLauncher
@@ -31,6 +31,7 @@ class SparkSQLSource(config: JsObject, queryId: String, query: String, actorCont
     val jarLocation = cfg.getOrElse("jar", JsString("spark_2.11-assembly.jar")).convertTo[String]
     val mainClass = cfg.getOrElse("mainClass", JsString("build.unstable.sonic.spark.jobs.SparkSQL")).convertTo[String]
     val printColNames: Boolean = cfg.getOrElse("column-names", JsBoolean(false)).convertTo[Boolean]
+
     Props(classOf[SparkPublisher], queryId, query, printColNames, jarLocation, mainClass)
   }
 }
@@ -79,9 +80,9 @@ class SparkPublisher(queryId: String, query: String, printColNames: Boolean, jar
   }
 
   lazy val env: Map[String, String] = Map(
-    "HADOOP_CONF_DIR" → SonicConfig.HADOOP_CONF.get,
-    "YARN_CONF_DIR" → SonicConfig.YARN_CONF.get,
-    "SPARK_MASTER" → SonicConfig.SPARK_MASTER.get,
+    "HADOOP_CONF_DIR" → SonicdConfig.HADOOP_CONF.get,
+    "YARN_CONF_DIR" → SonicdConfig.YARN_CONF.get,
+    "SPARK_MASTER" → SonicdConfig.SPARK_MASTER.get,
     "QUERY" → query,
     "QUERY_ID" → queryId,
     "PRINT_COLUMN_NAMES" → printColNames.toString
@@ -158,10 +159,10 @@ class SparkPublisher(queryId: String, query: String, printColNames: Boolean, jar
         handle = new SparkLauncher(env)
           //.setPropertiesFile(this.getClass.getClassLoader.getResource(SPARK_CONFIG).toURI.getPath)
           .setAppName(jobName)
-          .setSparkHome(SonicConfig.SPARK_HOME.get)
+          .setSparkHome(SonicdConfig.SPARK_HOME.get)
           .setAppResource(jarUri)
           .setMainClass(mainClass) //Main class in fat JAR
-          .setMaster(SonicConfig.SPARK_MASTER.get)
+          .setMaster(SonicdConfig.SPARK_MASTER.get)
           //.setConf("spark.driver.memory", "2g")
           //.setConf("spark.yarn.queue", "root.imports")
           //.setConf("spark.akka.frameSize", "200")

@@ -15,10 +15,11 @@ class SyntheticSource(config: JsObject, queryId: String, query: String, context:
   extends DataSource(config, queryId, query, context) {
 
   val handlerProps: Props = {
-    val seed = config.fields.get("seed").map(_.convertTo[Int]).getOrElse(1000)
-    val size = config.fields.get("size").map(_.convertTo[Int])
-    val progress = config.fields.get("progress-delay").map(_.convertTo[Int]).getOrElse(10)
-    val indexed = config.fields.get("indexed").map(_.convertTo[Boolean]).getOrElse(false)
+    val seed = getOption[Int]("seed").getOrElse(1000)
+    val size = getOption[Int]("size")
+    val progress = getOption[Int]("progress-delay").getOrElse(10)
+    val indexed = getOption[Boolean]("indexed").getOrElse(false)
+
     Props(classOf[SyntheticPublisher], seed, size, progress, query, indexed)
   }
 }

@@ -8,7 +8,7 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
 import akka.util.CompactByteString
-import build.unstable.sonicd.SonicConfig
+import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.model.{JsonProtocol, Receipt}
 import build.unstable.sonicd.system.{TcpSupervisor, Service, System}
 
@@ -47,12 +47,12 @@ trait AkkaApi extends Api {
             Receipt.error(e, "Oops! There was an unexpected Error")).toString()))))
   }
 
-  val queryEndpoint = new QueryEndpoint(controllerService, SonicConfig.ENDPOINT_TIMEOUT, SonicConfig.ACTOR_TIMEOUT)
+  val queryEndpoint = new QueryEndpoint(controllerService, SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
 
-  val monitoringEndpoint = new MonitoringEndpoint(SonicConfig.ENDPOINT_TIMEOUT)
+  val monitoringEndpoint = new MonitoringEndpoint(SonicdConfig.ENDPOINT_TIMEOUT)
 
   val httpHandler = logRequest("sonic") {
-    Route.seal(pathPrefix(SonicConfig.API_VERSION) {
+    Route.seal(pathPrefix(SonicdConfig.API_VERSION) {
       handleExceptions(receiptExceptionHandler) {
         queryEndpoint.route ~
           monitoringEndpoint.route

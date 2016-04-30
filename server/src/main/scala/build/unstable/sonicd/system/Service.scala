@@ -12,8 +12,6 @@ import scala.concurrent.duration._
  */
 trait Service {
 
-  implicit val materializer: ActorMaterializer
-
   /** handles the underlying low level I/O resources (selectors, channels)
     * and instantiates workers for specific tasks, such as listening to incoming connections.
     */
@@ -34,10 +32,6 @@ trait Service {
  */
 trait AkkaService extends Service {
   this: System ⇒
-
-  val matSettings: ActorMaterializerSettings = ActorMaterializerSettings(system)
-
-  implicit val materializer: ActorMaterializer = ActorMaterializer(matSettings)
 
   val controllerService: ActorRef = system.actorOf(Props(classOf[SonicController], materializer), "controller")
 

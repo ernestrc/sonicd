@@ -56,7 +56,7 @@ package object model {
     def apply[T: JsonWriter](data: Vector[T]): OutputChunk = OutputChunk(JsArray(data.map(_.toJson)))
   }
 
-  case class QueryProgress(progress: Option[Int], output: Option[String]) extends SonicMessage {
+  case class QueryProgress(progress: Option[Double], output: Option[String]) extends SonicMessage {
     val payload: Option[JsValue] = Some(JsObject(Map(
       "progress" → progress.map(JsNumber.apply).getOrElse(JsNull),
       "output" → output.map(JsString.apply).getOrElse(JsNull)
@@ -65,7 +65,7 @@ package object model {
     override val eventType = Some("P")
   }
 
-  case class DoneWithQueryExecution(success: Boolean, errors: Vector[Exception] = Vector.empty) extends SonicMessage {
+  case class DoneWithQueryExecution(success: Boolean, errors: Vector[Throwable] = Vector.empty) extends SonicMessage {
 
     override val eventType = Some("D")
     override val variation: Option[String] = if (success) Some("success") else Some("error")
@@ -81,12 +81,8 @@ package object model {
   }
 
   object DoneWithQueryExecution {
-    def error(e: Exception): DoneWithQueryExecution =
+    def error(e: Throwable): DoneWithQueryExecution =
       DoneWithQueryExecution(success = false, Vector(e))
-
-    def error(e: Throwable): DoneWithQueryExecution = {
-      error(new Exception(e.getMessage, e.getCause))
-    }
   }
 
   //events sent by the client to the server
@@ -121,7 +117,7 @@ package object model {
 
           case Some("P") ⇒
             QueryProgress(
-              Try(payload.get.asJsObject.fields.get("progress").map(_.convertTo[Int])).toOption.flatten,
+              Try(payload.get.asJsObject.fields.get("progress").map(_.convertTo[Double])).toOption.flatten,
               Try(payload.get.asJsObject.fields.get("output").map(_.convertTo[String])).toOption.flatten
             )
           case Some("Q") ⇒ Query(None, variation.get, payload.get.asJsObject)

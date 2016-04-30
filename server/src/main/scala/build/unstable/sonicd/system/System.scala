@@ -1,12 +1,16 @@
 package build.unstable.sonicd.system
 
 import akka.actor.ActorSystem
+import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 
 /**
  * Interface containing the [[akka.actor.ActorSystem]]
  */
 trait System {
   implicit val system: ActorSystem
+
+  implicit val materializer: ActorMaterializer
+
 }
 
 /**
@@ -15,6 +19,10 @@ trait System {
  */
 trait AkkaSystem extends System {
   implicit val system = ActorSystem("sonicd")
+
+  val matSettings: ActorMaterializerSettings = ActorMaterializerSettings(system)
+
+  implicit val materializer: ActorMaterializer = ActorMaterializer(matSettings)
 
   sys.addShutdownHook(system.terminate())
 

@@ -15,7 +15,7 @@ import build.unstable.sonicd.model.JsonProtocol._
 import spray.json._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ZuoraService.{QueryMore, QueryResult, RunQueryMore, ZuoraAuth}
-import build.unstable.sonicd.{SonicConfig, Sonicd}
+import build.unstable.sonicd.{SonicdConfig, Sonicd}
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -34,10 +34,10 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
     val host: String = getConfig[String]("host")
     val batchSize: Int =
       getOption[Int]("batch-size").map { i ⇒
-        if (i > SonicConfig.ZUORA_MAX_NUMBER_RECORDS || i <= MIN_RECORDS)
-          throw new Exception(s"'batch-size' must be between ${SonicConfig.ZUORA_MAX_NUMBER_RECORDS} and $MIN_RECORDS")
+        if (i > SonicdConfig.ZUORA_MAX_NUMBER_RECORDS || i <= MIN_RECORDS)
+          throw new Exception(s"'batch-size' must be between ${SonicdConfig.ZUORA_MAX_NUMBER_RECORDS} and $MIN_RECORDS")
         i
-      }.getOrElse(SonicConfig.ZUORA_MAX_NUMBER_RECORDS)
+      }.getOrElse(SonicdConfig.ZUORA_MAX_NUMBER_RECORDS)
 
     val auth = ZuoraAuth(user, password, host)
     val zuoraService = context.child(ZuoraService.actorName).getOrElse {
@@ -250,7 +250,7 @@ class ZuoraService extends Actor with ActorLogging {
     log.debug("instantiating new connection pool for host '{}'", host)
 
     val pool = Sonicd.http.newHostConnectionPoolHttps[String](host = host,
-      settings = ConnectionPoolSettings(SonicConfig.ZUORA_CONNECTION_POOL_SETTINGS),
+      settings = ConnectionPoolSettings(SonicdConfig.ZUORA_CONNECTION_POOL_SETTINGS),
     connectionContext = ConnectionContext.https(sslContext = Sonicd.sslContext,
       enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
       sslParameters = Some(Sonicd.sslContext.getDefaultSSLParameters)))
@@ -263,7 +263,7 @@ class ZuoraService extends Actor with ActorLogging {
     val data = payload.buildString(true)
     HttpRequest(
       method = HttpMethods.POST,
-      uri = SonicConfig.ZUORA_ENDPOINT,
+      uri = SonicdConfig.ZUORA_ENDPOINT,
       entity = HttpEntity.Strict(ContentTypes.`text/xml(UTF-8)`, ByteString.fromString(data))
     )
   }.flatMap { request ⇒

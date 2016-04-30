@@ -9,7 +9,7 @@ import scala.concurrent.duration.Duration
 
 import scala.util.Try
 
-object SonicConfig extends FromResourcesConfig(ConfigFactory.load())
+object SonicdConfig extends FromResourcesConfig(ConfigFactory.load())
 
 abstract class FromResourcesConfig(config: Config) {
 
@@ -31,8 +31,6 @@ abstract class FromResourcesConfig(config: Config) {
   lazy val SPARK_EXECUTOR_LIBRARYPATH = Try(config.getString("spark.executor.extraClassPath"))
   lazy val SPARK_JARS = Try(config.getStringList("spark.jars").toSeq)
 
-  lazy val ZUORA_HOST = config.getString("zuora.host")
-
   lazy val ZUORA_MAX_NUMBER_RECORDS = Try(config.getInt("zuora.query_limit")).getOrElse(2000)
   //https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E_SOAP_API_Calls/query_call
   assert(ZUORA_MAX_NUMBER_RECORDS <= 2000)
@@ -40,8 +38,6 @@ abstract class FromResourcesConfig(config: Config) {
   lazy val ZUORA_QUERY_TIMEOUT = Duration(config.getDuration("zuora.query-timeout").getSeconds, TimeUnit.SECONDS)
   lazy val ZUORA_ENDPOINT = config.getString("zuora.endpoint")
   lazy val ZUORA_CONNECTION_POOL_SETTINGS = config.getConfig("zuora")
-  lazy val ZUORA_USERNAME = config.getString("zuora.username")
-  lazy val ZUORA_PASSWORD = config.getString("zuora.password")
 
   lazy val HADOOP_CONF = Try(config.getString("sonic.hadoop-config"))
   lazy val YARN_CONF = Try(config.getString("sonic.yarn-config"))
@@ -49,5 +45,11 @@ abstract class FromResourcesConfig(config: Config) {
   implicit val ACTOR_TIMEOUT: Timeout = Timeout(config.getDuration("sonic.actor-timeout", TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
   val ENDPOINT_TIMEOUT: Timeout = Timeout(config.getDuration("sonic.endpoint-timeout", TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
+
+  lazy val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("presto")
+  lazy val PRESTO_RETRYIN = config.getInt("presto.retry-in")
+  lazy val PRESTO_RETRY_MULTIPLIER = config.getInt("presto.retry-multiplier")
+  lazy val PRESTO_TIMEOUT = Duration(config.getDuration("presto.timeout").getSeconds, TimeUnit.SECONDS)
+  lazy val PRESTO_APIV = "v1"
 }
 

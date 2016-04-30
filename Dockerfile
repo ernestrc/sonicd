@@ -6,7 +6,7 @@ RUN chmod 0775 /etc/sonicd; chmod 0775 /usr/local/sonicd; chmod 0775 /var/log/so
 
 ENV configfolder /etc/sonicd/
 ENV lib /var/lib/sonicd/*
-ENV mainclass build.unstable.sonicd.Sonic
+ENV mainclass build.unstable.sonicd.Sonicd
 ENV mainjar /usr/local/sonicd/sonicd-assembly.jar
 ENV cp $configfolder:$mainjar:$lib
 #ENV javaoptions=''

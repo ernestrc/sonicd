@@ -16,6 +16,8 @@ class JdbcSourceSpec(_system: ActorSystem)
   with Matchers with BeforeAndAfterAll with ImplicitSender
   with ImplicitSubscriber {
 
+  import Fixture._
+
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)
     runQuery(s"DROP ALL OBJECTS")()
@@ -23,18 +25,6 @@ class JdbcSourceSpec(_system: ActorSystem)
   }
 
   def this() = this(ActorSystem("JdbcSourceSpec"))
-
-  val testDB = "testdb"
-  val H2Url = s"jdbc:h2:mem:$testDB;DB_CLOSE_DELAY=-1;"
-  val H2Driver = "org.h2.Driver"
-  val H2Config =
-    s"""
-       | {
-       |  "driver" : "$H2Driver",
-       |  "url" : "$H2Url",
-       |  "class" : "JdbcSource"
-       | }
-    """.stripMargin.parseJson.asJsObject
 
   val controller: TestActorRef[TestController] =
     TestActorRef(Props[TestController].withDispatcher(CallingThreadDispatcher.Id))

@@ -4,7 +4,7 @@ import java.sql.{Connection, DriverManager, ResultSet, Statement}
 
 import akka.actor._
 import akka.stream.actor.ActorPublisher
-import build.unstable.sonicd.SonicConfig
+import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.JdbcConnectionsHandler.{GetJdbcHandle, JdbcHandle}
@@ -27,14 +27,11 @@ class JdbcSource(config: JsObject, queryId: String, query: String, context: Acto
       context.actorOf(jdbcConnectionsProps, JdbcConnectionsHandler.actorName)
     }
 
-    val user: String = config.fields.get("user").map(_.convertTo[String]).getOrElse("sonicd")
-    val initializationStmts: List[String] =
-      config.fields.get("pre").map(_.convertTo[List[String]]).getOrElse(Nil)
-    val password: String = config.fields.get("password").map(_.convertTo[String]).getOrElse("")
-    val dbUrl: String = config.fields.getOrElse("url",
-      throw new Exception("missing 'url' key in config")).convertTo[String]
-    val driver: String = config.fields.getOrElse("driver",
-      throw new Exception("missing 'driver' key in config")).convertTo[String]
+    val user: String = getOption[String]("user").getOrElse("sonicd")
+    val initializationStmts: List[String] = getOption[List[String]]("pre").getOrElse(Nil)
+    val password: String = getOption[String]("password").getOrElse("")
+    val dbUrl: String = getConfig[String]("url")
+    val driver: String = getConfig[String]("driver")
 
     Props(classOf[JdbcPublisher], queryId, query, dbUrl, user, password, driver,
       jdbcConns, initializationStmts).withDispatcher("akka.actor.jdbc-dispatcher")
@@ -327,7 +324,7 @@ class JdbcConnectionsHandler extends Actor with ActorLogging {
               ResultSet.CONCUR_READ_ONLY,
               ResultSet.FETCH_FORWARD
             )
-            stmt.setFetchSize(SonicConfig.JDBC_FETCHSIZE)
+            stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
           } else if (driver == "com.mysql.jdbc.Driver" && isQuery) {
             log.debug("setting streaming properties for mysql")
             stmt = conn.createStatement(
@@ -337,7 +334,7 @@ class JdbcConnectionsHandler extends Actor with ActorLogging {
             stmt.setFetchSize(Integer.MIN_VALUE)
           } else if (isQuery) {
             stmt = conn.createStatement()
-            stmt.setFetchSize(SonicConfig.JDBC_FETCHSIZE)
+            stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
           } else {
             stmt = conn.createStatement()
           }

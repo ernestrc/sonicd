@@ -13,7 +13,7 @@ import scala.concurrent.Future
 
 object SonicdSource {
 
-  class IncompleteStreamException extends Exception("stream was closed before completion")
+  class IncompleteStreamException extends Exception("stream was closed before done event was sent")
 
   class SonicProtocolStage
     extends GraphStage[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage]] {
@@ -34,11 +34,15 @@ object SonicdSource {
         var last: Option[DoneWithQueryExecution] = None
 
         def complete() = {
-          val l = last.get
-          if (l.success) completeStage()
-          else if (l.errors.nonEmpty) {
-            failStage(l.errors.head)
-          } else failStage(new Exception("there was an unexpected error in sonicd"))
+          last match {
+            case Some(l) ⇒
+              if (l.success) completeStage()
+              else if (l.errors.nonEmpty) {
+                failStage(l.errors.head)
+              } else failStage(new Exception("protocol error: done event is not success but errors is empty"))
+            case None ⇒
+              failStage(new IncompleteStreamException)
+          }
         }
 
         def pushAck() = {
@@ -47,6 +51,9 @@ object SonicdSource {
         }
 
         setHandler(in1, new InHandler {
+
+          @throws[Exception](classOf[Exception])
+          override def onUpstreamFailure(ex: Throwable): Unit = super.onUpstreamFailure(ex)
 
           @throws[Exception](classOf[Exception])
           override def onUpstreamFinish(): Unit =
@@ -67,13 +74,14 @@ object SonicdSource {
           }
         })
 
+        //query in
         setHandler(in2, new InHandler {
+
           @throws[Exception](classOf[Exception])
-          override def onUpstreamFinish(): Unit =
-            if (last.isDefined) {
-              pushAck()
-              complete()
-            }
+          override def onUpstreamFailure(ex: Throwable): Unit = super.onUpstreamFailure(ex)
+
+          @throws[Exception](classOf[Exception])
+          override def onUpstreamFinish(): Unit = ()
 
           override def onPush(): Unit = {
             val elem = grab(in2)
@@ -83,6 +91,9 @@ object SonicdSource {
         })
 
         setHandler(out1, new OutHandler {
+
+          @throws[Exception](classOf[Exception])
+          override def onDownstreamFinish(): Unit = super.onDownstreamFinish()
 
           override def onPull(): Unit = {
             if (last.isDefined) {
@@ -95,11 +106,16 @@ object SonicdSource {
         })
 
         setHandler(out2, new OutHandler {
+
+          @throws[Exception](classOf[Exception])
+          override def onDownstreamFinish(): Unit = super.onDownstreamFinish()
+
           override def onPull(): Unit = {
             pull(in1)
           }
         })
       }
+
   }
 
   //length prefix framing
@@ -134,23 +150,25 @@ object SonicdSource {
           connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
 
-    val foldMessages = Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty)(_ :+ _)
+    val foldMessages = Sink.fold[Vector[SonicMessage], SonicMessage] (Vector.empty) (_:+ _)
 
-    RunnableGraph.fromGraph(GraphDSL.create(foldMessages) { implicit b ⇒
-      fold ⇒
-        import GraphDSL.Implicits._
+    RunnableGraph.fromGraph(GraphDSL.create(foldMessages) {
+      implicit b ⇒
+        fold ⇒
 
-        val conn = b.add(connection)
-        val protocol = b.add(new SonicProtocolStage)
-        val framing = b.add(framingStage)
-        val q = b.add(Source.single(query))
+          import GraphDSL.Implicits._
 
-        q ~> protocol.in2
-        protocol.out1 ~> conn
-        protocol.in1 <~ framing <~ conn
-        protocol.out2 ~> fold
+          val conn = b.add(connection)
+          val protocol = b.add(new SonicProtocolStage)
+          val framing = b.add(framingStage)
+          val q = b.add(Source.single(query))
 
-        ClosedShape
+          q ~> protocol.in2
+          protocol.out1 ~> conn
+          protocol.in1 <~ framing <~ conn
+          protocol.out2 ~> fold
+
+          ClosedShape
     }).run()
   }
 
@@ -173,30 +191,33 @@ object SonicdSource {
 
     import system.dispatcher
 
-    val last = Sink.last[SonicMessage].mapMaterializedValue { f ⇒
-      f.map {
-        case d: DoneWithQueryExecution ⇒ d
-        case m ⇒ DoneWithQueryExecution.error(new Exception(s"protocol error: unknown last message: $m"))
-      }
+    val last = Sink.last[SonicMessage].mapMaterializedValue {
+      f ⇒
+        f.map {
+          case d: DoneWithQueryExecution ⇒ d
+          case m ⇒ DoneWithQueryExecution.error(new Exception(s"protocol error: unknown last message: $m"))
+        }
     }
 
-    Source.fromGraph(GraphDSL.create(last) { implicit b ⇒
-      last ⇒
-        import GraphDSL.Implicits._
+    Source.fromGraph(GraphDSL.create(last) {
+      implicit b ⇒
+        last ⇒
 
-        val q = b.add(Source.single(query))
-        val conn = b.add(connection)
-        val protocol = b.add(new SonicProtocolStage())
-        val framing = b.add(framingStage)
-        val bcast = b.add(Broadcast[SonicMessage](2))
+          import GraphDSL.Implicits._
 
-        q ~> protocol.in2
-        protocol.out1 ~> conn
-        protocol.in1 <~ framing <~ conn
-        protocol.out2 ~> bcast
-        bcast.out(1) ~> last
+          val q = b.add(Source.single(query))
+          val conn = b.add(connection)
+          val protocol = b.add(new SonicProtocolStage())
+          val framing = b.add(framingStage)
+          val bcast = b.add(Broadcast[SonicMessage] (2))
 
-        SourceShape(bcast.out(0))
+          q ~> protocol.in2
+          protocol.out1 ~> conn
+          protocol.in1 <~ framing <~ conn
+          protocol.out2 ~> bcast
+          bcast.out(1) ~> last
+
+          SourceShape(bcast.out(0))
     })
   }
 }
