@@ -124,11 +124,15 @@ class JdbcPublisher(queryId: String,
         while (pos <= classMeta.size) {
           val typeHint = classMeta(pos - 1)
           val value = typeHint match {
-            case clazz if classOf[String].isAssignableFrom(clazz) ⇒ extractValue(rs.getString(pos))(JsString.apply)
-            case clazz if classOf[Boolean].isAssignableFrom(clazz) ⇒ extractValue(rs.getBoolean(pos))(JsBoolean.apply)
-            case clazz if classOf[Double].isAssignableFrom(clazz) ⇒ extractValue(rs.getDouble(pos))(JsNumber.apply)
-            case clazz if classOf[Long].isAssignableFrom(clazz) ⇒ extractValue(rs.getLong(pos))(JsNumber.apply)
-            case clazz if classOf[Array[_]].isAssignableFrom(clazz) ⇒
+            case clazz if clazz.isAssignableFrom(classOf[String]) ⇒
+              extractValue(rs.getString(pos))(JsString.apply)
+            case clazz if clazz.isAssignableFrom(classOf[Boolean]) ⇒
+              extractValue(rs.getBoolean(pos))(JsBoolean.apply)
+            case clazz if clazz.isAssignableFrom(classOf[Double]) ⇒
+              extractValue(rs.getDouble(pos))(JsNumber.apply)
+            case clazz if clazz.isAssignableFrom(classOf[Long]) ⇒
+              extractValue(rs.getLong(pos))(JsNumber.apply)
+            case clazz if clazz.isAssignableFrom(classOf[java.sql.Array]) ⇒
               extractValue(rs.getArray(pos)) { value ⇒
                 JsArray(
                   value
@@ -239,7 +243,7 @@ class JdbcPublisher(queryId: String,
                       case "java.lang.String" ⇒ JsString("") → classOf[String]
                       case "java.lang.Boolean" ⇒ JsBoolean(true) → classOf[Boolean]
                       case "java.lang.Object" ⇒ JsObject.empty → classOf[AnyRef]
-                      case "java.sql.Array" ⇒ JsArray.empty → classOf[Array[_]]
+                      case "java.sql.Array" ⇒ JsArray.empty → classOf[java.sql.Array]
                       case "java.lang.Double" | "java.lang.Float" | "java.math.BigDecimal" ⇒ JsNumber(0.0) → classOf[Double]
                       case num if Try(classLoader.loadClass(num).getSuperclass.equals(classOf[Number])).getOrElse(false) ⇒
                         JsNumber(0) → classOf[Long]

@@ -130,18 +130,18 @@ class JdbcSourceSpec(_system: ActorSystem)
     }
 
     "encode/decode arrays correctly" in {
-      val createUsers = """CREATE TABLE `arrays_test`(`int_id` ARRAY)""".stripMargin
+      val createUsers = """CREATE TABLE `arrays_test`(`int_id` ARRAY, `dt` TIMESTAMP)""".stripMargin
       runQuery(createUsers)()
-      runQuery(s"INSERT INTO arrays_test VALUES (1)")()
-      runQuery(s"INSERT INTO arrays_test VALUES (NULL)")()
+      runQuery(s"INSERT INTO arrays_test VALUES (1, NULL)")()
+      runQuery(s"INSERT INTO arrays_test VALUES (NULL, cast('2014-04-28' as timestamp))")()
 
       implicit val pub = newPublisher("select * from arrays_test")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
-      expectMsg(OutputChunk(JsArray(Vector(JsArray(Vector(JsString("1")))))))
+      expectMsg(OutputChunk(JsArray(Vector(JsArray(Vector(JsString("1"))), JsNull))))
       pub ! ActorPublisherMessage.Request(1)
-      expectMsg(OutputChunk(JsArray(Vector(JsNull))))
+      expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("2014-04-28 00:00:00.0")))))
       pub ! ActorPublisherMessage.Request(1)
       expectDone
     }
