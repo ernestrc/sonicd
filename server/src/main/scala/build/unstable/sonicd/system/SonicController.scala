@@ -27,7 +27,7 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
   }
 
   // logging turned off as children errors are not system errors
-  override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(maxNrOfRetries = 1, loggingEnabled = false) {
+  override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true) {
     case e: Exception ⇒ Restart
   }
 
