@@ -1,12 +1,12 @@
 package build.unstable.sonicd.service.source
 
-import java.sql.{DriverManager, Statement}
+import java.sql.{Connection, DriverManager, Statement}
 
-import akka.actor.{ActorContext, ActorSystem, Props}
+import akka.actor.{ActorRef, ActorContext, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.model.{TypeMetadata, JsonProtocol, OutputChunk, DoneWithQueryExecution}
-import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcPublisher}
+import build.unstable.sonicd.model.{JsonProtocol, OutputChunk, TypeMetadata, DoneWithQueryExecution}
+import build.unstable.sonicd.source.{JdbcExecutor, JdbcConnectionsHandler, JdbcPublisher}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
 import JsonProtocol._
@@ -27,7 +27,7 @@ class JdbcSourceSpec(_system: ActorSystem)
   def this() = this(ActorSystem("JdbcSourceSpec"))
 
   val controller: TestActorRef[TestController] =
-    TestActorRef(Props[TestController].withDispatcher(CallingThreadDispatcher.Id))
+    TestActorRef(Props(classOf[TestController], self).withDispatcher(CallingThreadDispatcher.Id))
 
   Class.forName(H2Driver)
   val testConnection = DriverManager.getConnection(H2Url, "SONICD", "")
@@ -39,9 +39,9 @@ class JdbcSourceSpec(_system: ActorSystem)
     stmt.close()
   }
 
-  def newPublisher(query: String): TestActorRef[JdbcPublisher] = {
+  def newPublisher(query: String): ActorRef = {
     val src = new JdbcSource(H2Config, "test", query, controller.underlyingActor.context)
-    val ref = TestActorRef[JdbcPublisher](src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
+    val ref = controller.underlyingActor.context.actorOf(src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -51,34 +51,99 @@ class JdbcSourceSpec(_system: ActorSystem)
     expectMsgAnyClassOf(classOf[TypeMetadata])
   }
 
-  def expectDone(implicit pub: TestActorRef[JdbcPublisher]) = {
+  def expectDone(pub: ActorRef) = {
     expectMsg(DoneWithQueryExecution(success = true, Vector.empty))
-    expectMsg("complete")
+    expectMsg("complete") //sent by ImplicitSubscriber
     expectTerminated(pub)
   }
 
   "JdbcSource" should {
+
     "run a simple statement" in {
-      implicit val pub = newPublisher("create table users(id VARCHAR);")
+      val pub = newPublisher("create table users(id VARCHAR);")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
       runQuery("show tables") { stmt ⇒
         val rs = stmt.getResultSet
         rs.next()
         rs.getString(1).toUpperCase shouldBe "USERS"
       }
+      runQuery("drop table users;")()
+    }
+
+    "run multiple statements" in {
+      val pub = newPublisher(
+        "create table one(id VARCHAR);" +
+          "create table two(id VARCHAR);" +
+          "--create table two(no VARCHAR);" +
+          "create table three(id VARCHAR);" +
+          "create table four(id VARCHAR);" +
+          "create table five(id VARCHAR); ")
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub)
+      runQuery("show tables") { stmt ⇒
+        var buf = Vector.empty[String]
+        val rs = stmt.getResultSet
+        rs.next()
+        buf :+= rs.getString(1)
+        rs.next()
+        buf :+= rs.getString(1)
+        rs.next()
+        buf :+= rs.getString(1)
+        rs.next()
+        buf :+= rs.getString(1)
+        rs.next()
+        buf :+= rs.getString(1)
+        buf should contain allOf("ONE", "TWO", "THREE", "FOUR", "FIVE")
+      }
+    }
+
+    "run a query" in {
+      runQuery("CREATE TABLE test3(id VARCHAR)")()
+      runQuery("INSERT INTO test3 (id) VALUES ('1234')")()
+
+      val pub = newPublisher("select id from test3")
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(Vector("1234")))
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub)
+    }
+
+    "run multiple statements but rollback/not commit if one of them fails" in {
+      runQuery("create table roll(id VARCHAR);")()
+      val pub = newPublisher(
+        "insert into roll VALUES ('1');" +
+          "-- COMMENT insert into roll VALUES ('1');" +
+          "insert into ROCK VALUES ('2');" +
+          "insert into roll VALUES ('2');" +
+          "insert into roll VALUES ('4');")
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsgPF() {
+        case d: DoneWithQueryExecution ⇒ assert(d.errors.headOption.nonEmpty)
+      }
+      expectMsg("complete")
+      expectTerminated(pub)
+      runQuery("select count(*) from roll") { stmt ⇒
+        val rs = stmt.getResultSet
+        rs.next()
+        rs.getInt(1) shouldBe 0
+      }
     }
 
     "close connection after running one statement" in {
       runQuery("CREATE TABLE test2(id VARCHAR)")()
-      implicit val pub = newPublisher("INSERT INTO test2 (id) VALUES ('X')")
-      val handle = pub.underlyingActor.handle
+      val pub = newPublisher("INSERT INTO test2 (id) VALUES ('X')")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
 
       runQuery("select count(*) from information_schema.sessions;") { stmt ⇒
         val rs = stmt.getResultSet
@@ -87,17 +152,22 @@ class JdbcSourceSpec(_system: ActorSystem)
       }
     }
 
-    "run a query" in {
-      runQuery("CREATE TABLE test3(id VARCHAR)")()
-      runQuery("INSERT INTO test3 (id) VALUES ('1234')")()
-
-      implicit val pub = newPublisher("select id from test3")
+    "close connection after running multiple statements" in {
+      runQuery("CREATE TABLE girona(id VARCHAR)")()
+      val pub = newPublisher(
+        "INSERT INTO girona (id) VALUES ('X');" +
+          "INSERT INTO girona (id) VALUES ('B');" +
+          "INSERT INTO girona (id) VALUES ('C');")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
-      expectMsg(OutputChunk(Vector("1234")))
-      pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
+
+      runQuery("select count(*) from information_schema.sessions;") { stmt ⇒
+        val rs = stmt.getResultSet
+        rs.next()
+        rs.getInt(1) shouldBe 1 //test connection
+      }
     }
 
     "send typed values downstream" in {
@@ -114,7 +184,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery("INSERT INTO users_test (user_id, email, country) VALUES (3, NULL, 'Cat')")()
       runQuery("INSERT INTO users_test (user_id, email, country) VALUES (NULL, '4@lol.com', NULL)")()
 
-      implicit val pub = newPublisher("select user_id, email, country from users_test")
+      val pub = newPublisher("select user_id, email, country from users_test")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
@@ -126,7 +196,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("4@lol.com"), JsNull))))
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
     }
 
     "encode/decode arrays correctly" in {
@@ -135,7 +205,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery(s"INSERT INTO arrays_test VALUES (1, NULL)")()
       runQuery(s"INSERT INTO arrays_test VALUES (NULL, cast('2014-04-28' as timestamp))")()
 
-      implicit val pub = newPublisher("select * from arrays_test")
+      val pub = newPublisher("select * from arrays_test")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
@@ -143,7 +213,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("2014-04-28 00:00:00.0")))))
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
     }
 
     "encode/decode numbers correctly" in {
@@ -161,7 +231,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery(s"INSERT INTO numbers_test  VALUES (3, 3.123456789, NULL, ${Long.MaxValue})")()
       runQuery(s"INSERT INTO numbers_test  VALUES (NULL, 4.123456789, 4.123456789, NULL)")()
 
-      implicit val pub = newPublisher("select * from numbers_test")
+      val pub = newPublisher("select * from numbers_test")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
@@ -174,27 +244,33 @@ class JdbcSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsNumber(4.123456789), JsNumber(4.123456789), JsNull))))
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
     }
 
     "should send type metadata" in {
       runQuery("CREATE TABLE test4(id VARCHAR, a BIGINT)")()
       runQuery("INSERT INTO test4 (id, a) VALUES ('1234', 1234)")()
-      implicit val pub = newPublisher("select id, a from test4;")
+      val pub = newPublisher("select id, a from test4;")
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(TypeMetadata(Vector(("ID", JsString("")), ("A", JsNumber(0)))))
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(JsArray(Vector(JsString("1234"), JsNumber(1234)))))
       pub ! ActorPublisherMessage.Request(1)
-      expectDone
+      expectDone(pub)
     }
   }
 }
 
-//necessary to override jdbc connections actor dispatcher
+//override dispatchers
 class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext)
   extends build.unstable.sonicd.source.JdbcSource(config, queryId, query, context) {
+
+  override val executorProps: (Connection, Statement) ⇒ Props = { (conn, stmt) ⇒
+    Props(classOf[JdbcExecutor], queryId, query, conn, stmt, initializationStmts)
+      .withDispatcher(CallingThreadDispatcher.Id)
+  }
   override val jdbcConnectionsProps: Props =
     Props(classOf[JdbcConnectionsHandler]).withDispatcher(CallingThreadDispatcher.Id)
 }
+
 
