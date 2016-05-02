@@ -147,6 +147,7 @@ object Presto {
   implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat6(ErrorMessage.apply)
   implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
 
+  case class PostQuery(queryId: String, query: String)
   case class GetQueryResults(queryId: String, nextUri: String)
 
 }
@@ -243,11 +244,11 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
       log.debug("extracted query results for query '{}'", r.id)
       pub ! r
 
-    case q@Query(queryId, s, _) ⇒
+    case PostQuery(queryId, s) ⇒
       log.debug("{} supervising query '{}'", self.path, s)
       val pub = sender()
       context.watch(pub)
-      runStatement(queryId.get, s).pipeTo(self)(pub)
+      runStatement(queryId, s).pipeTo(self)(pub)
 
     case f: Status.Failure ⇒ sender() ! f
 
@@ -374,7 +375,7 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
 
     //first time client requests
     case Request(n) ⇒
-      supervisor ! new Query(Some(queryId), query, JsObject.empty)
+      supervisor ! PostQuery(queryId, query)
       log.debug("sent query to supervisor {}", supervisor)
       context.become(connected)
   }
