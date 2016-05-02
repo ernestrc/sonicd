@@ -90,6 +90,7 @@ with JsonProtocol {
       assert(thrown.getMessage.contains("not found"))
     }
 
+    /* FIXME
     "should bubble exception thrown by the tcp stage" in {
 
       val future: Future[Vector[SonicMessage]] =
@@ -109,5 +110,6 @@ with JsonProtocol {
       }
       assert(thrown.getMessage.contains("Could not establish connection to"))
     }
+    */
   }
 }
