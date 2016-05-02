@@ -5,6 +5,7 @@ import java.nio.charset.Charset
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
+import com.typesafe.config.{ConfigRenderOptions, ConfigFactory}
 import spray.json._
 
 import scala.util.Try
@@ -100,8 +101,10 @@ package object model {
     def fromJson(raw: String): SonicMessage = try {
       val fields = raw.parseJson.asJsObject.fields
       if (fields.contains("event_type")) {
+
         val variation: Option[String] = Try(fields.get("variation").map(_.convertTo[String])).getOrElse(None)
         val payload: Option[JsValue] = fields.get("payload")
+
         fields.get("event_type").map(_.convertTo[String]) match {
           case Some("O") ⇒ payload match {
             case Some(d: JsArray) ⇒ OutputChunk(d)
@@ -120,7 +123,7 @@ package object model {
               Try(payload.get.asJsObject.fields.get("progress").map(_.convertTo[Double])).toOption.flatten,
               Try(payload.get.asJsObject.fields.get("output").map(_.convertTo[String])).toOption.flatten
             )
-          case Some("Q") ⇒ Query(None, variation.get, payload.get.asJsObject)
+          case Some("Q") ⇒ new Query(None, variation.get, payload.get)
           case Some("D") ⇒ DoneWithQueryExecution(variation.get == "success",
             payload.map(_.convertTo[Vector[String]].map(e ⇒ new Exception(e))).getOrElse(Vector.empty))
           case e ⇒ throw new Exception(s"unexpected event type '$e'")
@@ -128,9 +131,9 @@ package object model {
       } else {
         val queryStr = fields.getOrElse("query",
           throw new Exception("missing 'query' field in query payload")).convertTo[String]
-        val config = fields.getOrElse("config",
-          throw new Exception("missing 'config' field in query payload")).asJsObject
-        Query(queryStr, config)
+        val config: JsValue = fields.getOrElse("config",
+          throw new Exception("missing 'config' field in query payload"))
+        new Query(None, queryStr, config)
       }
     } catch {
       case e: Exception ⇒ throw new Exception(s"event deserialization error: ${e.getMessage}", e)
@@ -143,17 +146,24 @@ package object model {
       fromJson(b.decodeString("utf-8"))
   }
 
-  case class Query(query_id: Option[String], query: String, config: JsObject) extends SonicMessage {
+  class Query(val query_id: Option[String], val query: String, _config: JsValue) extends SonicMessage {
 
-    @transient
+    val config: JsObject = _config match {
+      case o: JsObject ⇒ o
+      case JsString(alias) ⇒ Try {
+        ConfigFactory.load().getObject(s"sonicd.source.$alias").render(ConfigRenderOptions.concise()).parseJson.asJsObject
+      }.recover {
+        case e: Exception ⇒ throw new Exception(s"could not load query config '$alias'", e)
+      }.get
+      case _ ⇒
+        throw new Exception("'config' key in query config can only be either a full config object or an alias (string) that will be extracted by sonicd server")
+    }
+
     override val variation: Option[String] = Some(query)
-    @transient
     override val payload: Option[JsValue] = Some(config)
-    @transient
     override val eventType: Option[String] = Some("Q")
 
-    @transient
-    lazy val clazzName = config.fields.getOrElse("class",
+    val clazzName: String = config.fields.getOrElse("class",
       throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
     def getSourceClass: Class[_] = Try(Query.clazzLoader.loadClass(clazzName))
@@ -163,6 +173,7 @@ package object model {
   object Query {
 
     def apply(query: String, config: JsObject): Query = new Query(None, query, config)
+    def unapply(query: Query): Option[(Option[String], String, JsObject)] = Some(query.query_id, query.query, query.config)
 
     import spray.json._
 
@@ -170,7 +181,7 @@ package object model {
 
     def fromBytes(data: ByteString): Try[Query] = Try {
       val msg = SonicMessage.fromBytes(data)
-      Query(None, msg.variation.getOrElse(throw new Exception("protocol error: query msg is missing 'variation' field")),
+      Query(msg.variation.getOrElse(throw new Exception("protocol error: query msg is missing 'variation' field")),
         msg.payload.map(_.asJsObject).getOrElse(JsObject.empty))
     }
   }

@@ -374,7 +374,7 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
 
     //first time client requests
     case Request(n) ⇒
-      supervisor ! Query(Some(queryId), query, JsObject.empty)
+      supervisor ! new Query(Some(queryId), query, JsObject.empty)
       log.debug("sent query to supervisor {}", supervisor)
       context.become(connected)
   }

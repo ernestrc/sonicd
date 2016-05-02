@@ -40,7 +40,7 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
 
   def newQuery(q: Query): (String, DataSource) = {
     val id = UUID.randomUUID().toString
-    val query = q.copy(query_id = Some(id))
+    val query = new Query(Some(id), q.query, q.config)
     val source = query.getSourceClass.getConstructors()(0)
       .newInstance(query.config, query.query_id.get, query.query, context)
       .asInstanceOf[DataSource]

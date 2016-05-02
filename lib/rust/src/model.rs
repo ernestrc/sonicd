@@ -7,8 +7,7 @@ use std::str::FromStr;
 pub struct Query {
     pub query_id: Option<String>,
     pub query: String,
-    pub source: String,
-    pub config: BTreeMap<String, Value>,
+    pub config: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -96,7 +95,7 @@ impl Query {
         SonicMessage {
             event_type: "Q".to_owned(),
             variation: Some(self.query.clone()),
-            payload: Some(Value::Object(self.config.clone())),
+            payload: Some(self.config.clone()),
         }
     }
 }

@@ -16,6 +16,7 @@ import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory
 import com.typesafe.sslconfig.ssl.{ConfigSSLContextBuilder, SSLConfigFactory}
 import org.scalatest._
+import spray.json.JsString
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -34,7 +35,7 @@ with JsonProtocol {
   val http = Http()
   val sslConfigFactory = AkkaSSLConfig()
 
-  val sonicOverrides = system.settings.config.getConfig("sonic.ssl-config")
+  val sonicOverrides = system.settings.config.getConfig("sonicd.ssl-config")
   val defaults = system.settings.config.getConfig("ssl-config")
   val config = SSLConfigFactory.parse(sonicOverrides withFallback defaults)
 
@@ -60,6 +61,20 @@ with JsonProtocol {
   "sonicd tcp " should {
     "run a simple query using the tcp api" in {
 
+      val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
+      val stream: Future[DoneWithQueryExecution] =
+        SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
+
+      val sDone = Await.result(stream, 20.seconds)
+      val fDone = Await.result(future, 20.seconds)
+
+      assert(sDone.success)
+      fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+    }
+
+    "run a query against a source that is configured server side" in {
+
+      val syntheticQuery = new Query(None, "10", JsString("test_server_config"))
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
       val stream: Future[DoneWithQueryExecution] =
         SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()

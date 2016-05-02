@@ -205,25 +205,17 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
 
 pub fn build(src_alias: &str, mut srcfg: BTreeMap<String, Value>, query: &str) -> Result<Query> {
 
-    let source_config = try!(srcfg.remove(src_alias)
-                                  .ok_or(Receipt::error(format!("config for source '{}' not \
-                                                                 found",
-                                                                src_alias))));
-    match source_config {
-        Value::Object(map) => {
-            map.get("class")
-               .map(|source| {
-                   Query {
-                       query_id: None,
-                       query: String::from_str(query).unwrap(),
-                       source: source.as_string()
-                                     .unwrap()
-                                     .to_string(),
-                       config: map.clone(),
-                   }
-               })
-               .ok_or(Receipt::error(format!("missing 'class' key inside {} config", &src_alias)))
-        }
+    let source_config = srcfg.remove(src_alias);
+
+    let config: Value = try!(match source_config {
+        Some(o@Value::Object) => Ok(o),
+        None => Ok(Value::String(src_alias.to_owned())),
         _ => Err(Receipt::error(format!("source '{}' config is not an object", &src_alias))),
-    }
+    });
+
+    Ok(Query {
+        query_id: None,
+        query: query.to_owned(),
+        config: config,
+    })
 }

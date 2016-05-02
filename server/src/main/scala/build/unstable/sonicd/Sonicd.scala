@@ -18,7 +18,7 @@ object Sonicd extends App with AkkaSystem with AkkaService with AkkaApi {
   val http = Http()
   val sslConfigFactory = AkkaSSLConfig()
 
-  val sonicOverrides = system.settings.config.getConfig("sonic.ssl-config")
+  val sonicOverrides = system.settings.config.getConfig("sonicd.ssl-config")
   val defaults = system.settings.config.getConfig("ssl-config")
   val config = SSLConfigFactory.parse(sonicOverrides withFallback defaults)
 
