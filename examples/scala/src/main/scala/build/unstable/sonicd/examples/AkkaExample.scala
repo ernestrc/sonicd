@@ -17,7 +17,7 @@ import scala.concurrent.{Await, Future}
  */
 object AkkaExample extends App {
 
-  val config = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
+  val config: JsObject = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
   val query = Query("10", config)
   val addr = new InetSocketAddress("127.0.0.1", 10001)
 

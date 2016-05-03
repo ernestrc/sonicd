@@ -5,7 +5,7 @@ import java.nio.charset.Charset
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
-import com.typesafe.config.{ConfigRenderOptions, ConfigFactory}
+import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import spray.json._
 
 import scala.util.Try
@@ -146,44 +146,52 @@ package object model {
       fromJson(b.decodeString("utf-8"))
   }
 
-  class Query(val query_id: Option[String], val query: String, _config: JsValue) extends SonicMessage {
+  class Query(val query_id: Option[String], val query: String, val _config: JsValue) extends SonicMessage {
 
-    val config: JsObject = _config match {
+    override val variation: Option[String] = Some(query)
+    override val payload: Option[JsValue] = Some(_config)
+    override val eventType: Option[String] = Some("Q")
+
+    //CAUTION: leaking this value outside of sonicd-server is a major security risk
+    private[sonicd] lazy val config = _config match {
       case o: JsObject ⇒ o
       case JsString(alias) ⇒ Try {
-        ConfigFactory.load().getObject(s"sonicd.source.$alias").render(ConfigRenderOptions.concise()).parseJson.asJsObject
+        ConfigFactory.load().getObject(s"sonicd.source.$alias")
+          .render(ConfigRenderOptions.concise()).parseJson.asJsObject
       }.recover {
         case e: Exception ⇒ throw new Exception(s"could not load query config '$alias'", e)
       }.get
       case _ ⇒
-        throw new Exception("'config' key in query config can only be either a full config object or an alias (string) that will be extracted by sonicd server")
+        throw new Exception("'config' key in query config can only be either a full config " +
+          "object or an alias (string) that will be extracted by sonicd server")
     }
 
-    override val variation: Option[String] = Some(query)
-    override val payload: Option[JsValue] = Some(config)
-    override val eventType: Option[String] = Some("Q")
-
-    val clazzName: String = config.fields.getOrElse("class",
+    private[sonicd] def clazzName: String = config.fields.getOrElse("class",
       throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
-    def getSourceClass: Class[_] = Try(Query.clazzLoader.loadClass(clazzName))
-      .getOrElse(Query.clazzLoader.loadClass("build.unstable.sonicd.source." + clazzName))
+    private[sonicd] def getSourceClass: Class[_] = {
+      val clazzLoader = this.getClass.getClassLoader
+      Try(clazzLoader.loadClass(clazzName))
+        .getOrElse(clazzLoader.loadClass("build.unstable.sonicd.source." + clazzName))
+    }
+
+    def copy(query_id: String) = new Query(Some(query_id), query, _config)
   }
 
   object Query {
 
+    /**
+     * Build a Query from a fully specified source configuration 'config'
+     */
     def apply(query: String, config: JsObject): Query = new Query(None, query, config)
-    def unapply(query: Query): Option[(Option[String], String, JsObject)] = Some(query.query_id, query.query, query.config)
 
-    import spray.json._
+    /**
+     * Build a Query from a configuration alias 'config' for the sonicd server to
+     * load from its configuration
+     */
+    def apply(query: String, config: JsString): Query = new Query(None, query, config)
 
-    val clazzLoader = this.getClass.getClassLoader
-
-    def fromBytes(data: ByteString): Try[Query] = Try {
-      val msg = SonicMessage.fromBytes(data)
-      Query(msg.variation.getOrElse(throw new Exception("protocol error: query msg is missing 'variation' field")),
-        msg.payload.map(_.asJsObject).getOrElse(JsObject.empty))
-    }
+    def unapply(query: Query): Option[(Option[String], String)] = Some((query.query_id, query.query))
   }
 
 }

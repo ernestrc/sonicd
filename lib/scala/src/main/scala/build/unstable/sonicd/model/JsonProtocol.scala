@@ -23,17 +23,16 @@ trait JsonProtocol extends SprayJsonSupport with DefaultJsonProtocol {
 
   implicit val queryJsonFormat: RootJsonFormat[Query] = new RootJsonFormat[Query] {
     override def write(obj: Query): JsValue = JsObject(Map(
-      "config" → obj.config,
+      "config" → obj._config, //when we write, we don't want to leak the server side 'config'
       "query_id" → obj.query_id.map(JsString.apply).getOrElse(JsNull),
       "query" → JsString(obj.query)
     ))
 
     override def read(json: JsValue): Query = {
       val f = json.asJsObject.fields
-      new Query(
-        f.get("query_id").map(_.convertTo[String]),
-        f("query").convertTo[String],
-        f("config"))
+      val config = f("config")
+      val query = f("query").convertTo[String]
+      new Query(None, query, config)
     }
   }
 
