@@ -81,7 +81,10 @@ object SonicdSource {
           override def onUpstreamFailure(ex: Throwable): Unit = super.onUpstreamFailure(ex)
 
           @throws[Exception](classOf[Exception])
-          override def onUpstreamFinish(): Unit = ()
+          override def onUpstreamFinish(): Unit = {
+            //dont complete here as we want to make sure that tcp connection
+            //stays open even if TCP Half-Close mechanism is not enabled
+          }
 
           override def onPush(): Unit = {
             val elem = grab(in2)
@@ -143,7 +146,7 @@ object SonicdSource {
    */
   def run(address: InetSocketAddress, query: Query)
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
-    run(query, Tcp().outgoingConnection(address, halfClose = true))
+    run(query, Tcp().outgoingConnection(address))
   }
 
   def run(query: Query,
@@ -183,7 +186,7 @@ object SonicdSource {
    */
   def stream(address: InetSocketAddress, query: Query)
             (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
-    stream(query, Tcp().outgoingConnection(address, halfClose = true))
+    stream(query, Tcp().outgoingConnection(address))
   }
 
   def stream(query: Query, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
