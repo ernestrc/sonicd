@@ -83,14 +83,13 @@ object Presto {
 
   case class FailureInfo(message: String,
                          stack: Vector[String],
-                         errorLocation: ErrorLocation)
+                         errorLocation: Option[ErrorLocation])
 
   case class ErrorMessage(message: String,
                           errorCode: Int,
                           errorName: String,
                           errorType: String,
-                          failureInfo: FailureInfo,
-                          errorLocation: ErrorLocation)
+                          failureInfo: FailureInfo)
 
   case class QueryStats(elapsedTime: String,
                         queuedTime: String,
@@ -144,10 +143,11 @@ object Presto {
   implicit var outputStageJsonFormat: RootJsonFormat[OutputStage] = jsonFormat3(OutputStage.apply)
   implicit var errorLocation: RootJsonFormat[ErrorLocation] = jsonFormat2(ErrorLocation.apply)
   implicit var failureInfoFormat: RootJsonFormat[FailureInfo] = jsonFormat3(FailureInfo.apply)
-  implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat6(ErrorMessage.apply)
+  implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat5(ErrorMessage.apply)
   implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
 
   case class PostQuery(queryId: String, query: String)
+
   case class GetQueryResults(queryId: String, nextUri: String)
 
 }
@@ -170,6 +170,7 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
     response.entity.toStrict(SonicdConfig.PRESTO_TIMEOUT).map { d ⇒
       log.debug("recv response from presto master for '{}' {} bytes", queryId, d.data.size)
       val str = d.data.decodeString("UTF-8")
+      log.debug("{}", str)
       str.parseJson.convertTo[QueryResults]
     }
   }
@@ -222,16 +223,16 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
   override def receive: Actor.Receive = {
 
     case Terminated(ref) ⇒
-      queries.remove(ref).flatMap { res ⇒
+      queries.remove(ref).map { res ⇒
+        val queryId = res.id
         res.partialCancelUri.map { cancelUri ⇒
-          val queryId = res.id
           cancelQuery(queryId, cancelUri).andThen {
             case Success(wasCanceled) if wasCanceled ⇒ log.debug("successfully canceled query '{}'", queryId)
-            case s: Success[_] ⇒ log.error("could not cancel query'{}': DELETE response was not 200 OK", queryId)
+            case s: Success[_] ⇒ log.error("could not cancel query '{}': DELETE response was not 200 OK", queryId)
             case Failure(e) ⇒ log.error(e, "error canceling query '{}'", queryId)
           }
-        }
-      }.getOrElse(log.warning("could not cancel/remove query of publisher {}", ref))
+        }.getOrElse(log.warning("could not cancel query '{}': paritalCancelUri is empty", ref))
+      }.getOrElse(log.debug("could not remove query of publisher: {}: not queryresults found", ref))
 
     case GetQueryResults(queryId, nextUri) ⇒
       log.debug("getting query results of '{}'", queryId)
@@ -338,7 +339,7 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
       }
 
       r.stats.state match {
-        case "RUNNING" | "QUEUED" | "PLANNING" ⇒
+        case "RUNNING" | "QUEUED" | "PLANNING" | "STARTING" ⇒
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           tryPullUpstream()
 
