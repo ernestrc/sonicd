@@ -28,9 +28,10 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
 
   val MIN_RECORDS = 100
 
-  def newConnectionPool: ConnectionPoolFactory = { implicit mat ⇒
-    host ⇒
-      Sonicd.http.newHostConnectionPoolHttps[String](host = host,
+  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))(context)
+
+  def newConnectionPool(host: String): ConnectionPool = {
+    Sonicd.http.newHostConnectionPoolHttps[String](host = host,
           settings = ConnectionPoolSettings(SonicdConfig.ZUORA_CONNECTION_POOL_SETTINGS),
         connectionContext = ConnectionContext.https(sslContext = Sonicd.sslContext,
           enabledProtocols = Some(scala.collection.immutable.Vector("TLSv1.2")), //zuora only allows TLSv1.2 and TLSv.1.1
@@ -49,8 +50,11 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
       }.getOrElse(SonicdConfig.ZUORA_MAX_NUMBER_RECORDS)
 
     val auth = ZuoraAuth(user, password, host)
-    val zuoraService = context.child(ZuoraService.actorName).getOrElse {
-      context.actorOf(Props(classOf[ZuoraService], newConnectionPool), ZuoraService.actorName)
+    val zuoraServiceActorName = ZuoraService.getZuoraServiceActorName(auth)
+
+    val zuoraService = context.child(zuoraServiceActorName).getOrElse {
+      val pool: ConnectionPool = newConnectionPool(auth.host)
+      context.actorOf(Props(classOf[ZuoraService], pool, materializer), zuoraServiceActorName)
     }
 
     Props(classOf[ZOQLPublisher], query, queryId, zuoraService, auth, batchSize)
@@ -110,7 +114,10 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
     case res: QueryResult ⇒
       val totalSize = res.size
       val effectiveBatchSize = getEffectiveBatchSize(streamLimit)
-      if (!res.done && streamLimit.isDefined && effectiveBatchSize < streamLimit.get) {
+      if (res.done || streamLimit.isDefined && effectiveBatchSize < streamLimit.get) {
+        log.info(s"successfully fetched $totalSize zuora objects")
+        self ! DoneWithQueryExecution(success = true)
+      } else {
         val percPerBatch = 100.0 * effectiveBatchSize / totalSize
         buffer.enqueue(QueryProgress(Some(percPerBatch), Some(s"querying for $effectiveBatchSize more objects")))
 
@@ -119,9 +126,6 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
           service ! RunQueryMore(QueryMore(zoql, res.queryLocator.get, queryId), effectiveBatchSize, auth)
           log.debug("querying ahead, buffer size is {}", buffer)
         }
-      } else {
-        log.info(s"successfully fetched $totalSize zuora objects")
-        self ! DoneWithQueryExecution(success = true)
       }
 
       try {
@@ -222,7 +226,7 @@ object ZuoraObjectQueryLanguageSource {
       .getOrElse(Vector.empty)
 }
 
-class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with ActorLogging {
+class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorMaterializer) extends Actor with ActorLogging {
 
   import ZuoraService._
   import context.dispatcher
@@ -241,10 +245,6 @@ class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with 
     log.debug(s"stopping ZuoraService actor")
   }
 
-  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))
-
-  //one connection pool for every host seen
-  val connectionPools = scala.collection.mutable.Map.empty[String, ConnectionPool]
   val validSessions = scala.collection.mutable.Map.empty[ZuoraAuth, Future[Session]]
 
   def memoizedSession(auth: ZuoraAuth): Future[Session] =
@@ -253,13 +253,6 @@ class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with 
       validSessions.update(auth, h)
       h
     })
-
-  def memoizedConnectionPool(host: String) = connectionPools.getOrElse(host, {
-    log.debug("instantiating new connection pool for host '{}'", host)
-    val pool = newConnectionPool(materializer)(host)
-    connectionPools.update(host, pool)
-    pool
-  })
 
   def xmlRequest(payload: scala.xml.Node, queryId: String, pool: ConnectionPool): Future[HttpResponse] = Future {
     val data = payload.buildString(true)
@@ -297,13 +290,13 @@ class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with 
   def getLogin(auth: ZuoraAuth): Future[Session] = {
     loginN += 1
     log.debug("trying to login for the {} time", loginN)
-    xmlRequest(auth.xml, loginN.toString, memoizedConnectionPool(auth.host))
+    xmlRequest(auth.xml, loginN.toString, connectionPool)
       .flatMap(r ⇒ Session.fromHttpEntity(r.entity, auth.host))
   }
 
   def runQueryMore(qMore: QueryMore, auth: ZuoraAuth, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
     val xml = qMore.xml(batchSize, sessionHeader.id)
-    xmlRequest(xml, qMore.queryId, memoizedConnectionPool(sessionHeader.host))
+    xmlRequest(xml, qMore.queryId, connectionPool)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
@@ -313,7 +306,7 @@ class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with 
     val q = FirstQuery(zoql, queryId)
     val xml = q.xml(batchSize, sessionHeader.id)
 
-    xmlRequest(xml, q.queryId, memoizedConnectionPool(sessionHeader.host))
+    xmlRequest(xml, q.queryId, connectionPool)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
@@ -343,7 +336,6 @@ class ZuoraService(newConnectionPool: ConnectionPoolFactory) extends Actor with 
 object ZuoraService {
 
   type ConnectionPool = Flow[(HttpRequest, String), (Try[HttpResponse], String), Http.HostConnectionPool]
-  type ConnectionPoolFactory = (ActorMaterializer ⇒ String ⇒ ConnectionPool)
 
   case class Session(id: String, host: String)
 
@@ -440,7 +432,7 @@ object ZuoraService {
     }
   }
 
-  val actorName = "zuoraservice"
+  def getZuoraServiceActorName(auth: ZuoraAuth) = s"zuora_service_${auth.host}"
 
   //https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E_SOAP_API_Calls/query_call
   val MAX_NUMBER_RECORDS = 2000
