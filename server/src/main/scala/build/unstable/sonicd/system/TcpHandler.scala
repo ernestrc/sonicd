@@ -31,7 +31,7 @@ class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
     case c@Tcp.Connected(remote, local) =>
       val connection = sender()
       val handler = context.actorOf(Props(classOf[TcpHandler], controller, connection))
-      connection ! Tcp.Register(handler, keepOpenOnPeerClosed = true)
+      connection ! Tcp.Register(handler)
       listener ! Tcp.ResumeAccepting(1)
   }
 

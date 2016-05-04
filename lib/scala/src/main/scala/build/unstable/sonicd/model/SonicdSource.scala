@@ -143,7 +143,7 @@ object SonicdSource {
    */
   def run(address: InetSocketAddress, query: Query)
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
-    run(query, Tcp().outgoingConnection(address, halfClose = false))
+    run(query, Tcp().outgoingConnection(address, halfClose = true))
   }
 
   def run(query: Query,
@@ -183,7 +183,7 @@ object SonicdSource {
    */
   def stream(address: InetSocketAddress, query: Query)
             (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
-    stream(query, Tcp().outgoingConnection(address, halfClose = false))
+    stream(query, Tcp().outgoingConnection(address, halfClose = true))
   }
 
   def stream(query: Query, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
