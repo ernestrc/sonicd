@@ -101,7 +101,8 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       writeOne()
     } else buffer(ev)
 
-    val recv: Receive = {
+    {
+      case PeerClosed ⇒ log.debug("peer closed")
       case ConfirmedClosed ⇒ context.stop(self)
       case CommandFailed(_: Write) => connection ! ResumeWriting
       case WritingResumed => writeOne()
@@ -109,7 +110,6 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
         acknowledge(offset)
         if (storage.length > 0) writeOne()
     }
-    recv
   }
 
   val subs = new Subscriber[SonicMessage] {
@@ -188,7 +188,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       log.error(msg)
       context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
 
-    case PeerClosed => log.debug("peer closed")
+    case PeerClosed ⇒ log.debug("peer closed")
   }
 
   def deserializeAndHandleQueryFrame(data: ByteString): Unit = {

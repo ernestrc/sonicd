@@ -5,13 +5,12 @@ import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.ByteString
+import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.SyntheticPublisher
 import build.unstable.sonicd.system.SonicController.NewQuery
 import build.unstable.sonicd.system.TcpHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
-import spray.json._
-import JsonProtocol._
 
 import scala.concurrent.duration._
 
@@ -44,32 +43,16 @@ class MockConnection extends Actor {
   }
 }
 
-class Zombie extends ActorPublisher[SonicMessage] {
-  override def receive: Actor.Receive = {
-    case any ⇒ //ignore
-  }
-}
-
-object TcpHandlerSpec {
-
-  //it doesn't matter as it's handled by controller anyway
-  val query =
-    SonicdSource.lengthPrefixEncode(Query("10", """{"class":"SyntheticSource"}""".parseJson.asJsObject).toBytes)
-}
-
 class TcpHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
-  import TcpHandlerSpec._
+  import Fixture._
 
   def this() = this(ActorSystem("TcpHandlerSpec"))
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)
   }
-
-  val props = Props(classOf[SyntheticPublisher], 1000, Some(1), 10, "1", false).withDispatcher(CallingThreadDispatcher.Id)
-  val zombie = Props[Zombie].withDispatcher(CallingThreadDispatcher.Id)
 
   def newTestCase(name: String, replyMsg: Any): (TestActorRef[MockController], TestActorRef[MockConnection], TestActorRef[TcpHandler]) = {
     val controller = TestActorRef[MockController](Props(classOf[MockController], replyMsg), "controller" + name)
@@ -88,7 +71,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
     expectMsg(Tcp.ResumeReading)
 
-    tcpHandler ! Tcp.Received(query)
+    tcpHandler ! Tcp.Received(queryBytes)
     //expectMsg(Tcp.ResumeReading)
     //expectMsgType[NewQuery]
     receiveN(2) //race condition between resume and q
@@ -138,7 +121,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     watch(tcpHandler)
 
     expectMsg(Tcp.ResumeReading)
-    val (qChunk1, qChunk2) = query.splitAt(10)
+    val (qChunk1, qChunk2) = queryBytes.splitAt(10)
 
     tcpHandler ! Tcp.Received(qChunk1)
     expectMsg(Tcp.ResumeReading)
@@ -156,7 +139,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     watch(tcpHandler)
 
     expectMsg(Tcp.ResumeReading)
-    tcpHandler ! Tcp.Received(query)
+    tcpHandler ! Tcp.Received(queryBytes)
 
     expectMsgType[NewQuery]
 
@@ -175,7 +158,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should retry writing if tcp write fails" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     val write = progressFlowNoAck(tcpHandler)
 
     tcpHandler ! Tcp.CommandFailed(write)
@@ -201,7 +184,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should acknowledge and request for more if tcp write succeeds" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     val ack = progressFlowNoAck(tcpHandler).ack
 
     tcpHandler ! ack
@@ -212,7 +195,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should buffer a second message if received before 1st message ack" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     val ack = progressFlowNoAck(tcpHandler).ack
 
     val out = OutputChunk(Vector("1"))
@@ -227,7 +210,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should send all messages for tcp writing until completed is called" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
 
     val ack = progressFlowNoAck(tcpHandler).ack
@@ -247,7 +230,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should materialize stream and propagate writes to connection" in {
-    val tcpHandler = newHandlerOnStreamingState(props)
+    val tcpHandler = newHandlerOnStreamingState(syntheticPubProps)
     watch(tcpHandler)
 
     val writes = (0 until 103).map { i ⇒
@@ -271,10 +254,11 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   "if peer closes before should terminate after client acknowledges or when connection breaks" in {
     //stream completes
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
 
     tcpHandler ! Tcp.PeerClosed
+
     val ack1 = sendDoneNoAck(tcpHandler, 1).ack
     tcpHandler ! ack1
     tcpHandler ! TcpHandler.CompletedStream
@@ -283,10 +267,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     expectTerminated(tcpHandler)
 
     //connection breaks
-    val (controller, connection, tcpHandler2) = newTestCase("_0", zombie)
+    val (controller, connection, tcpHandler2) = newTestCase("_0", zombiePubProps)
     watch(tcpHandler2)
 
-    tcpHandler2 ! Tcp.Received(query)
+    tcpHandler2 ! Tcp.Received(queryBytes)
 
     tcpHandler2 ! Tcp.PeerClosed
 
@@ -303,10 +287,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   "should terminate if connection breaks after query has been sent" in {
 
-    val (controller, connection, tcpHandler) = newTestCase("_1", props)
+    val (controller, connection, tcpHandler) = newTestCase("_1", syntheticPubProps)
     watch(tcpHandler)
 
-    tcpHandler ! Tcp.Received(query)
+    tcpHandler ! Tcp.Received(queryBytes)
 
     controller.underlyingActor.isMaterialized shouldBe true
 
@@ -315,9 +299,33 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   }
 
+  "should handle error event when controller fails to instantiate publisher" in {
+
+    val tcpHandler =
+      TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
+    watch(tcpHandler)
+    expectMsg(Tcp.ResumeReading)
+
+    tcpHandler ! Tcp.Received(queryBytes)
+    receiveN(2)
+
+    val done = DoneWithQueryExecution.error(new Exception("BOOM"))
+    val ack = TcpHandler.Ack(1)
+    val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack)
+
+    tcpHandler ! done
+    expectMsg(w)
+    tcpHandler ! ack
+    tcpHandler.underlyingActor.storage.length shouldBe 0
+
+    clientAcknowledge(tcpHandler)
+    expectTerminated(tcpHandler)
+
+  }
+
   "should terminate if connection breaks before sending query" in {
 
-    val (controller, connection, tcpHandler) = newTestCase("_2", props)
+    val (controller, connection, tcpHandler) = newTestCase("_2", syntheticPubProps)
     watch(tcpHandler)
     connection ! PoisonPill
     expectTerminated(tcpHandler)
@@ -325,7 +333,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "in closing state, it should buffer all messages received and send them for writing when possible before terminating" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
     val done = DoneWithQueryExecution(success = true)
 
@@ -353,7 +361,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "for terminating it should wait peer closed and stream is completed if connection is not broken" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
 
     val ack = progressFlowNoAck(tcpHandler).ack
@@ -373,7 +381,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "log error and pass error downstream if stream is completed without a done event" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
 
     val ack = progressFlowNoAck(tcpHandler).ack
@@ -400,7 +408,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "doesnt write done until buffer is empty" in {
-    val tcpHandler = newHandlerOnStreamingState(zombie)
+    val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
 
     val ack = progressFlowNoAck(tcpHandler).ack

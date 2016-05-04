@@ -25,7 +25,8 @@ class IntegrationSpec extends WordSpec with Matchers with ScalatestRouteTest
 with BeforeAndAfterAll with TestSystem with AkkaService with AkkaApi
 with JsonProtocol {
 
-  import build.unstable.sonicd.service.source.Fixture._
+  import Fixture._
+  import build.unstable.sonicd.model.Fixture._
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)

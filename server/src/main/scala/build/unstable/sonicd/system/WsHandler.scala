@@ -2,56 +2,42 @@ package build.unstable.sonicd.system
 
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrategy, RequestStrategy}
+import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.SonicController.NewQuery
 import org.reactivestreams._
-
-import scala.collection.mutable
-import scala.concurrent.duration._
 
 class WsHandler(controller: ActorRef) extends ActorPublisher[SonicMessage]
 with ActorSubscriber with ActorLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
   import akka.stream.actor.ActorSubscriberMessage._
-  import context.dispatcher
 
   override protected def requestStrategy: RequestStrategy = OneByOneRequestStrategy
 
   case object CompletedStream
 
-  def closing(done: Option[DoneWithQueryExecution]): Receive = {
-    log.debug("switched to closing behaviour with ev {} and storage {}", done, buffer)
-    if (done.isDefined) {
-      val msg = done.get
-      if (totalDemand > 0) {
-        onNext(msg)
-        onCompleteThenStop()
-      } else {
-        buffer.enqueue(msg)
-      }
-    }
-    if (buffer.length == 0) {
-      log.debug("called closing and buffer is empty. shutting down..")
+  def closing(done: DoneWithQueryExecution): Receive = {
+    log.debug("switched to closing behaviour with ev {}", done)
+    if (isActive && totalDemand > 0) {
+      onNext(done)
       onCompleteThenStop()
     }
-    log.debug("switched to closing state but storage is not empty: {}", buffer)
-    val recv: Receive = {
-      case Cancel | OnComplete ⇒
-        onCompleteThenStop()
+
+    {
+      case Cancel | OnComplete ⇒ onCompleteThenStop()
       case Request(n) =>
-        while (isActive && totalDemand > 0 && buffer.length > 0) {
-          onNext(buffer.dequeue())
+        if (isActive) {
+          onNext(done)
+          onCompleteThenStop()
         }
-        if (!isActive || buffer.isEmpty) onCompleteThenStop()
     }
-    recv orElse commonBehaviour
   }
 
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
-      log.error(t, "stream error")
+      log.error(t, "publisher called onError of wsHandler")
       self ! DoneWithQueryExecution.error(t)
     }
 
@@ -65,39 +51,53 @@ with ActorSubscriber with ActorLogging {
 
   def commonBehaviour: Receive = {
 
-    case OnComplete | Cancel ⇒
+    case Cancel | OnComplete ⇒
       log.debug("client completed/canceled stream")
-      context.become(closing(None))
+      onCompleteThenStop()
 
     case CompletedStream ⇒
-      log.debug("source completed stream")
-      context.become(closing(None))
+      val msg = "completed stream without done msg"
+      log.error(msg)
+      context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
 
     case msg@OnError(e) ⇒
       log.error(e, "error in ws stream")
-      context.become(closing(Some(DoneWithQueryExecution.error(e))))
+      context.become(closing(DoneWithQueryExecution.error(e)))
+
+    case msg: DoneWithQueryExecution ⇒
+      context.become(closing(msg))
+
   }
 
-  val buffer = mutable.Queue.empty[SonicMessage]
+  var pendingToStream: Long = 0L
+
+  def requestTil(implicit s: Subscription): Unit = {
+    //make sure that requested is never > than totalDemand
+    while (pendingToStream < totalDemand) {
+      s.request(1)
+      pendingToStream += 1L
+    }
+  }
 
   def materialized(subscription: Subscription): Receive = {
     val recv: Receive = {
 
-      case msg@Request(n) ⇒
-        //drain buffer as much as possible given downstream demand
-        while (buffer.nonEmpty && totalDemand > 0) {
-          val msg = buffer.dequeue()
-          onNext(msg)
-        }
-        if (totalDemand > 0) subscription.request(1)
+      case msg@Request(n) ⇒ requestTil(subscription)
 
-      case msg: DoneWithQueryExecution ⇒
-        context.become(closing(Some(msg)))
+      case msg: DoneWithQueryExecution ⇒ context.become(closing(msg))
 
       case msg: SonicMessage ⇒
-        if (totalDemand > 0) onNext(msg)
-        else buffer.enqueue(msg)
-        if (totalDemand > 0) subscription.request(1)
+        try {
+          if (isActive) {
+            onNext(msg)
+            pendingToStream -= 1L
+          }
+          else log.warning(s"dropping message $msg: wsHandler is not active")
+        } catch {
+          case e: Exception ⇒
+            log.error(s"error onNext: pending: $pendingToStream; demand: $totalDemand")
+            context.become(closing(DoneWithQueryExecution.error(e)))
+        }
 
       case a@(OnComplete | Cancel) ⇒
         commonBehaviour.apply(a)
@@ -109,7 +109,7 @@ with ActorSubscriber with ActorLogging {
   def initial: Receive = {
 
     case s: Subscription ⇒
-      s.request(1)
+      requestTil(s)
       context.become(materialized(s))
 
     case handlerProps: Props ⇒
@@ -126,7 +126,7 @@ with ActorSubscriber with ActorLogging {
       } catch {
         case e: Exception ⇒
           log.error(e, "error while processing query")
-          context.become(closing(Some(DoneWithQueryExecution.error(e))))
+          context.become(closing(DoneWithQueryExecution.error(e)))
       }
   }
 

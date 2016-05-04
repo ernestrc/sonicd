@@ -28,7 +28,9 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
     Flow.fromSinkAndSource[SonicMessage, SonicMessage](
     Sink.fromSubscriber(ActorSubscriber(wsHandler)),
     Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))
-    )
+    ).recover {
+      case e: Exception ⇒ DoneWithQueryExecution.error(e)
+    }
   }
 
   /** Transforms flow by prepending a deserialization step and
@@ -67,8 +69,6 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
 
       FlowShape(de.in, ser.out)
     })
-  }.recover {
-    case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
   }
 
   val route =
@@ -77,7 +77,9 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
         pathEndOrSingleSlash {
           extractUpgradeToWebSocket { upgrade ⇒
             complete {
-              upgrade.handleMessages(messageSerDe)
+              upgrade.handleMessages(messageSerDe.recover {
+                case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
+              })
             }
           }
         }

@@ -95,12 +95,12 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
 
   "run graph method" should {
     "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicdSource.run(Fixture.query, tcpFailure1)
+      val f1 = SonicdSource.run(Fixture.syntheticQuery, tcpFailure1)
       whenReady(f1.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
       }
-      val f2 = SonicdSource.run(Fixture.query, tcpFailure2)
+      val f2 = SonicdSource.run(Fixture.syntheticQuery, tcpFailure2)
       whenReady(f2.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
@@ -110,12 +110,12 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
 
   "stream graph method" should {
     "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicdSource.stream(Fixture.query, tcpFailure1).to(Sink.ignore).run()
+      val f1 = SonicdSource.stream(Fixture.syntheticQuery, tcpFailure1).to(Sink.ignore).run()
       whenReady(f1.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
       }
-      val f2 = SonicdSource.stream(Fixture.query, tcpFailure2).to(Sink.ignore).run()
+      val f2 = SonicdSource.stream(Fixture.syntheticQuery, tcpFailure2).to(Sink.ignore).run()
       whenReady(f2.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError

@@ -1,17 +1,20 @@
-package build.unstable.sonicd.service.source
+package build.unstable.sonicd.service
 
 import akka.testkit.ImplicitSender
 import build.unstable.sonicd.model.SonicMessage
-import org.reactivestreams.{Subscription, Subscriber}
+import org.reactivestreams.{Subscriber, Subscription}
 
 trait ImplicitSubscriber extends Subscriber[SonicMessage] {
   this: ImplicitSender ⇒
 
   val subs = this
+  var subscription: Subscription = null
 
   override def onError(t: Throwable): Unit = self ! t
 
-  override def onSubscribe(s: Subscription): Unit = { }
+  override def onSubscribe(s: Subscription): Unit = {
+    subscription = s
+  }
 
   override def onComplete(): Unit = self ! "complete"
 

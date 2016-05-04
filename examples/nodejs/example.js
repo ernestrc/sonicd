@@ -4,7 +4,7 @@
 var Client = require('../../lib/nodejs/lib.js').Client;
 
 var query = {
-  query: '20',
+  query: '20000',
   config: {
     "class" : "SyntheticSource",
     "seed" : 1000,
