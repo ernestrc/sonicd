@@ -359,6 +359,9 @@ object ZuoraService {
   }
 
   case class ZuoraAuth(user: String, pwd: String, host: String) {
+
+    override def toString: String = s"Auth($host)"
+
     val xml: scala.xml.Node = {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Body>
