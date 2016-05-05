@@ -250,11 +250,12 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
   def memoizedSession(auth: ZuoraAuth): Future[Session] =
     validSessions.getOrElse(auth, {
       val h = getLogin(auth)
+      context.system.scheduler.scheduleOnce(10.minutes, self, VoidSession(auth))
       validSessions.update(auth, h)
       h
     })
 
-  def xmlRequest(payload: scala.xml.Node, queryId: String, pool: ConnectionPool): Future[HttpResponse] = Future {
+  def xmlRequest(payload: scala.xml.Node, queryId: String, pool: ConnectionPool, auth: ZuoraAuth): Future[HttpResponse] = Future {
     val data = payload.buildString(true)
     HttpRequest(
       method = HttpMethods.POST,
@@ -279,6 +280,9 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
           val entity = (XhtmlParser(scala.io.Source.fromString(en.data.utf8String)) \\ "FaultMessage").text
           val error = new IOException(s"request failed with status ${response.status} and error: $entity")
           log.error(error, s"unsuccessful response from server: $entity")
+          if (entity == "invalid session") {
+            self ! VoidSession(auth)
+          }
           Future.failed(error)
         }
       case (Failure(e), _) ⇒ Future.failed(e)
@@ -290,23 +294,23 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
   def getLogin(auth: ZuoraAuth): Future[Session] = {
     loginN += 1
     log.debug("trying to login for the {} time", loginN)
-    xmlRequest(auth.xml, loginN.toString, connectionPool)
+    xmlRequest(auth.xml, loginN.toString, connectionPool, auth)
       .flatMap(r ⇒ Session.fromHttpEntity(r.entity, auth.host))
   }
 
   def runQueryMore(qMore: QueryMore, auth: ZuoraAuth, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
     val xml = qMore.xml(batchSize, sessionHeader.id)
-    xmlRequest(xml, qMore.queryId, connectionPool)
+    xmlRequest(xml, qMore.queryId, connectionPool, auth)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
-  def runQuery(queryId: String, zoql: String, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
+  def runQuery(queryId: String, zoql: String, batchSize: Int, auth: ZuoraAuth)(sessionHeader: Session): Future[QueryResult] = {
     log.debug("running query '{}': {}", queryId, zoql)
 
     val q = FirstQuery(zoql, queryId)
     val xml = q.xml(batchSize, sessionHeader.id)
 
-    xmlRequest(xml, q.queryId, connectionPool)
+    xmlRequest(xml, q.queryId, connectionPool, auth)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
@@ -325,7 +329,7 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
 
     case RunZOQLQuery(queryId, zoql, batchSize, auth) ⇒
       memoizedSession(auth)
-        .flatMap(runQuery(queryId, zoql, batchSize))
+        .flatMap(runQuery(queryId, zoql, batchSize, auth))
         .recover {
           case e: Exception ⇒ QueryFailed(e)
         } pipeTo sender()
