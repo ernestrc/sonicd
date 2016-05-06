@@ -1,8 +1,8 @@
 FROM java:openjdk-8-jdk
 
 # config, mainjar, logs and data folders respectively
-RUN mkdir /etc/sonicd/; mkdir /usr/local/sonicd; mkdir /var/log/sonicd; mkdir /var/sonicd
-RUN chmod 0775 /etc/sonicd; chmod 0775 /usr/local/sonicd; chmod 0775 /var/log/sonicd/; chmod 0775 /var/sonicd
+RUN mkdir /etc/sonicd/; mkdir /usr/local/sonicd; mkdir /var/log/sonicd; mkdir /var/lib/sonicd;
+RUN chmod 0775 /etc/sonicd; chmod 0775 /usr/local/sonicd; chmod 0775 /var/log/sonicd/; chmod 0775 /var/lib/sonicd
 
 ENV configfolder /etc/sonicd/
 ENV lib /var/lib/sonicd/*
