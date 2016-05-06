@@ -5,18 +5,17 @@ import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.pattern._
-import akka.http.scaladsl.model._
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.{BuildInfo, SonicdConfig, Sonicd}
+import build.unstable.sonicd.{BuildInfo, Sonicd, SonicdConfig}
 import spray.json._
 
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
-import scala.util.{Try, Failure, Success}
+import scala.util.{Failure, Success}
 
 class PrestoSource(config: JsObject, queryId: String, query: String, context: ActorContext)
   extends DataSource(config, queryId, query, context) {
@@ -35,7 +34,9 @@ class PrestoSource(config: JsObject, queryId: String, query: String, context: Ac
       context.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
     }
 
-    Props(classOf[PrestoPublisher], queryId, query, prestoSupervisor, masterUrl)
+    Props(classOf[PrestoPublisher], queryId, query, prestoSupervisor,
+      masterUrl, SonicdConfig.PRESTO_MAX_RETRIES,
+      SonicdConfig.PRESTO_RETRYIN)
   }
 }
 
@@ -258,11 +259,14 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
 
 }
 
-class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, masterUrl: String)
+class PrestoPublisher(queryId: String, query: String,
+                      supervisor: ActorRef, masterUrl: String,
+                      maxRetries: Int, retryIn: FiniteDuration)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
   import Presto._
   import akka.stream.actor.ActorPublisherMessage._
+  import context.dispatcher
 
   //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 1.minute
@@ -270,6 +274,7 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
     log.info(s"stopping presto publisher of '$queryId' pointing at '$masterUrl'")
+    retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
   }
 
   @throws[Exception](classOf[Exception])
@@ -322,6 +327,8 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
   var bufferedMeta: Boolean = false
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
   var lastQueryResults: Option[QueryResults] = None
+  var retryScheduled: Option[Cancellable] = None
+  var retried = 0
 
   def connected: Receive = commonReceive orElse {
 
@@ -349,9 +356,17 @@ class PrestoPublisher(queryId: String, query: String, supervisor: ActorRef, mast
 
         case "FAILED" ⇒
           val e = new Exception(r.error.get.message)
-          //FIXME
-          log.warning("FIXME >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> {}", r)
-          context.become(terminating(DoneWithQueryExecution.error(e)))
+          r.error.get.errorCode match {
+            case 65540 /* PAGE_TRANSPORT_TIMEOUT */ if retried < maxRetries ⇒
+              retried += 1
+              log.warning("retrying query '{}' for the {} time in {}: {}",
+                query, retried, retryIn, r.error.get)
+              retryScheduled = Some(context.system.scheduler
+                .scheduleOnce(retryIn, supervisor, PostQuery(queryId, query)))
+            case _ ⇒
+              log.warning("query failed {}; retried {}", r, retried)
+              context.become(terminating(DoneWithQueryExecution.error(e)))
+          }
 
         case state ⇒
           val e = new Exception(s"unexpected query state from presto $state")

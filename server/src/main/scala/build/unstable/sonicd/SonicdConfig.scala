@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.collection.JavaConversions._
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{FiniteDuration, Duration}
 
 import scala.util.Try
 
@@ -47,8 +47,8 @@ abstract class FromResourcesConfig(config: Config) {
   val ENDPOINT_TIMEOUT: Timeout = Timeout(config.getDuration("sonicd.endpoint-timeout", TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
   lazy val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.presto")
-  lazy val PRESTO_RETRYIN = config.getInt("sonicd.presto.retry-in")
-  lazy val PRESTO_RETRY_MULTIPLIER = config.getInt("sonicd.presto.retry-multiplier")
+  lazy val PRESTO_RETRYIN: FiniteDuration = FiniteDuration(config.getDuration("sonicd.presto.retry-in").getSeconds, TimeUnit.SECONDS)
+  lazy val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
   lazy val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
   lazy val PRESTO_APIV = "v1"
 }
