@@ -174,8 +174,7 @@ class JdbcExecutor(queryId: String,
     val buf = ListBuffer.empty[String]
     for (s ← query.split(";")) {
       val trim = s.trim()
-      if (trim != "" && !trim.startsWith("--"))
-        buf.append(trim)
+      if (trim != "") buf.append(trim)
     }
     buf.toList
   }
@@ -192,8 +191,8 @@ class JdbcExecutor(queryId: String,
   def extractValue[T](v: T)(c: (T) ⇒ JsValue): JsValue =
     if (v != null) c(v) else JsNull
 
-  def terminate() = {
-    context.parent ! DoneWithQueryExecution(success = true, Vector.empty)
+  def terminate(done: DoneWithQueryExecution) = {
+    context.parent ! done
     context.stop(self)
   }
 
@@ -238,7 +237,7 @@ class JdbcExecutor(queryId: String,
       }
       if (isDone && n > 0) {
         log.debug("stopping: last row extracted")
-        terminate()
+        terminate(DoneWithQueryExecution.success)
       }
   }
 
@@ -252,7 +251,11 @@ class JdbcExecutor(queryId: String,
       }
 
       val statements = splitBatch(query)
-      if (statements.foldLeft(true)((acc, u) ⇒ { val isResultSet = stmt.execute(u); acc && isResultSet })) {
+      log.debug("split query into statements: {}", statements)
+
+      if (statements.isEmpty) {
+        terminate(DoneWithQueryExecution.error(new Exception("nothing to run")))
+      } else if (statements.foldLeft(true)((acc, u) ⇒ { val isResultSet = stmt.execute(u); acc && isResultSet })) {
         rs = stmt.getResultSet
         val rsmd = rs.getMetaData
         val columnCount = rsmd.getColumnCount
@@ -280,9 +283,9 @@ class JdbcExecutor(queryId: String,
       } else {
         conn.commit()
         context.parent ! TypeMetadata(Vector.empty) //n at least will be 1
-        if (n - 1 > 0) terminate()
+        if (n - 1 > 0) terminate(DoneWithQueryExecution.success)
         else context.become({
-          case r: Request ⇒ terminate()
+          case r: Request ⇒ terminate(DoneWithQueryExecution.success)
         })
       }
   }

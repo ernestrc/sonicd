@@ -107,7 +107,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery("CREATE TABLE test3(id VARCHAR)")()
       runQuery("INSERT INTO test3 (id) VALUES ('1234')")()
 
-      val pub = newPublisher("select id from test3")
+      val pub = newPublisher("-- THIS IS A COMMENT\nselect id from test3")
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
@@ -156,7 +156,8 @@ class JdbcSourceSpec(_system: ActorSystem)
     "close connection after running multiple statements" in {
       runQuery("CREATE TABLE girona(id VARCHAR)")()
       val pub = newPublisher(
-        "INSERT INTO girona (id) VALUES ('X');" +
+        "-- THIS IS A COMMENT" +
+          "INSERT INTO girona (id) VALUES ('X');" +
           "INSERT INTO girona (id) VALUES ('B');" +
           "INSERT INTO girona (id) VALUES ('C');")
       pub ! ActorPublisherMessage.Request(1)

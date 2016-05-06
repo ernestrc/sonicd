@@ -82,6 +82,7 @@ package object model {
   }
 
   object DoneWithQueryExecution {
+    val success: DoneWithQueryExecution = DoneWithQueryExecution(success = true, Vector.empty)
     def error(e: Throwable): DoneWithQueryExecution =
       DoneWithQueryExecution(success = false, Vector(e))
   }
