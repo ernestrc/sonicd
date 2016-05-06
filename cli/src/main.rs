@@ -43,6 +43,7 @@ Options:
   --file, -f            run command from file
   -c <config>           use config file (default: $HOME/.sonicrc)
   -d                    inject variable name to value (i.e. -d foo=bar)
+  --silent, -S          output data only
   -r, --rows-only       print rows only
   -h, --help            show this message
   --version             show daemon and cli version
@@ -73,7 +74,7 @@ fn _main(args: Args) -> Result<Receipt> {
 
         println!("sonic cli version {} ({}); daemon version {}",
         VERSION,
-        COMMIT.unwrap_or_else(|| "unknown-commit"),
+        COMMIT.unwrap_or_else(|| "dev"),
         daemon_v);
         return Ok(Receipt::success());
     };
@@ -111,20 +112,22 @@ fn _main(args: Args) -> Result<Receipt> {
     };
 
     let fn_prog = |msg: SonicMessage| {
-        let fields = msg.payload.unwrap();
-        fields.find("progress").and_then(|p| {
-            p.as_f64().map(|pi| {
-                if pi >= 99.0 {
-                    pb.finish();
-                } else if pi >= 1.0 {
-                    pb.add(pi as usize);
-                }
-            })
-        });
-        fields.find("output")
-            .and_then(|o| o.as_string().map(|os| {
-                io::stderr().write(&format!("{}", os).as_bytes()).unwrap();
-            }));
+        if !args.flag_silent {
+            let fields = msg.payload.unwrap();
+            fields.find("progress").and_then(|p| {
+                p.as_f64().map(|pi| {
+                    if pi >= 99.0 {
+                        pb.finish();
+                    } else if pi >= 1.0 {
+                        pb.add(pi as usize);
+                    }
+                })
+            });
+            fields.find("output")
+                .and_then(|o| o.as_string().map(|os| {
+                    io::stderr().write(&format!("{}\r", os).as_bytes()).unwrap();
+                }));
+        }
     };
 
     try!(stream(query, &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta)
