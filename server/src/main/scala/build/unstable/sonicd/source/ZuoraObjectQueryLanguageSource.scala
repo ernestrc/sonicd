@@ -12,11 +12,12 @@ import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
-import spray.json._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ZuoraService._
-import build.unstable.sonicd.{SonicdConfig, Sonicd}
+import build.unstable.sonicd.{Sonicd, SonicdConfig}
+import spray.json._
 
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.matching.Regex
@@ -77,32 +78,39 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
     log.debug(s"stopping ZOQLPublisher of '$queryId'")
   }
 
-  def zObjectsToOutputChunk(fields: Vector[String], v: Vector[ZuoraService.RawZObject]): Vector[SonicMessage] =
-    Try {
-      // unfortunately zuora doesn't give us any type information at runtime
-      // the only way to pass type information would be to hardcode types in the table describes
-      val meta = TypeMetadata(fields.map(_ → JsString.empty))
-      Vector(meta) ++ v.map { n ⇒
-        val child = n.xml.child
-        val values = fields.map(k ⇒ child.find(_.label equalsIgnoreCase k).map(_.text).getOrElse(""))
-        OutputChunk(values)
-      }
-    }.recover {
-      case e: Exception ⇒
-        throw new Exception(s"could not parse ZObject: ${e.getMessage}", e)
-    }.get
-
-  def getEffectiveBatchSize(lim: Option[Int]): Int =
-    lim.map(i ⇒ Math.min(i, batchSize)).getOrElse(batchSize)
-
+  // STATE
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
+  var streamed = 0
+  var effectiveBatchSize: Int = batchSize //can be overriden if query has limit
+  var metaSent = false
 
+  // HELPERS
   def stream() {
     while (buffer.nonEmpty && totalDemand > 0) {
       onNext(buffer.dequeue())
     }
   }
 
+  def zObjectsToOutputChunk(fields: Vector[String], v: Vector[ZuoraService.RawZObject]): Vector[SonicMessage] =
+    Try {
+      val buf: ListBuffer[SonicMessage] = if (!metaSent) {
+        metaSent = true
+        ListBuffer(TypeMetadata(fields.map(_ → JsString.empty)))
+      } else ListBuffer.empty[SonicMessage]
+      // unfortunately zuora doesn't give us any type information at runtime
+      // the only way to pass type information would be to hardcode types in the table describes
+       v.foreach { n ⇒
+        val child = n.xml.child
+        val values = fields.map(k ⇒ child.find(_.label equalsIgnoreCase k).map(_.text).getOrElse(""))
+        buf.append(OutputChunk(values))
+      }
+      buf.to[Vector]
+    }.recover {
+      case e: Exception ⇒
+        throw new Exception(s"could not parse ZObject: ${e.getMessage}", e)
+    }.get
+
+  // RECEIVE
   def streaming(streamLimit: Option[Int], completeBufEmpty: Boolean, zoql: String, colNames: Vector[String]): Receive = {
 
     case Request(n) ⇒
@@ -113,8 +121,8 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
 
     case res: QueryResult ⇒
       val totalSize = res.size
-      val effectiveBatchSize = getEffectiveBatchSize(streamLimit)
-      if (res.done || streamLimit.isDefined && effectiveBatchSize < streamLimit.get) {
+
+      if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
         log.info(s"successfully fetched $totalSize zuora objects")
         self ! DoneWithQueryExecution(success = true)
       } else {
@@ -195,6 +203,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
             Try(ZuoraService.LIMIT.findFirstMatchIn(query).map(_.group("lim").toInt)) match {
               case Success(Some(i)) ⇒
                 log.debug("parsed query limit {}", i)
+                effectiveBatchSize = Math.min(i, batchSize)
                 Some(i)
               case _ ⇒ None
             }
@@ -202,7 +211,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
           val col = extractSelectColumnNames(query)
           log.debug("extracted column names: {}", col)
 
-          service ! ZuoraService.RunZOQLQuery(queryId, query, getEffectiveBatchSize(lim), auth)
+          service ! ZuoraService.RunZOQLQuery(queryId, query, effectiveBatchSize, auth)
 
           (false, col, lim)
         }
