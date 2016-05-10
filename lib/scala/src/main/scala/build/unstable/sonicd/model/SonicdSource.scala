@@ -15,7 +15,7 @@ object SonicdSource {
 
   class IncompleteStreamException extends Exception("stream was closed before done event was sent")
 
-  class SonicProtocolStage
+  case object SonicProtocolStage
     extends GraphStage[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage]] {
     val in1: Inlet[ByteString] = Inlet("ServerIncoming")
     val out2: Outlet[SonicMessage] = Outlet("ClientOutgoing")
@@ -50,10 +50,11 @@ object SonicdSource {
           close = None
         }
 
+        //conn in
         setHandler(in1, new InHandler {
 
           @throws[Exception](classOf[Exception])
-          override def onUpstreamFailure(ex: Throwable): Unit = super.onUpstreamFailure(ex)
+          override def onUpstreamFailure(ex: Throwable): Unit = failStage(ex)
 
           @throws[Exception](classOf[Exception])
           override def onUpstreamFinish(): Unit =
@@ -74,7 +75,7 @@ object SonicdSource {
           }
         })
 
-        //query in
+        //client in
         setHandler(in2, new InHandler {
 
           @throws[Exception](classOf[Exception])
@@ -93,6 +94,7 @@ object SonicdSource {
           }
         })
 
+        //conn out
         setHandler(out1, new OutHandler {
 
           @throws[Exception](classOf[Exception])
@@ -108,6 +110,7 @@ object SonicdSource {
           }
         })
 
+        //client outnew
         setHandler(out2, new OutHandler {
 
           @throws[Exception](classOf[Exception])
@@ -135,7 +138,9 @@ object SonicdSource {
         fieldOffset = 0,
         maximumFrameLength = 1000000 /* 1 MB */ ,
         byteOrder = ByteOrder.BIG_ENDIAN)
-      )
+      ).recover {
+      case e: Exception ⇒ DoneWithQueryExecution.error(e).toBytes
+    }
 
   /**
    * runs the given query against the sonicd instance
@@ -149,6 +154,7 @@ object SonicdSource {
     run(query, Tcp().outgoingConnection(address))
   }
 
+  //FIXME seems to complete when tcp connection throws exception
   def run(query: Query,
           connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
@@ -162,7 +168,7 @@ object SonicdSource {
           import GraphDSL.Implicits._
 
           val conn = b.add(connection)
-          val protocol = b.add(new SonicProtocolStage)
+          val protocol = b.add(SonicProtocolStage)
           val framing = b.add(framingStage)
           val q = b.add(Source.single(query))
 
@@ -189,6 +195,8 @@ object SonicdSource {
     stream(query, Tcp().outgoingConnection(address))
   }
 
+  //FIXME seems to not bubble up exception from tcp connection
+  //instead throws NoSuchElement (in Sink.last)
   def stream(query: Query, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
             (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
 
@@ -210,7 +218,7 @@ object SonicdSource {
 
           val q = b.add(Source.single(query))
           val conn = b.add(connection)
-          val protocol = b.add(new SonicProtocolStage())
+          val protocol = b.add(SonicProtocolStage)
           val framing = b.add(framingStage)
           val bcast = b.add(Broadcast[SonicMessage] (2))
 

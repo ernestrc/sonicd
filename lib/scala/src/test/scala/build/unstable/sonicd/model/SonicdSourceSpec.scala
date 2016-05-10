@@ -13,7 +13,7 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.Future
 
-class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll with ScalaFutures {
+class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll with ScalaFutures {
 
   val tcpError = "TCPBOOM"
 
@@ -23,7 +23,7 @@ class SonicSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll 
   implicit val mat = ActorMaterializer(ActorMaterializerSettings(system))
 
   val clientProtocol: Graph[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage], _] =
-    new SonicProtocolStage()
+    SonicProtocolStage
 
   val tcpFailure1: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
     Flow.fromSinkAndSource(Sink.ignore, Source.failed(new TcpException))
