@@ -15,6 +15,7 @@ use std::option::Option;
 use nix::sys::epoll::*;
 use std::rc::Rc;
 use std::cell::Cell;
+use std::net::TcpListener;
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONICD_COMMIT");
@@ -45,8 +46,7 @@ fn main() {
 
     assert_eq!(rx.iter().take(n_jobs).fold(0, |a, b| a + b), 28);
 
-    ::ws::listen("127.0.0.1:9111", |out| WsHandler::new(out, count.clone())) .unwrap()
-
+    //::ws::listen("127.0.0.1:9111", |out| WsHandler::new(out, count.clone())) .unwrap();
 
     // let epfd = epoll_create().unwrap();
 

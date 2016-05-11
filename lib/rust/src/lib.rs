@@ -12,6 +12,7 @@ mod api;
 mod tcp;
 mod model;
 mod ws;
+mod io;
 
 pub use api::{run, version, stream};
 pub use model::{Query, SonicMessage, Receipt, Error, ClientConfig};
