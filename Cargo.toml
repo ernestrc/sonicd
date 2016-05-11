@@ -4,12 +4,16 @@ version = "0.4.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 
 [lib]
-name = "sonicd"
+name = "libsonicd"
 path = "lib/rust/src/lib.rs"
 
 [[bin]]
 name = "sonic"
 path = "cli/src/main.rs"
+
+[[bin]]
+name = "sonicc"
+path = "cache/src/main.rs"
 
 [dependencies]
 serde = "*"
@@ -20,12 +24,17 @@ curl = "*"
 nix = "*"
 log = "*"
 
+# cli
 regex = "*"
-docopt = "0.6"
-docopt_macros = "0.6"
-rustc-serialize = "0.3"
+docopt = "*"
+docopt_macros = "*"
+rustc-serialize = "*"
 env_logger = "*"
 pbr = "*"
+
+# cache
+threadpool = "*"
+ws = "*"
 
 #[profile.release]
 #debug = true

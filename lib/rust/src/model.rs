@@ -91,6 +91,22 @@ impl fmt::Display for Error {
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 impl Query {
+    pub fn from_msg(msg: SonicMessage) -> Result<Query> {
+        match (msg.event_type.as_ref(), &msg.variation, &msg.payload) {
+            ("Q", &Some(ref query), &Some(ref config)) => {
+                Ok(Query {
+                    query_id: None,
+                    query: query.to_owned(),
+                    config: config.to_owned(),
+                })
+            }
+            _ => {
+                Err(Error::SerDe(format!("message cannot be deserialized into a query: {:?}",
+                                         &msg)))
+            }
+        }
+    }
+
     pub fn into_msg(&self) -> SonicMessage {
         SonicMessage {
             event_type: "Q".to_owned(),
@@ -107,6 +123,36 @@ impl SonicMessage {
             variation: None,
             payload: None,
         }
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        ::serde_json::to_string(&self).unwrap().into_bytes()
+    }
+
+    pub fn from_slice(slice: &[u8]) -> Result<SonicMessage> {
+        ::serde_json::from_slice::<SonicMessage>(slice).map_err(|e| {
+            let json_str = ::std::str::from_utf8(slice);
+            Error::SerDe(format!("error unmarshalling SonicMessage '{:?}': {}", json_str, e))
+        })
+    }
+
+    // DoneWithQueryExecution error
+    pub fn done<T>(e: Result<T>) -> SonicMessage {
+        let (s, e) = if e.is_ok() {
+            ("success".to_owned(), Value::Null)
+        } else {
+            ("error".to_owned(),
+             Value::Array(vec![Value::String(format!("{}", e.err().unwrap()))]))
+        };
+        SonicMessage {
+            event_type: "D".to_owned(),
+            variation: Some(s),
+            payload: Some(e),
+        }
+    }
+
+    pub fn from_bytes(buf: Vec<u8>) -> Result<SonicMessage> {
+        Self::from_slice(buf.as_slice())
     }
 
     fn payload_into_errors(payload: Option<Value>) -> Vec<String> {
@@ -145,10 +191,10 @@ impl Receipt {
         }
     }
 
-    pub fn error(msg: String) -> Receipt {
+    pub fn error(e: Error) -> Receipt {
         Receipt {
             success: false,
-            errors: vec![msg],
+            errors: vec![format!("{}", e)],
             message: None,
             request_id: None,
         }

@@ -1,12 +1,10 @@
-use model::{Query, SonicMessage, Receipt, Error, Result};
-use std::net::TcpStream;
+use model::{SonicMessage, Error, Result};
 use std::net::SocketAddr;
 use std::fmt::Display;
-use std::io::{Write, Cursor};
+use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use nix::unistd;
 use nix::errno::Errno::*;
-use std::os::unix::io::AsRawFd;
 
 fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
     match unistd::read(fd, buf) {
@@ -43,7 +41,22 @@ fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
     }
 }
 
-fn get_message(fd: &i32) -> Result<SonicMessage> {
+fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
+    format!("{}:{}", addr, port)
+        .parse::<SocketAddr>()
+        .map_err(|e| Error::ParseAddr(e))
+}
+
+pub fn frame(msg: SonicMessage) -> Vec<u8> {
+    let qbytes = msg.into_bytes();
+    let qlen = qbytes.len() as i32;
+    let mut fbytes = Vec::new();
+    fbytes.write_i32::<BigEndian>(qlen).unwrap();
+    fbytes.extend(qbytes.as_slice());
+    fbytes
+}
+
+pub fn read_message(fd: &i32) -> Result<SonicMessage> {
 
     let len_buf = &mut [0; 4];
 
@@ -60,19 +73,10 @@ fn get_message(fd: &i32) -> Result<SonicMessage> {
     // read message bytes
     try!(read(len, *fd, buf.as_mut_slice()));
 
-    ::serde_json::from_slice::<SonicMessage>(buf.as_slice()).map_err(|e| {
-        let json_str = String::from_utf8(buf);
-        Error::SerDe(format!("error unmarshalling SonicMessage '{:?}': {}", json_str, e))
-    })
+    SonicMessage::from_slice(buf.as_slice())
 }
 
-fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
-    format!("{}:{}", addr, port)
-        .parse::<SocketAddr>()
-        .map_err(|e| Error::ParseAddr(e))
-}
-
-fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
+pub fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
     parse_addr(addr, port).or_else(|_| {
         ::std::net::lookup_host(&addr)
             .map_err(|e| Error::GetAddr(e))
@@ -83,75 +87,4 @@ fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
                  .map(|a| SocketAddr::new(a.ip(), *port))
             })
     })
-}
-
-fn frame(msg: SonicMessage) -> Vec<u8> {
-    let qbytes = ::serde_json::to_string(&msg).unwrap().into_bytes();
-    let qlen = qbytes.len() as i32;
-    let mut fbytes = Vec::new();
-    fbytes.write_i32::<BigEndian>(qlen).unwrap();
-    fbytes.extend(qbytes.as_slice());
-    fbytes
-}
-
-pub fn stream<O, P, M>(query: Query,
-                       addr: &str,
-                       port: &u16,
-                       mut output: O,
-                       mut progress: P,
-                       mut metadata: M)
-                       -> Result<()>
-    where O: FnMut(SonicMessage) -> (),
-          P: FnMut(SonicMessage) -> (),
-          M: FnMut(SonicMessage) -> ()
-{
-    let addr = try!(get_addr(addr, port));
-
-    debug!("resolved host and port to addr {}", addr);
-
-    let mut res = Receipt::error("protocol error. socket closed before done".to_owned());
-
-    let mut stream = try!(TcpStream::connect(&addr).map_err(|e| Error::Connect(e)));
-
-    // set timeout 10s
-    stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))).unwrap();
-
-    // frame query
-    let fbytes = frame(query.into_msg());
-
-    // send query
-    stream.write(&fbytes.as_slice()).unwrap();
-
-    let fd = stream.as_raw_fd();
-
-    loop {
-        match get_message(&fd) {
-            Ok(msg) => {
-                match msg.event_type.as_ref() {
-                    "O" => output(msg),
-                    "P" => progress(msg),
-                    "T" => metadata(msg),
-                    "D" => {
-                        res = msg.into_rec();
-                        let fbytes = frame(SonicMessage::ack());
-                        // send ack
-                        stream.write(&fbytes.as_slice()).unwrap();
-                        debug!("disconnected");
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            Err(r) => {
-                res = Receipt::error(format!("{}", r));
-                break;
-            }
-        }
-    }
-
-    if res.success {
-        Ok(())
-    } else {
-        Err(Error::StreamError(res))
-    }
 }

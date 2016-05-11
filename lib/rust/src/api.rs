@@ -1,7 +1,10 @@
-use model::{Query, Error, Result, SonicMessage};
+use model::{Query, Error, Result, SonicMessage, Receipt};
 use std::collections::HashMap;
 use curl::http::{Response, Request, Handle};
 use curl::http::handle::Method;
+use std::net::TcpStream;
+use std::io::Write;
+use std::os::unix::io::AsRawFd;
 
 static API_VERSION: &'static str = "v1";
 
@@ -39,6 +42,69 @@ fn request(path: &str,
     res.map_err(|e| Error::HttpError(e))
 }
 
+pub fn stream<O, P, M>(query: Query,
+                       addr: &str,
+                       port: &u16,
+                       mut output: O,
+                       mut progress: P,
+                       mut metadata: M)
+                       -> Result<()>
+    where O: FnMut(SonicMessage) -> (),
+          P: FnMut(SonicMessage) -> (),
+          M: FnMut(SonicMessage) -> ()
+{
+    let addr = try!(::tcp::get_addr(addr, port));
+
+    debug!("resolved host and port to addr {}", addr);
+
+    let mut res = Receipt::error(Error::ProtocolError("protocol error. socket closed before done"
+                                                          .to_owned()));
+
+    let mut stream = try!(TcpStream::connect(&addr).map_err(|e| Error::Connect(e)));
+
+    // set timeout 10s
+    stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))).unwrap();
+
+    // frame query
+    let fbytes = ::tcp::frame(query.into_msg());
+
+    // send query
+    stream.write(&fbytes.as_slice()).unwrap();
+
+    let fd = stream.as_raw_fd();
+
+    loop {
+        match ::tcp::read_message(&fd) {
+            Ok(msg) => {
+                match msg.event_type.as_ref() {
+                    "O" => output(msg),
+                    "P" => progress(msg),
+                    "T" => metadata(msg),
+                    "D" => {
+                        res = msg.into_rec();
+                        let fbytes = ::tcp::frame(SonicMessage::ack());
+                        // send ack
+                        stream.write(&fbytes.as_slice()).unwrap();
+                        debug!("disconnected");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            Err(r) => {
+                res = Receipt::error(r);
+                break;
+            }
+        }
+    }
+
+    if res.success {
+        Ok(())
+    } else {
+        Err(Error::StreamError(res))
+    }
+}
+
 pub fn run(query: Query, host: &str, tcp_port: &u16) -> Result<Vec<SonicMessage>> {
 
     let mut buf = Vec::new();
@@ -48,7 +114,7 @@ pub fn run(query: Query, host: &str, tcp_port: &u16) -> Result<Vec<SonicMessage>
             buf.push(msg);
         };
 
-        try!(::tcp::stream(query, host, tcp_port, fn_buf, |_| {}, |_| {}));
+        try!(stream(query, host, tcp_port, fn_buf, |_| {}, |_| {}));
     }
 
     Ok(buf)

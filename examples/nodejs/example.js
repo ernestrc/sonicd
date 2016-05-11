@@ -14,19 +14,19 @@ var query = {
 
 var client = new Client('ws://localhost:9111');
 
-client.exec(query, function(err, res) {
-  if (err) {
-    console.log(err);
-    return;
-  }
-
-  res.forEach(function(e) {
-    console.log(e);
-  });
-
-  console.log('exec is done!');
-
-});
+//client.exec(query, function(err, res) {
+//  if (err) {
+//    console.log(err);
+//    return;
+//  }
+//
+//  res.forEach(function(e) {
+//    console.log(e);
+//  });
+//
+//  console.log('exec is done!');
+//
+//});
 
 var done = 0;
 var stream = client.stream(query);

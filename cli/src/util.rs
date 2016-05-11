@@ -1,4 +1,4 @@
-use sonicd::{Receipt, Query, ClientConfig};
+use libsonicd::{Receipt, Query, ClientConfig};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::process::Command;

@@ -9,13 +9,13 @@ extern crate docopt;
 extern crate rustc_serialize;
 extern crate env_logger;
 #[macro_use] extern crate log;
-#[macro_use] extern crate sonicd;
+#[macro_use] extern crate libsonicd;
 
 mod util;
 
 use std::path::PathBuf;
 use pbr::ProgressBar;
-use sonicd::*;
+use libsonicd::*;
 use util::*;
 use std::process;
 use std::io::{Write, self};
