@@ -58,7 +58,19 @@ object Build extends sbt.Build {
           "org.scalatest" %% "scalatest" % "2.2.5" % "test"
         )
       }
-    )
+    ).disablePlugins(com.twitter.scrooge.ScroogeSBT)
+
+  val hive: Project = Project("sonicd-hive", file("server/hive"))
+    .settings(commonSettings: _*)
+    .settings(
+      assemblyStrategy,
+      libraryDependencies ++= {
+        Seq(
+          "org.apache.thrift" % "libthrift" % "0.8.0",
+          "com.twitter" %% "scrooge-core" % "4.6.0",
+          "com.twitter" %% "finagle-thrift" % "6.34.0"
+        )
+      }).dependsOn(core)
 
   val server: Project = Project("sonicd-server", file("server"))
     .settings(Revolver.settings: _*)
@@ -90,7 +102,8 @@ object Build extends sbt.Build {
         )
       }
     )
-    .dependsOn(core % "compile->compile;test->test")
+    .disablePlugins(com.twitter.scrooge.ScroogeSBT)
+    .dependsOn(core % "compile->compile;test->test", hive)
 
   val examples = Project("sonicd-examples", file("examples/scala"))
     .settings(Revolver.settings: _*)
@@ -103,4 +116,5 @@ object Build extends sbt.Build {
         )
       }
     ).dependsOn(core)
+    .disablePlugins(com.twitter.scrooge.ScroogeSBT)
 }

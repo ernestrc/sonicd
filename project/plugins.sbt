@@ -15,3 +15,7 @@ addSbtPlugin("com.eed3si9n" % "sbt-buildinfo" % "0.5.0")
 addSbtPlugin("com.typesafe.sbt" % "sbt-git" % "0.8.5")
 
 addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
+
+resolvers += "twitter-repo" at "https://maven.twttr.com"
+
+addSbtPlugin("com.twitter" % "scrooge-sbt-plugin" % "4.6.0")
