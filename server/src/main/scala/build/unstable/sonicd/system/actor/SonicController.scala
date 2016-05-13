@@ -1,13 +1,11 @@
 package build.unstable.sonicd.system.actor
 
 import java.net.InetAddress
-import java.nio.charset.Charset
 
 import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.pattern._
-import akka.util.{ByteString, Timeout}
+import akka.util.Timeout
 import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}

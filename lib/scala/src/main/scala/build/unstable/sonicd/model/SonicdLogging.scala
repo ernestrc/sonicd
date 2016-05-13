@@ -44,14 +44,15 @@ trait SonicdLogging extends TypedLogging {
 
   case object ExecuteStatement extends CallType
 
-  case object GetJdbcHandle extends CallType
+  case object GetConnectionHandle extends CallType
 
   case object RunInitializationStatements extends CallType
 
   case class RetryStatement(n: Int) extends CallType
 
   case class HttpReq(method: String, endpoint: String) extends CallType
-
+  
+  case class ThriftReq(req: String) extends CallType
 
   case object DownloadHttpBody extends CallType
 

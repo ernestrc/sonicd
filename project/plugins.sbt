@@ -18,4 +18,4 @@ addSbtPlugin("me.lessis" % "bintray-sbt" % "0.3.0")
 
 resolvers += "twitter-repo" at "https://maven.twttr.com"
 
-addSbtPlugin("com.twitter" % "scrooge-sbt-plugin" % "4.6.0")
+addSbtPlugin("com.twitter" % "scrooge-sbt-plugin" % "4.8.0")

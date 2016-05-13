@@ -121,14 +121,14 @@ class JdbcPublisher(query: String,
 
   def waitingForHandle: Receive = {
     case j@JdbcHandle(conn, stmt) ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Success, "received jdbc handle")
+      trace(log, ctx.traceId, GetConnectionHandle, Variation.Success, "received jdbc handle")
       handle = j
       val executor = context.actorOf(executorProps(conn, stmt))
       context.watch(executor)
       context.become(streaming(executor))
 
     case r: DoneWithQueryExecution ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
+      trace(log, ctx.traceId, GetConnectionHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
       onNext(r)
       onCompleteThenStop()
   }
@@ -141,7 +141,7 @@ class JdbcPublisher(query: String,
 
     //first time client requests
     case Request(n) ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Attempt, "")
+      trace(log, ctx.traceId, GetConnectionHandle, Variation.Attempt, "")
       connections ! JdbcConnectionsHandler.GetJdbcHandle(isSelect(query), driver, dbUrl, user, password)
       log.debug("waiting for handle of {}", dbUrl)
       context.become(waitingForHandle, discardOld = false)

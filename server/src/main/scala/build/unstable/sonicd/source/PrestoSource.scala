@@ -370,4 +370,4 @@ class PrestoPublisher(traceId: String, query: String,
       tryPushDownstream()
       context.become(materialized)
   }
-}
+ }
