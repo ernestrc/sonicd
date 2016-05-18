@@ -1,4 +1,4 @@
-use libsonicd::{Receipt, Query, ClientConfig};
+use libsonicd::{Receipt, Query, ClientConfig, Result, Error};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -12,8 +12,6 @@ use regex::Regex;
 use std::collections::BTreeMap;
 
 static EDITOR: &'static str = "vim";
-
-pub type Result<T> = ::std::result::Result<T, Receipt>;
 
 fn touch_config(config: &ClientConfig) -> io::Result<()> {
     debug!("Overwriting or creating new configuration file with {:?}",
@@ -53,11 +51,11 @@ fn run_cmd_file(mut cmd: Command, path: PathBuf) -> String {
 pub fn read_file_contents(path: PathBuf) -> Result<String> {
 
     let mut file = try!(File::open(&path).map_err(|e| {
-        Receipt::error(format!("could not open file in '{:?}': {}", &path, e))
+        Error::OtherError(format!("could not open file in '{:?}': {}", &path, e))
     }));
     let mut contents = String::new();
     try!(file.read_to_string(&mut contents)
-             .map_err(|e| Receipt::error(format!("could not read file in '{:?}': {}", &path, e))));
+             .map_err(|e| Error::OtherError(format!("could not read file in '{:?}': {}", &path, e))));
 
     return Ok(contents);
 }
@@ -67,7 +65,7 @@ pub fn read_cfg(path: PathBuf) -> Result<ClientConfig> {
     let contents = try!(read_file_contents(path));
 
     ::serde_json::from_str::<ClientConfig>(&contents.to_string())
-        .map_err(|e| Receipt::error(format!("Could not deserialize config file: {}", e)))
+        .map_err(|e| Error::OtherError(format!("Could not deserialize config file: {}", e)))
 }
 
 
@@ -95,7 +93,7 @@ pub fn source_sonicrc() -> Result<ClientConfig> {
                         ::serde_json::from_str(&run_cmd_file(Command::new(EDITOR), path)).unwrap();
                     Ok(c)
                 }
-                Err(error) => Err(Receipt::error(error.to_string())),
+                Err(error) => Err(Error::OtherError(error.to_string())),
             }
         }
     }
@@ -135,7 +133,7 @@ pub fn split_key_value(vars: &Vec<String>) -> Result<Vec<(String, String)>> {
             m.push((split.next().unwrap().to_string(),
                     split.next().unwrap().to_string()));
         } else {
-            return Err(Receipt::error(format!("Cannot split {}. It should follow format \
+            return Err(Error::OtherError(format!("Cannot split {}. It should follow format \
                                                'key=value'",
                                               var)));
         }
@@ -186,7 +184,7 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
     for var in vars.iter() {
         let k = "${".to_string() + &var.0 + "}";
         if !q.contains(&k) {
-            return Err(Receipt::error(format!("{} not found in template", k)));
+            return Err(Error::OtherError(format!("{} not found in template", k)));
         } else {
             q = q.replace(&k, &var.1);
         }
@@ -197,7 +195,7 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
     // check if some variables were left un-injected
     let re = Regex::new(r"(\$\{.*\})").unwrap();
     if re.is_match(&q) {
-        Err(Receipt::error("Some variables remain uninjected".to_string()))
+        Err(Error::OtherError("Some variables remain uninjected".to_string()))
     } else {
         Ok(q)
     }
@@ -208,9 +206,9 @@ pub fn build(src_alias: &str, mut srcfg: BTreeMap<String, Value>, query: &str) -
     let source_config = srcfg.remove(src_alias);
 
     let config: Value = try!(match source_config {
-        Some(o@Value::Object) => Ok(o),
+        Some(o@Value::Object(_)) => Ok(o),
         None => Ok(Value::String(src_alias.to_owned())),
-        _ => Err(Receipt::error(format!("source '{}' config is not an object", &src_alias))),
+        _ => Err(Error::OtherError(format!("source '{}' config is not an object", &src_alias))),
     });
 
     Ok(Query {

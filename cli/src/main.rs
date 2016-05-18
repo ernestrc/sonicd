@@ -69,8 +69,7 @@ fn _main(args: Args) -> Result<Receipt> {
     } else if args.flag_execute {
         args.arg_query.clone()
     } else {
-        let daemon_v = try!(version(&config.sonicd, &config.http_port)
-                            .map_err(|e| Receipt::error(format!("{}", e))));
+        let daemon_v = try!(version(&config.sonicd, &config.http_port));
 
         println!("sonic cli version {} ({}); daemon version {}",
         VERSION,
@@ -119,7 +118,7 @@ fn _main(args: Args) -> Result<Receipt> {
                     if pi >= 99.0 {
                         pb.finish();
                     } else if pi >= 1.0 {
-                        pb.add(pi as usize);
+                        pb.add(pi as u64);
                     }
                 })
             });
@@ -130,13 +129,7 @@ fn _main(args: Args) -> Result<Receipt> {
         }
     };
 
-    try!(stream(query, &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta)
-         .map_err(|e| {
-             match e {
-                 Error::StreamError(rec) => rec,
-                 e => Receipt::error(format!("{}", e))
-             }
-         }));
+    try!(stream(query, &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta));
 
     Ok(Receipt::success())
 }

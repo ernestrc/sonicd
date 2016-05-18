@@ -56,6 +56,7 @@ pub enum Error {
     ProtocolError(String),
     HttpError(::curl::ErrCode),
     StreamError(Receipt),
+    OtherError(String),
 }
 
 impl fmt::Display for Receipt {
@@ -83,6 +84,7 @@ impl fmt::Display for Error {
             &Error::ProtocolError(ref err) => write!(f, "{}", err),
             &Error::HttpError(ref err) => write!(f, "{}", err),
             &Error::StreamError(ref rec) => write!(f, "{}", rec), 
+            &Error::OtherError(ref rec) => write!(f, "{}", rec), 
         }
     }
 }
