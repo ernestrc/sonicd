@@ -10,9 +10,9 @@ import spray.revolver.RevolverPlugin._
 
 object Sonic extends Build {
 
-  val scalaV = "2.11.7"
-  val akkaV = "2.4.4"
-  val sonicdV = "0.4.2"
+  val scalaV = "2.11.8"
+  val akkaV = "2.4.6"
+  val sonicdV = "0.4.3"
   val sparkV = "1.6.1"
 
   val commonSettings = Seq(

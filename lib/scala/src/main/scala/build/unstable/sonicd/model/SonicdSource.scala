@@ -138,9 +138,7 @@ object SonicdSource {
         fieldOffset = 0,
         maximumFrameLength = 1000000 /* 1 MB */ ,
         byteOrder = ByteOrder.BIG_ENDIAN)
-      ).recover {
-      case e: Exception ⇒ DoneWithQueryExecution.error(e).toBytes
-    }
+      )
 
   /**
    * runs the given query against the sonicd instance
