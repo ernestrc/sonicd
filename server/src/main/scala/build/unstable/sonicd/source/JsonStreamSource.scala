@@ -85,10 +85,10 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
     onCompleteThenStop()
   }
 
-  def filter(json: JsObject, query: Query): Option[OutputChunk] = {
+  def filter(json: JsObject, query: Query): Option[Map[String, JsValue]] = {
     if (query.filter(json)) {
       val fields = json.fields.filter(query.select)
-      Some(OutputChunk(JsArray(fields.values.to[Vector])))
+      Some(fields)
     } else None
   }
 
@@ -102,15 +102,16 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
       val raw = read.get
       val json = raw.parseJson.asJsObject
+      val filtered = filter(json, query)
 
-      if(!sentMeta) {
-        onNext(TypeMetadata(json.fields.toVector))
+      if (!sentMeta && filtered.isDefined) {
+        onNext(TypeMetadata(filtered.get.toVector))
         sentMeta = true
       }
 
-      filter(json, query) match {
-        case Some(chunk) if totalDemand > 0 ⇒ onNext(chunk)
-        case Some(chunk) ⇒ buffer.append(raw)
+      filtered match {
+        case Some(fields) if totalDemand > 0 ⇒ onNext(OutputChunk(JsArray(fields.values.to[Vector])))
+        case Some(fields) ⇒ buffer.append(raw)
         case None ⇒
       }
       stream(fw, br, query)
@@ -122,6 +123,15 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
   case class Query(select: ((String, JsValue)) ⇒ Boolean,
                    filter: JsObject ⇒ Boolean, raw: String)
+
+  def matchObject(arg: JsObject): JsObject ⇒ Boolean = (o: JsObject) ⇒ {
+    val argFields = arg.fields
+    o.fields.forall {
+      case (s: String, b: JsObject) if argFields.get(s).isDefined && argFields(s).isInstanceOf[JsObject]⇒
+        matchObject(argFields(s).asJsObject)(b)
+      case (s: String, b: JsValue) ⇒ arg.fields.forall(kv ⇒ if (kv._1 == s) b == kv._2 else true)
+    }
+  }
 
   /**
    * {
@@ -138,12 +148,8 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
     }.getOrElse((v: (String, JsValue)) ⇒ true)
 
     val f = r.get("filter").map { fo ⇒
-      val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}").fields
-      (o: JsObject) ⇒ {
-        o.fields.forall {
-          case (s: String, b: JsValue) ⇒ fObj.forall(kv ⇒ if (kv._1 == s) b == kv._2 else true)
-        }
-      }
+      val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}")
+      matchObject(fObj)
     }.getOrElse((o: JsObject) ⇒ true)
 
     Query(select, f, raw)
@@ -236,6 +242,7 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
   log.debug("created watcher object {}", watcher)
 
   def watch(): List[WatchEvent[_]] = {
+    //FIXME blocks until file changes. Use with timeout
     val key = watcher.take
     val events = key.pollEvents
 
