@@ -51,6 +51,7 @@ object Sonic extends Build {
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
+          "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
           "com.typesafe.akka" %% "akka-stream" % akkaV,
           "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
           "org.scalatest" %% "scalatest" % "2.2.5" % "test"
@@ -58,7 +59,22 @@ object Sonic extends Build {
       }
     )
 
-  val spark: Project = Project("sonicd-spark", file("server/spark"))
+  val tyLog: Project = Project("tylog", file("tylog"))
+    .settings(commonSettings: _*)
+    .settings(
+      libraryDependencies ++= {
+        Seq(
+          "io.spray" %% "spray-json" % "1.3.2",
+          "com.typesafe.akka" %% "akka-actor" % akkaV,
+          "com.typesafe.akka" %% "akka-slf4j" % akkaV,
+          "com.typesafe.akka" %% "akka-stream" % akkaV,
+          "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
+          "org.scalatest" %% "scalatest" % "2.2.5" % "test"
+        )
+      }
+    )
+
+  lazy val spark: Project = Project("sonicd-spark", file("server/spark"))
     .settings(commonSettings: _*)
     .settings(
       assemblyStrategy,
@@ -77,7 +93,7 @@ object Sonic extends Build {
 
   val AsResource = config("asResource")
 
-  val server: Project = Project("sonicd-server", file("server"))
+  lazy val server: Project = Project("sonicd-server", file("server"))
     .settings(Revolver.settings: _*)
     .settings(commonSettings: _*)
     .settings(net.virtualvoid.sbt.graph.Plugin.graphSettings: _*)
@@ -112,9 +128,9 @@ object Sonic extends Build {
         )
       }
     )
-    .dependsOn(core % "compile->compile;test->test")
+    .dependsOn(core % "compile->compile;test->test", tyLog % "compile->compile")
 
-  val examples = Project("sonicd-examples", file("examples/scala"))
+  lazy val examples = Project("sonicd-examples", file("examples/scala"))
     .settings(Revolver.settings: _*)
     .settings(commonSettings: _*)
     .settings(

@@ -12,6 +12,10 @@ import scala.util.Try
 
 package object model {
 
+  trait Command {
+    def traceId: String
+  }
+
   sealed trait SonicMessage {
 
     val variation: Option[String]
@@ -83,6 +87,7 @@ package object model {
 
   object DoneWithQueryExecution {
     val success: DoneWithQueryExecution = DoneWithQueryExecution(success = true, Vector.empty)
+
     def error(e: Throwable): DoneWithQueryExecution =
       DoneWithQueryExecution(success = false, Vector(e))
   }

@@ -8,7 +8,7 @@ import build.unstable.sonicd.system.SonicController.NewQuery
 import org.reactivestreams._
 
 class WsHandler(controller: ActorRef) extends ActorPublisher[SonicMessage]
-with ActorSubscriber with ActorLogging {
+with ActorSubscriber with SonicdActorLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
   import akka.stream.actor.ActorSubscriberMessage._

@@ -14,7 +14,7 @@ import org.reactivestreams.{Subscriber, Subscription}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 
-class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
+class TcpSupervisor(controller: ActorRef) extends Actor with SonicdActorLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -57,7 +57,7 @@ object TcpHandler {
 }
 
 class TcpHandler(controller: ActorRef, connection: ActorRef)
-  extends Actor with ActorLogging {
+  extends Actor with SonicdActorLogging {
 
   import akka.io.Tcp._
   import TcpHandler._

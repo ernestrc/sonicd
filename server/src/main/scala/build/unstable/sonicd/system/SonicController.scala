@@ -3,8 +3,8 @@ package build.unstable.sonicd.system
 import java.nio.charset.Charset
 import java.util.UUID
 
-import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
+import akka.actor.SupervisorStrategy.Restart
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.stream._
 import akka.util.ByteString
@@ -12,19 +12,9 @@ import build.unstable.sonicd.model._
 
 import scala.collection.mutable
 
-class SonicController(materializer: Materializer) extends Actor with ActorLogging {
+class SonicController(materializer: Materializer) extends Actor with SonicdActorLogging {
 
   import SonicController._
-
-  @throws[Exception](classOf[Exception])
-  override def preStart(): Unit = {
-    log.info(s"Starting Sonic Controller ${self.path}")
-  }
-
-  @throws[Exception](classOf[Exception])
-  override def postRestart(reason: Throwable): Unit = {
-    log.error(s"RESTARTED CONTROLLER. REASON: $reason")
-  }
 
   // logging turned off as children errors are not system errors
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true) {
@@ -75,17 +65,13 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
           log.error(e, msg)
           handler ! DoneWithQueryExecution.error(e)
       }
-
-
-    case m ⇒ log.error(s"Oops! It looks like I received the wrong message: $m")
-
   }
 }
 
 object SonicController {
 
-  case class NewQuery(query: Query)
+  case class NewQuery(query: Query) extends Command
 
-  case class ExecuteQuery(queryId: String)
+  case class ExecuteQuery(queryId: String) extends Command
 
 }

@@ -1,12 +1,39 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <!-- encoders are assigned the type ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
-        <encoder>
-            <pattern>[%highlight(%level)][%d{ISO8601}][%.12thread][%logger{36}] - %msg%n</pattern>
-        </encoder>
+    <appender name="async" class="net.logstash.logback.appender.LoggingEventAsyncDisruptorAppender">
+        <waitStrategyType>sleeping</waitStrategyType>
+        <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+            <!-- encoders are assigned the type ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
+            <encoder>
+                <pattern>[%highlight(%level)][%d{ISO8601}][%.12thread][%logger{36}] - %msg%n</pattern>
+            </encoder>
+        </appender>
     </appender>
-    <logger name="akka" level="DEBUG"/>
-    <root level="DEBUG">
-        <appender-ref ref="STDOUT"/>
+    <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+        <providers>
+            <mdc/>
+            <pattern>
+                <pattern>
+                    {
+                    "timestamp": "%date{ISO8601}",
+                    "myCustomField": "fieldValue",
+                    "relative": "#asLong{%relative}"
+                    }
+                </pattern>
+            </pattern>
+            <stackTrace>
+                <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                    <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                    <maxLength>2048</maxLength>
+                    <shortenedClassNameLength>20</shortenedClassNameLength>
+                    <exclude>sun\.reflect\..*\.invoke.*</exclude>
+                    <exclude>net\.sf\.cglib\.proxy\.MethodProxy\.invoke</exclude>
+                    <evaluator class="myorg.MyCustomEvaluator"/>
+                    <rootCauseFirst>true</rootCauseFirst>
+                </throwableConverter>
+            </stackTrace>
+        </providers>
+    </encoder>
+    <root level="all">
+        <appender-ref ref="async"/>
     </root>
 </configuration>
