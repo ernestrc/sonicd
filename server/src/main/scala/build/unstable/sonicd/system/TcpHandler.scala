@@ -13,6 +13,7 @@ import org.reactivestreams.{Subscriber, Subscription}
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
+import scala.util.control.NonFatal
 
 class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
 
@@ -23,7 +24,7 @@ class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
 
   override def supervisorStrategy: SupervisorStrategy =
     OneForOneStrategy(loggingEnabled = true) {
-      case e: Exception ⇒ Stop
+      case NonFatal(_) ⇒ Stop
     }
 
   def listening(listener: ActorRef): Receive = {
@@ -59,8 +60,8 @@ object TcpHandler {
 class TcpHandler(controller: ActorRef, connection: ActorRef)
   extends Actor with ActorLogging {
 
-  import akka.io.Tcp._
   import TcpHandler._
+  import akka.io.Tcp._
   import context.dispatcher
 
   //wrapper around org.reactivestreams.Subscription

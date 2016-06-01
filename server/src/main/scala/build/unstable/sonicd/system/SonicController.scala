@@ -11,6 +11,7 @@ import akka.util.ByteString
 import build.unstable.sonicd.model._
 
 import scala.collection.mutable
+import scala.util.control.NonFatal
 
 class SonicController(materializer: Materializer) extends Actor with ActorLogging {
 
@@ -28,7 +29,7 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
 
   // logging turned off as children errors are not system errors
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true) {
-    case e: Exception ⇒ Restart
+    case NonFatal(e) ⇒ Restart
   }
 
   val handlers = mutable.Map.empty[ActorPath, String]
