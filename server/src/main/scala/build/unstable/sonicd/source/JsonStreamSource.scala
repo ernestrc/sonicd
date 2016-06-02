@@ -15,6 +15,7 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
+import scala.util.Try
 import scala.util.control.NonFatal
 
 /**
@@ -92,26 +93,37 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
     } else None
   }
 
+  //first element dictates type metadata
+  def metaFiltering(meta: Option[TypeMetadata], fields: Map[String, JsValue]): Vector[JsValue] = {
+    meta match {
+      case Some(m) ⇒ m.typesHint.map{
+        case (s: String, v: JsValue) ⇒ fields.get(s).getOrElse(JsNull)
+      }
+      case None ⇒ fields.values.to[Vector]
+    }
+  }
+
   @tailrec
   final def stream(fw: ActorRef, br: BufferedReader, query: Query, retries: Int = 2): Unit = {
     lazy val read =
       if (buffer.isEmpty) Option(br.readLine())
       else Option(buffer.remove(0))
 
-    if (totalDemand > 0 && read.isDefined && read.get != "") {
+    lazy val raw = read.get
+    lazy val json = Try(raw.parseJson.asJsObject)
 
-      val raw = read.get
-      val json = raw.parseJson.asJsObject
-      val filtered = filter(json, query)
+    if (totalDemand > 0 && read.isDefined && read.get != "" && json.isSuccess) {
 
-      if (!sentMeta && filtered.isDefined) {
-        onNext(TypeMetadata(filtered.get.toVector))
-        sentMeta = true
+      val filtered = filter(json.get, query)
+
+      if (meta.isEmpty && filtered.isDefined) {
+        meta = Some(TypeMetadata(filtered.get.toVector))
+        onNext(meta.get)
       }
 
       filtered match {
         case Some(fields) if totalDemand > 0 ⇒
-          onNext(OutputChunk(JsArray(fields.values.to[Vector])))
+          onNext(OutputChunk(JsArray(metaFiltering(meta, fields))))
         case Some(fields) ⇒ buffer.append(raw)
         case None ⇒ log.debug("filtered {}", filtered)
       }
@@ -162,7 +174,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
   val files = mutable.Map.empty[String, BufferedReader]
   val buffer = ListBuffer.empty[String]
-  var sentMeta: Boolean = false
+  var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
 

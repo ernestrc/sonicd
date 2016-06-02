@@ -18,9 +18,29 @@ var graph = (function() {
     return {};
   }
 
-  function tail() {
+  var currentId = 0;
+
+  function buildItem(attempt, success, idxMdc, idxTs, idxType) {
+    currentId += 1;
+    console.log(attempt);
+    return {
+      id: currentId,
+      content: attempt[idxMdc].callType,
+      className: attempt[idxType],
+      group: attempt[idxMdc].traceId,
+      type: 'range',
+      title: attempt[idxMdc].callType,
+      start: moment(attempt[idxTs]),
+      end: moment(success[idxTs]),
+    }
+  }
+
+  function tail(timeline, dataSet, groups) {
 
     var q = getQuery();
+    var meta = [];
+    var data = {};
+    var ids = [];
 
     var query = {
       query: JSON.stringify(q),
@@ -39,8 +59,8 @@ var graph = (function() {
       stop();
     }
 
-    function output(elems) {
-      var cols = elems.map(function(el) {
+    function output(row) {
+      var cols = row.map(function(el) {
         if (typeof el === 'object') {
           return "<th>" + JSON.stringify(el) + "</th>";
         } else {
@@ -48,19 +68,61 @@ var graph = (function() {
         }
       });
       $('#data').append("<tr>" + cols + "</tr>");
+
+      //if variation is success, find attempt in data
+      //else append to data
+      var idxMdc = meta.indexOf('mdc');
+      var d = row[idxMdc];
+      if (d && d.traceId) {
+        if (ids.indexOf(d.traceId) < 0) {
+          ids.push(d.traceId);
+          groups.add({id: d.traceId, content: d.traceId});
+        }
+        if (d.variation == 'Success') {
+          var ev = data[d.traceId];
+          if (!ev)  {
+            console.error('received success before any other event: ' + JSON.stringify(row));
+          } else {
+            //find one with same call_type and variation == attempt
+            var filtered = ev.filter(function(l) {
+              return d.callType == l[idxMdc].callType && l[idxMdc].variation == 'Attempt';
+            });
+
+            if (filtered.length == 0) {
+              console.error('could not map success to attempt' + JSON.stringify(row));
+            } else {
+              var attempt = filtered[0];
+              var success = row;
+              var item = buildItem(attempt, success, idxMdc, meta.indexOf('@timestamp'), meta.indexOf('logType'));
+              dataSet.add(item);
+              var range = timeline.getItemRange();
+              timeline.setWindow(range.min, range.max);
+            }
+          }
+        } else {
+          if (!data[d.traceId]) {
+            data[d.traceId] = [row];
+          } else {
+            data[d.traceId].push(row);
+          }
+        }
+      } else {
+        console.log('traceId undefined:')
+        console.log(d);
+      }
     }
 
     function progress(prog) {
       console.log(prog);
     }
 
-    function metadata(meta) {
+    function metadata(metaRow) {
       $('#data').empty();
-      var metaCol = meta.map(function(el) {
+      var metaCol = metaRow.map(function(el) {
+        meta.push(el[0]);
         return "<th>" + el[0] + "</th>";
       });
       $('#data').append("<tr>" + metaCol + "</tr>");
-      console.log(meta);
     }
 
     client.stream(query, done, output, progress, metadata);
@@ -78,54 +140,53 @@ var graph = (function() {
       $('#content').removeClass('panel-default');
       $('#content').addClass('panel-danger');
     }
+    $("#clear").removeClass("disabled");
     $("#cat").removeClass("disabled");
     $("#tail").removeClass("disabled");
     $("#stop").addClass("disabled");
   }
 
-  function start(fn) {
+  function start(fn, timeline, dataSet,groups) {
     $('#content').removeClass('');
     $("#cat").addClass("disabled");
     $("#tail").addClass("disabled");
     $("#stop").removeClass("disabled");
+    $("#clear").addClass("disabled");
     $('#content').removeClass('panel-danger');
     $('#content').addClass('panel-default');
-    fn();
+    fn(timeline, dataSet, groups);
   }
 
   function init() {
     console.log('initialising timeline...');
-    var data = [
-      {id: 1, content: 'item 1', start: '2013-04-20'},
-      {id: 2, content: 'item 2', start: '2013-04-14'},
-      {id: 3, content: 'item 3', start: '2013-04-18'},
-      {id: 4, content: 'item 4', start: '2013-04-16', end: '2013-04-19'},
-      {id: 5, content: 'item 5', start: '2013-04-25'},
-      {id: 6, content: 'item 6', start: '2013-04-27'}
-    ];
 
     // DOM element where the Timeline will be attached
     var container = document.getElementById('visualization');
 
     // Create a DataSet (allows two way data-binding)
-    var items = new vis.DataSet(data);
+    var dataSet = new vis.DataSet();
+    var groups = new vis.DataSet();
 
     // Configuration for the Timeline
-    var options = {};
+    var options = {
+      showCurrentTime: false 
+    };
 
     // Create a Timeline
-    var timeline = new vis.Timeline(container, items, options);
+    var timeline = new vis.Timeline(container, dataSet, groups, options);
 
-    //attach flush and re-init
-
+    $("#clear").click(function(e) {
+      e.preventDefault();
+      dataSet.clear();
+      groups.clear();
+    });
     //attach click listeners on menu
-    $("#cat").click(function() {
-      start(cat);
+    $("#tail").click(function(e) {
+      e.preventDefault();
+      start(tail, timeline, dataSet, groups);
     });
-    $("#tail").click(function() {
-      start(tail);
-    });
-    $("#stop").click(function() {
+    $("#stop").click(function(e) {
+      e.preventDefault();
       stop();
     });
   };
@@ -133,7 +194,6 @@ var graph = (function() {
   return {
     init: init,
     tail: tail,
-    stop: stop,
-    cat: cat
+    stop: stop
   }
 })();

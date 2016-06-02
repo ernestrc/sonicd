@@ -14,35 +14,53 @@ table {
   font-size: 8px;
 }
 
+.vis-item.rumor {
+  color: white;
+  background-color: red;
+  border-color: darkred;
+}
+
+.vis-item.mantis {
+  color: white;
+  background-color: blue;
+  border-color: darkblue;
+}
+
+.vis-item.anvil {
+  color: white;
+  background-color: brown;
+  border-color: black;
+}
+
 .timeline-chart .axis path {
   fill: none;
-  stroke: none; }
+stroke: none; }
 
 .timeline-chart line {
-  stroke: black; }
+stroke: black; }
 
 .timeline-chart rect, .timeline-chart rect.chart-bounds {
-  fill: transparent; }
+fill: transparent; }
 
 .timeline-chart rect.chart-bounds:hover, .timeline-chart rect.interval:hover {
   cursor: -webkit-grab;
-  cursor: grab; }
+cursor: grab; }
 
 .timeline-chart rect.chart-bounds:active, .timeline-chart rect.interval:active {
   cursor: -webkit-grabbing;
-  cursor: grabbing; }
+cursor: grabbing; }
 
 .timeline-chart .dot:hover {
-  cursor: pointer; }
+cursor: pointer; }
 
 .timeline-chart .interval-text {
-  pointer-events: none; }
+pointer-events: none; }
 
 .timeline-chart rect.interval {
   ry: 5;
   rx: 5;
   fill: black;
-  stroke: #2b2b2b; }
+stroke: #2b2b2b; }
 
 .timeline-chart .axis path {
   fill: none;
