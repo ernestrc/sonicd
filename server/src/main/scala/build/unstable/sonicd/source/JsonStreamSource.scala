@@ -96,8 +96,8 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   //first element dictates type metadata
   def metaFiltering(meta: Option[TypeMetadata], fields: Map[String, JsValue]): Vector[JsValue] = {
     meta match {
-      case Some(m) ⇒ m.typesHint.map{
-        case (s: String, v: JsValue) ⇒ fields.get(s).getOrElse(JsNull)
+      case Some(m) ⇒ m.typesHint.map {
+        case (s: String, v: JsValue) ⇒ fields.getOrElse(s, JsNull)
       }
       case None ⇒ fields.values.to[Vector]
     }
@@ -177,10 +177,15 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
+  context.setReceiveTimeout(1.second)
 
   /* BEHAVIOUR */
 
   def streaming(watcher: ActorRef, query: Query): Receive = {
+
+    case ReceiveTimeout ⇒
+      log.debug("received receive timeout")
+      files.foreach(kv ⇒ stream(watcher, kv._2, query))
 
     case req: Request ⇒
       files.foreach(kv ⇒ stream(watcher, kv._2, query))
