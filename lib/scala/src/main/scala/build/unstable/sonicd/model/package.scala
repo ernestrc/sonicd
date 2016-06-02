@@ -2,7 +2,7 @@ package build.unstable.sonicd
 
 import java.nio.charset.Charset
 
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
+import akka.http.scaladsl.model.ws.{TextMessage, BinaryMessage, Message}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
@@ -35,7 +35,7 @@ package object model {
     }
 
     def toWsMessage: Message =
-      BinaryMessage.Strict(ByteString(json.compactPrint.getBytes(Charset.forName("utf-8"))))
+      TextMessage.Strict(json.compactPrint)
 
     def isDone: Boolean = this.isInstanceOf[DoneWithQueryExecution]
   }

@@ -1,5 +1,6 @@
 package build.unstable.sonicd.system
 
+import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrategy, RequestStrategy}
 import build.unstable.sonicd.model.Exceptions.ProtocolException
@@ -16,6 +17,13 @@ with ActorSubscriber with ActorLogging {
   override protected def requestStrategy: RequestStrategy = OneByOneRequestStrategy
 
   case object CompletedStream
+
+  override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
+    case e: Exception ⇒
+      log.error(e, "error in publisher")
+      self ! DoneWithQueryExecution.error(e)
+      Stop
+  }
 
   def closing(done: DoneWithQueryExecution): Receive = {
     log.debug("switched to closing behaviour with ev {}", done)

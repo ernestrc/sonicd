@@ -69,7 +69,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
     val fs = new FileInputStream(Paths.get(folderPath, fileName).toFile)
     val br = new BufferedReader(new InputStreamReader(fs))
     if (tail) {
-      var count = br.lines.count()
+      var count = br.lines.count() - 1
       log.debug("tail mode enabled. Skipping {} lines", count)
       while (count > 0) {
         br.readLine()
@@ -93,7 +93,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   }
 
   @tailrec
-  final def stream(fw: ActorRef, br: BufferedReader, query: Query): Unit = {
+  final def stream(fw: ActorRef, br: BufferedReader, query: Query, retries: Int = 2): Unit = {
     lazy val read =
       if (buffer.isEmpty) Option(br.readLine())
       else Option(buffer.remove(0))
@@ -110,13 +110,15 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
       }
 
       filtered match {
-        case Some(fields) if totalDemand > 0 ⇒ onNext(OutputChunk(JsArray(fields.values.to[Vector])))
+        case Some(fields) if totalDemand > 0 ⇒
+          onNext(OutputChunk(JsArray(fields.values.to[Vector])))
         case Some(fields) ⇒ buffer.append(raw)
-        case None ⇒
+        case None ⇒ log.debug("filtered {}", filtered)
       }
       stream(fw, br, query)
+    } else if (totalDemand > 0 && retries > 0) {
+      stream(fw, br, query, retries - 1)
     } else if (totalDemand > 0) {
-      log.debug("demand left to fullfill {}", totalDemand)
       fw ! Request(totalDemand)
     }
   }
@@ -127,7 +129,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   def matchObject(arg: JsObject): JsObject ⇒ Boolean = (o: JsObject) ⇒ {
     val argFields = arg.fields
     o.fields.forall {
-      case (s: String, b: JsObject) if argFields.get(s).isDefined && argFields(s).isInstanceOf[JsObject]⇒
+      case (s: String, b: JsObject) if argFields.get(s).isDefined && argFields(s).isInstanceOf[JsObject] ⇒
         matchObject(argFields(s).asJsObject)(b)
       case (s: String, b: JsValue) ⇒ arg.fields.forall(kv ⇒ if (kv._1 == s) b == kv._2 else true)
     }
@@ -161,6 +163,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   val files = mutable.Map.empty[String, BufferedReader]
   val buffer = ListBuffer.empty[String]
   var sentMeta: Boolean = false
+  val watching: Boolean = false
 
 
   /* BEHAVIOUR */
@@ -182,7 +185,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
       val ev = event.asInstanceOf[WatchEvent[Path]]
       val fileName = ev.context().toFile.toString
 
-      log.debug("file {} changed: {}", fileName, kind.name())
+      //log.debug("file {} changed: {}", fileName, kind.name())
 
       kind match {
         case StandardWatchEventKinds.ENTRY_CREATE ⇒ newFile(fileName)
@@ -232,6 +235,7 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
     log.info(s"stopping file watcher of '$queryId'")
     try {
       watcher.close()
+      key.cancel()
       log.debug("closed watcher object {}", watcher)
     } catch {
       case e: Exception ⇒
@@ -243,17 +247,17 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
 
   def watch(): List[WatchEvent[_]] = {
     //FIXME blocks until file changes. Use with timeout
-    val key = watcher.take
-    val events = key.pollEvents
+    val k = watcher.take
+    val events = k.pollEvents
 
-    if (key.reset) {
+    if (k.reset()) {
       events.toList.filter { ev ⇒
         ev.asInstanceOf[WatchEvent[Path]].context().toFile.toString.endsWith(".json")
       }
     } else throw new Exception("aborted")
   }
 
-  folder.register(
+  val key = folder.register(
     watcher,
     StandardWatchEventKinds.ENTRY_CREATE,
     StandardWatchEventKinds.ENTRY_MODIFY,
@@ -261,13 +265,13 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
   )
 
   override def receive: Actor.Receive = {
-    case w: WatchEvent[_] ⇒ context.parent ! w
     case r: Request ⇒
-      log.debug("watching contents of folder {}", folder)
+      log.debug("watching contents of folder {}; request is {}", folder, r.n)
       val ev = watch()
       if (ev.nonEmpty) {
-        ev.foreach(self ! _)
+        ev.foreach(context.parent ! _)
       } else {
+        log.debug("watching again..")
         self ! r
       }
     case msg ⇒ log.warning("oops! extraneous message")

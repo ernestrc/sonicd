@@ -106,6 +106,7 @@ object Sonic extends Build {
           "org.apache.spark" %% "spark-sql" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
           //core
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "ch.megard" %% "akka-http-cors" % "0.1.2",
           "ch.qos.logback" % "logback-classic" % "1.0.13",
           "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
           "com.h2database" % "h2" % "1.3.175" % "test"

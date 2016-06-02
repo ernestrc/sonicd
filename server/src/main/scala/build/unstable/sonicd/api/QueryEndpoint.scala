@@ -8,12 +8,13 @@ import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.util.Timeout
 import build.unstable.sonicd.model.JsonProtocol
 import build.unstable.sonicd.system.WsHandler
+import ch.megard.akka.http.cors.CorsDirectives
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
 
 class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
-                   (implicit mat: ActorMaterializer, system: ActorSystem) {
+                   (implicit mat: ActorMaterializer, system: ActorSystem) extends CorsDirectives {
 
   import JsonProtocol._
   import akka.stream.scaladsl._
@@ -75,11 +76,13 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
     get {
       path("query") {
         pathEndOrSingleSlash {
-          extractUpgradeToWebSocket { upgrade ⇒
-            complete {
-              upgrade.handleMessages(messageSerDe.recover {
-                case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
-              })
+          cors() {
+            extractUpgradeToWebSocket { upgrade ⇒
+              complete {
+                upgrade.handleMessages(messageSerDe.recover {
+                  case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
+                })
+              }
             }
           }
         }
@@ -91,6 +94,10 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
             Future.failed(new Exception("not implemented yet"))
           }
         }
+      }
+    } ~ get {
+      path(Segments) { fold ⇒
+        getFromResource(fold.reduce(_ + "/" + _))
       }
     }
 }
