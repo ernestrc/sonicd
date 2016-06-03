@@ -88,16 +88,12 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
         }
       }
     } ~ get {
-      path("consume" / Segment) { streamId ⇒
+      path("subscribe" / Segment) { streamId ⇒
         parameterMap { params ⇒
           complete {
             Future.failed(new Exception("not implemented yet"))
           }
         }
-      }
-    } ~ get {
-      path(Segments) { fold ⇒
-        getFromResource(fold.reduce(_ + "/" + _))
       }
     }
 }
