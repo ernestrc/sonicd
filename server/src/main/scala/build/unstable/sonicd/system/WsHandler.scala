@@ -17,19 +17,23 @@ with ActorSubscriber with ActorLogging {
 
   case object CompletedStream
 
+  def awaitingAck: Receive = {
+    case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
+  }
+
   def closing(done: DoneWithQueryExecution): Receive = {
     log.debug("switched to closing behaviour with ev {}", done)
     if (isActive && totalDemand > 0) {
       onNext(done)
-      onCompleteThenStop()
+      context.become(awaitingAck)
     }
 
     {
-      case Cancel | OnComplete ⇒ onCompleteThenStop()
+      case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
       case Request(n) =>
         if (isActive) {
           onNext(done)
-          onCompleteThenStop()
+          context.become(awaitingAck)
         }
     }
   }
