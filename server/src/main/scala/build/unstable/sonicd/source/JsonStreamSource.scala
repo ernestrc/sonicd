@@ -140,12 +140,13 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   case class Query(select: ((String, JsValue)) ⇒ Boolean,
                    filter: JsObject ⇒ Boolean, raw: String)
 
-  def matchObject(arg: JsObject): JsObject ⇒ Boolean = (o: JsObject) ⇒ {
-    val argFields = arg.fields
-    o.fields.forall {
-      case (s: String, b: JsObject) if argFields.get(s).isDefined && argFields(s).isInstanceOf[JsObject] ⇒
-        matchObject(argFields(s).asJsObject)(b)
-      case (s: String, b: JsValue) ⇒ arg.fields.forall(kv ⇒ if (kv._1 == s) b == kv._2 else true)
+  def matchObject(filter: JsObject): JsObject ⇒ Boolean = (o: JsObject) ⇒ {
+    val filterFields = filter.fields
+    val oFields = o.fields
+    filterFields.forall {
+      case (key, j: JsObject) if oFields.isDefinedAt(key) && oFields(key).isInstanceOf[JsObject] ⇒
+        matchObject(j)(oFields(key).asInstanceOf[JsObject])
+      case (key, value) ⇒ oFields.isDefinedAt(key) && oFields(key) == value
     }
   }
 
@@ -215,7 +216,7 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
   def receive: Receive = {
     case req: Request ⇒
-      log.debug("starting watch on path {}", rawQuery, folderPath)
+      log.debug("starting query {} watch on path {}", rawQuery, folderPath)
 
       try {
         val parsed = parseQuery(rawQuery)
