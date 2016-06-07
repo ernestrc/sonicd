@@ -20,11 +20,11 @@ import scala.util.Try
 import scala.util.control.NonFatal
 
 /**
- * Watches JSON files in 'path' and streams their contents.
+ * Watches JSON files in 'path' local to Sonicd instance and exposes contents as a stream.
  *
- * Takes an optional 'tail' parameter to configure if only new data should be streamed
+ * Takes an optional 'tail' parameter to configure if only new data should be streamed.
  */
-class JsonStreamSource(config: JsObject, queryId: String, query: String, context: ActorContext)
+class LocalJsonStreamSource(config: JsObject, queryId: String, query: String, context: ActorContext)
   extends DataSource(config, queryId, query, context) {
 
   val handlerProps: Props = {
@@ -136,11 +136,15 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
         case Some(fields) if totalDemand > 0 ⇒
           onNext(OutputChunk(JsArray(metaFiltering(meta, fields))))
         case Some(fields) ⇒ buffer.append(raw)
-        case None ⇒ log.debug("filtered {}", filtered)
+        case None ⇒
       }
+
       stream(fileName, reader, query)
+
     } else if (totalDemand > 0 && read.isDefined && json.isFailure) {
+
       stream(fileName, reader, query)
+
     }
   }
 

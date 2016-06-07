@@ -63,7 +63,7 @@ with ActorSubscriber with ActorLogging {
 
   def commonBehaviour: Receive = {
 
-    case Cancel | OnComplete ⇒
+    case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒
       log.debug("client completed/canceled stream")
       onCompleteThenStop()
 
@@ -98,6 +98,10 @@ with ActorSubscriber with ActorLogging {
 
       case msg: DoneWithQueryExecution ⇒ context.become(closing(msg))
 
+      case a@(OnComplete | Cancel | OnNext(ClientAcknowledge)) ⇒
+        commonBehaviour.apply(a)
+        subscription.cancel() //cancel source
+
       case msg: SonicMessage ⇒
         try {
           if (isActive) {
@@ -107,13 +111,9 @@ with ActorSubscriber with ActorLogging {
           else log.warning(s"dropping message $msg: wsHandler is not active")
         } catch {
           case e: Exception ⇒
-            log.error(s"error onNext: pending: $pendingToStream; demand: $totalDemand")
+            log.error(e, s"error onNext: pending: $pendingToStream; demand: $totalDemand")
             context.become(closing(DoneWithQueryExecution.error(e)))
         }
-
-      case a@(OnComplete | Cancel) ⇒
-        commonBehaviour.apply(a)
-        subscription.cancel() //cancel source
     }
     recv orElse commonBehaviour
   }
