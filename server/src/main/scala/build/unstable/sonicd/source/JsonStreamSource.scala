@@ -88,8 +88,8 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   }
 
   def filter(json: JsObject, query: Query): Option[Map[String, JsValue]] = {
-    if (query.filter(json)) {
-      val fields = json.fields.filter(query.select)
+    if (query.valueFilter(json)) {
+      val fields = json.fields.filter(query.selectFilter)
       Some(fields)
     } else None
   }
@@ -121,7 +121,14 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
       val filtered = filter(json.get, query)
 
       if (meta.isEmpty && filtered.isDefined) {
-        meta = Some(TypeMetadata(filtered.get.toVector))
+
+        meta = query.select.map { select ⇒
+          //FIXME select types potentially not known at this point
+          TypeMetadata(select.map(s ⇒ s → filtered.get.getOrElse(s, JsNull)))
+        }.orElse {
+          Some(TypeMetadata(filtered.get.toVector))
+        }
+
         onNext(meta.get)
       }
 
@@ -137,8 +144,10 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
     }
   }
 
-  case class Query(select: ((String, JsValue)) ⇒ Boolean,
-                   filter: JsObject ⇒ Boolean, raw: String)
+  case class Query(raw: String,
+                   selectFilter: ((String, JsValue)) ⇒ Boolean,
+                   select: Option[Vector[String]],
+                   valueFilter: JsObject ⇒ Boolean)
 
   def matchObject(filter: JsObject): JsObject ⇒ Boolean = (o: JsObject) ⇒ {
     val filterFields = filter.fields
@@ -161,15 +170,15 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
     val select = r.get("select").map { v ⇒
       val fields = v.convertTo[Vector[String]]
-      (v: (String, JsValue)) ⇒ fields.contains(v._1)
-    }.getOrElse((v: (String, JsValue)) ⇒ true)
+      ((v: (String, JsValue)) ⇒ fields.contains(v._1)) → Some(fields)
+    }.getOrElse(((v: (String, JsValue)) ⇒ true) → None)
 
     val f = r.get("filter").map { fo ⇒
       val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}")
       matchObject(fObj)
     }.getOrElse((o: JsObject) ⇒ true)
 
-    Query(select, f, raw)
+    Query(raw, select._1, select._2, f)
   }
 
 
