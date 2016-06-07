@@ -1,7 +1,7 @@
 package build.unstable.sonicd.source
 
-import java.io.{BufferedReader, FileInputStream, InputStreamReader}
-import java.nio.file.{Path, Paths, StandardWatchEventKinds, WatchEvent}
+import java.io.RandomAccessFile
+import java.nio.file._
 
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
@@ -9,6 +9,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
+import build.unstable.sonicd.source.FileWatcher.Watch
 import spray.json._
 
 import scala.annotation.tailrec
@@ -27,10 +28,10 @@ class JsonStreamSource(config: JsObject, queryId: String, query: String, context
   extends DataSource(config, queryId, query, context) {
 
   val handlerProps: Props = {
-    val file = getConfig[String]("path")
+    val folderPath = getConfig[String]("path")
     val tail = getOption[Boolean]("tail").getOrElse(false)
 
-    Props(classOf[JsonStreamPublisher], queryId, file, query, tail)
+    Props(classOf[JsonStreamPublisher], queryId, folderPath, query, tail)
   }
 }
 
@@ -66,19 +67,19 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
   /* HELPERS */
 
-  def newFile(fileName: String) = {
-    val fs = new FileInputStream(Paths.get(folderPath, fileName).toFile)
-    val br = new BufferedReader(new InputStreamReader(fs))
-    if (tail) {
-      var count = br.lines.count() - 1
-      log.debug("tail mode enabled. Skipping {} lines", count)
-      while (count > 0) {
-        br.readLine()
-        count -= 1
-      }
-    }
-    files.update(fileName, br)
-    br
+  def newFile(fileName: String): RandomAccessFile = {
+    val file = Paths.get(folderPath, fileName).toFile
+    val reader = new RandomAccessFile(file, "r")
+
+    val pos = if (tail) {
+      val skip = file.length()
+      reader.seek(skip)
+      log.debug("tail mode enabled. skipping {} bytes", skip)
+      skip
+    } else 1L
+
+    files.update(fileName, reader)
+    reader
   }
 
   def terminate(done: DoneWithQueryExecution) = {
@@ -104,15 +105,18 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   }
 
   @tailrec
-  final def stream(fw: ActorRef, br: BufferedReader, query: Query, retries: Int = 2): Unit = {
-    lazy val read =
-      if (buffer.isEmpty) Option(br.readLine())
+  final def stream(fileName: String, reader: RandomAccessFile, query: Query): Unit = {
+    lazy val read = {
+      if (buffer.isEmpty) {
+        Option(reader.readLine())
+      }
       else Option(buffer.remove(0))
+    }
 
     lazy val raw = read.get
     lazy val json = Try(raw.parseJson.asJsObject)
 
-    if (totalDemand > 0 && read.isDefined && read.get != "" && json.isSuccess) {
+    if (totalDemand > 0 && read.isDefined && json.isSuccess) {
 
       val filtered = filter(json.get, query)
 
@@ -127,11 +131,9 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
         case Some(fields) ⇒ buffer.append(raw)
         case None ⇒ log.debug("filtered {}", filtered)
       }
-      stream(fw, br, query)
-    } else if (totalDemand > 0 && retries > 0) {
-      stream(fw, br, query, retries - 1)
-    } else if (totalDemand > 0) {
-      fw ! Request(totalDemand)
+      stream(fileName, reader, query)
+    } else if (totalDemand > 0 && read.isDefined && json.isFailure) {
+      stream(fileName, reader, query)
     }
   }
 
@@ -172,24 +174,17 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
   /* STATE */
 
-  val files = mutable.Map.empty[String, BufferedReader]
+  val files = mutable.Map.empty[String, RandomAccessFile]
   val buffer = ListBuffer.empty[String]
   var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
-  context.setReceiveTimeout(1.second)
-
   /* BEHAVIOUR */
 
-  def streaming(watcher: ActorRef, query: Query): Receive = {
-
-    case ReceiveTimeout ⇒
-      log.debug("received receive timeout")
-      files.foreach(kv ⇒ stream(watcher, kv._2, query))
+  def streaming(query: Query): Receive = {
 
     case req: Request ⇒
-      files.foreach(kv ⇒ stream(watcher, kv._2, query))
-      if (totalDemand > 0) watcher ! Request(totalDemand)
+      files.foreach(kv ⇒ stream(kv._1, kv._2, query))
 
     case done: DoneWithQueryExecution ⇒
       if (totalDemand > 0) terminate(done)
@@ -206,26 +201,37 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
 
       kind match {
         case StandardWatchEventKinds.ENTRY_CREATE ⇒ newFile(fileName)
-        case StandardWatchEventKinds.ENTRY_MODIFY ⇒ files.get(fileName) match {
-          case Some(reader) ⇒
-            stream(watcher, reader, query)
-          case None ⇒
-            val reader = newFile(fileName)
-            stream(watcher, reader, query)
-        }
+        case StandardWatchEventKinds.ENTRY_MODIFY ⇒
+          files.get(fileName) match {
+            case Some(file) ⇒
+              stream(fileName, file, query)
+            case None ⇒
+              val file = newFile(fileName)
+              stream(fileName, file, query)
+          }
         case StandardWatchEventKinds.ENTRY_DELETE ⇒ files.remove(fileName)
       }
   }
 
   def receive: Receive = {
-
     case req: Request ⇒
-      log.debug("recv first request for query {} on path {}", rawQuery, folderPath)
+      log.debug("starting watch on path {}", rawQuery, folderPath)
+
       try {
-        val fw = context.actorOf(Props(classOf[JsonWatcher], Paths.get(folderPath), queryId))
         val parsed = parseQuery(rawQuery)
-        fw ! req
-        context.become(streaming(fw, parsed))
+        for (file <- new java.io.File(folderPath).listFiles) {
+          if (file.isFile) {
+            val fileName = file.getName
+            val reader = newFile(fileName)
+            files.update(fileName, reader)
+          }
+        }
+
+        val fw = context.actorOf(Props(classOf[FileWatcher], Paths.get(folderPath), queryId))
+        fw ! FileWatcher.Watch
+        self ! req
+        context.become(streaming(parsed))
+
       } catch {
         case e: Exception ⇒
           terminate(DoneWithQueryExecution.error(e))
@@ -237,7 +243,13 @@ class JsonStreamPublisher(queryId: String, folderPath: String, rawQuery: String,
   }
 }
 
-class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging {
+object FileWatcher {
+
+  case object Watch
+
+}
+
+class FileWatcher(folder: Path, queryId: String) extends Actor with ActorLogging {
 
   import java.nio.file._
 
@@ -263,14 +275,11 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
   log.debug("created watcher object {}", watcher)
 
   def watch(): List[WatchEvent[_]] = {
-    //FIXME blocks until file changes. Use with timeout
     val k = watcher.take
     val events = k.pollEvents
 
     if (k.reset()) {
-      events.toList.filter { ev ⇒
-        ev.asInstanceOf[WatchEvent[Path]].context().toFile.toString.endsWith(".json")
-      }
+      events.toList
     } else throw new Exception("aborted")
   }
 
@@ -282,15 +291,14 @@ class JsonWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
   )
 
   override def receive: Actor.Receive = {
-    case r: Request ⇒
-      log.debug("watching contents of folder {}; request is {}", folder, r.n)
+    case Watch ⇒
+      log.debug("watching contents of folder {}", folder)
       val ev = watch()
       if (ev.nonEmpty) {
         ev.foreach(context.parent ! _)
-      } else {
-        log.debug("watching again..")
-        self ! r
       }
+
+      self ! Watch
     case msg ⇒ log.warning("oops! extraneous message")
   }
 }
