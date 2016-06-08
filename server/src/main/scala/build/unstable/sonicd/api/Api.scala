@@ -9,7 +9,7 @@ import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
 import akka.util.CompactByteString
 import build.unstable.sonicd.SonicdConfig
-import build.unstable.sonicd.model.{JsonProtocol, Receipt}
+import build.unstable.sonicd.model.{SonicdLogging, JsonProtocol, Receipt}
 import build.unstable.sonicd.system.{TcpSupervisor, Service, System}
 
 trait Api {
@@ -24,7 +24,7 @@ trait Api {
  * to the top-level actors that make up the system.
  */
 trait AkkaApi extends Api {
-  this: System with Service ⇒
+  this: System with Service with SonicdLogging ⇒
 
   def completeWithMessage(msg: String, rejection: Rejection) = {
     complete(HttpResponse(BadRequest,
@@ -34,13 +34,17 @@ trait AkkaApi extends Api {
   }
 
   implicit val rejectionHandler: RejectionHandler.Builder = RejectionHandler.newBuilder().handle {
-    case rej@MalformedRequestContentRejection(msg, _) ⇒ completeWithMessage("There was a problem when unmarshalling payload: " + msg, rej)
-    case rej: Rejection ⇒ completeWithMessage("Oops!", rej)
+    case rej@MalformedRequestContentRejection(msg, _) ⇒
+      warning(log, "malformed request: {}", rej)
+      completeWithMessage("there was a problem when unmarshalling payload: " + msg, rej)
+    case rej: Rejection ⇒
+      warning(log, "rejected: {}", rej)
+      completeWithMessage("rejected", rej)
   }
 
   implicit val receiptExceptionHandler = ExceptionHandler {
     case e: Exception ⇒
-      system.log.error(e, "Unexpected errorp")
+      log.error("unexpected error", e)
       complete(HttpResponse(InternalServerError,
         entity = HttpEntity.Strict(ContentType(`application/json`),
           CompactByteString(JsonProtocol.receiptJsonFormat.write(
@@ -57,6 +61,8 @@ trait AkkaApi extends Api {
         queryEndpoint.route ~
           monitoringEndpoint.route
       }
-    })(RoutingSettings.default, rejectionHandler = rejectionHandler.result(), exceptionHandler = receiptExceptionHandler)
+    })(RoutingSettings.default,
+      rejectionHandler = rejectionHandler.result(),
+      exceptionHandler = receiptExceptionHandler)
   }
 }

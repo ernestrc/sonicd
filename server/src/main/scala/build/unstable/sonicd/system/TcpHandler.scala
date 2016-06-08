@@ -1,5 +1,7 @@
 package build.unstable.sonicd.system
 
+import java.util.UUID
+
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.io.Tcp
@@ -15,7 +17,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
-class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
+class TcpSupervisor(controller: ActorRef) extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -30,6 +32,7 @@ class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
   def listening(listener: ActorRef): Receive = {
 
     case c@Tcp.Connected(remote, local) =>
+      debug(log, "new connection: remoteAddr: {}; localAddr: {}", remote, local)
       val connection = sender()
       val handler = context.actorOf(Props(classOf[TcpHandler], controller, connection))
       connection ! Tcp.Register(handler)
@@ -41,7 +44,7 @@ class TcpSupervisor(controller: ActorRef) extends Actor with ActorLogging {
     case Tcp.CommandFailed(_: Tcp.Bind) => context stop self
 
     case b@Tcp.Bound(localAddress) =>
-      log.info(s"ready and listening for new connections on $localAddress")
+      info(log, "ready and listening for new connections on {}", localAddress)
       val listener = sender()
       listener ! Tcp.ResumeAccepting(1)
       context.become(listening(listener))
@@ -58,7 +61,7 @@ object TcpHandler {
 }
 
 class TcpHandler(controller: ActorRef, connection: ActorRef)
-  extends Actor with ActorLogging {
+  extends Actor with SonicdLogging {
 
   import TcpHandler._
   import akka.io.Tcp._
@@ -76,14 +79,14 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
-      log.error(e, "error in publisher")
+      error(log, e, "error in publisher")
       self ! DoneWithQueryExecution.error(e)
       Stop
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug(s"starting tcp handler in path '{}'", self.path)
+    debug(log, "starting tcp handler in path {}", self.path)
     connection ! ResumeReading
   }
 
@@ -91,11 +94,11 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
     if (cancellableCompleted != null) cancellableCompleted.cancel()
-    log.debug(s"stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
+    debug(log, "stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
   }
 
   def closing(ev: DoneWithQueryExecution): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
-    log.debug("switched to closing behaviour with ev {} and storage {}", ev, storage)
+    debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
     // check if we're ready to send done msg
     if (storage.isEmpty) {
       buffer(ev)
@@ -103,7 +106,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
     } else buffer(ev)
 
     {
-      case PeerClosed ⇒ log.debug("peer closed")
+      case PeerClosed ⇒ debug(log, "peer closed")
       case ConfirmedClosed ⇒ context.stop(self)
       case CommandFailed(_: Write) => connection ! ResumeWriting
       case WritingResumed => writeOne()
@@ -116,7 +119,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
-      log.error(t, "stream error")
+      error(log, t, "stream error")
       self ! DoneWithQueryExecution.error(t)
     }
 
@@ -125,14 +128,10 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
     }
 
     override def onComplete(): Unit = {
-      log.debug("stream is complete")
       cancellableCompleted = context.system.scheduler.scheduleOnce(2.seconds, self, CompletedStream)
     }
 
-    override def onNext(t: SonicMessage): Unit = {
-      //log.debug("sending msg to self")
-      self ! t
-    }
+    override def onNext(t: SonicMessage): Unit = self ! t
   }
 
   def buffer(t: SonicMessage) = {
@@ -140,14 +139,12 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
     //length prefix framing
     val w = Write(SonicdSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
     storage.append(w)
-    //log.debug("buffered {}", w)
     w
   }
 
   private def writeOne(): Unit = {
     val msg = storage.head
     connection ! storage.head
-    //log.debug("sending for write {}", msg)
   }
 
   private def acknowledge(offset: Long): Unit = {
@@ -160,9 +157,9 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
         //log.debug("acknowledge offset {} transferred {} therefore ack {}", offset, transferred, idx)
 
         storage.remove(idx.toInt)
-      } else log.warning("received double ack: {}", offset)
+      } else warning(log, "received double ack: {}", offset)
     } else {
-      log.warning(s"storage was empty at ack $offset")
+      warning(log, "storage was empty at ack {}", offset)
     }
   }
 
@@ -175,6 +172,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   var subscription: StreamSubscription = null
   var cancellableCompleted: Cancellable = null
   var dataBuffer = ByteString.empty
+  var traceId: Option[String] = None
 
   def commonBehaviour: Receive = {
 
@@ -189,13 +187,23 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       log.error(msg)
       context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
 
-    case PeerClosed ⇒ log.debug("peer closed")
+    case PeerClosed ⇒ debug(log, "peer closed")
   }
 
   def deserializeAndHandleQueryFrame(data: ByteString): Unit = {
     SonicMessage.fromBytes(data) match {
-      case q: Query ⇒ controller ! NewQuery(q)
+      case q: Query ⇒
+        val (id, query) = traceId match {
+          case Some(i) ⇒ i → q.copy(query_id = i)
+          case None ⇒
+            val i = UUID.randomUUID().toString
+            i → q.copy(query_id = i)
+        }
+        trace(log, id, MaterializeSource, Variation.Attempt)
+        controller ! NewQuery(query)
+        context.become(waitingController(id) orElse commonBehaviour)
       case ClientAcknowledge ⇒ connection ! ConfirmedClose
+      case TraceId(id) ⇒ traceId = Some(id)
       case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
     }
   }
@@ -212,7 +220,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       case anyElse ⇒ handler ! OnNext(anyElse)
     }
 
-  def streaming: Receive =
+  def materialized: Receive =
     commonBehaviour orElse framing(deserializeAndHandleMessageFrame) orElse {
       case t: SonicMessage ⇒
         buffer(t)
@@ -248,20 +256,27 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
         }
       } catch {
         case e: Exception ⇒
-          log.error(e, "error framing incoming bytes")
+          log.error("error framing incoming bytes", e)
           context.become(closing(DoneWithQueryExecution.error(e)))
       } finally {
         connection ! ResumeReading
       }
   }
 
-  def receive: Receive = framing(deserializeAndHandleQueryFrame) orElse commonBehaviour orElse {
+  def waitingController(queryId: String): Receive = {
+
+    case ev: DoneWithQueryExecution ⇒
+      log.debug("received done msg")
+      context.become(closing(ev))
+      trace(log, queryId, MaterializeSource, Variation.Failure(ev.errors.head))
+
     case s: Subscription ⇒
       //start streaming
-      log.debug("subscribed to publisher, requesting first element")
       subscription = new StreamSubscription(s)
       subscription.request(1)
-      context.become(streaming)
+      trace(log, queryId, MaterializeSource, Variation.Success,
+        Some("subscribed to publisher, requesting first element"))
+      context.become(materialized)
 
     case handlerProps: Props ⇒
       log.debug("received props {}", handlerProps)
@@ -269,4 +284,6 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       val pub = ActorPublisher[SonicMessage](handler)
       pub.subscribe(subs)
   }
+
+  def receive: Receive = framing(deserializeAndHandleQueryFrame) orElse commonBehaviour
 }

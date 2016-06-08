@@ -9,12 +9,12 @@ import akka.util.Timeout
 import build.unstable.sonicd.model.JsonProtocol
 import build.unstable.sonicd.system.WsHandler
 import ch.megard.akka.http.cors.CorsDirectives
-import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
 
 class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
-                   (implicit mat: ActorMaterializer, system: ActorSystem) extends CorsDirectives {
+                   (implicit val mat: ActorMaterializer, system: ActorSystem)
+  extends CorsDirectives with RouteLogging {
 
   import JsonProtocol._
   import akka.stream.scaladsl._
@@ -22,9 +22,8 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
 
   implicit val t: Timeout = responseTimeout
 
-  val log = LoggerFactory.getLogger(this.getClass.getSimpleName)
-
   def wsFlowHandler: Flow[SonicMessage, SonicMessage, Any] = {
+
     val wsHandler = system.actorOf(Props(classOf[WsHandler], controller))
     Flow.fromSinkAndSource[SonicMessage, SonicMessage](
     Sink.fromSubscriber(ActorSubscriber(wsHandler)),
@@ -50,7 +49,7 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
     *           +------------------------------------------+
     * }}}
     */
-  def messageSerDe: Flow[Message, Message, Any] = {
+  def messageSerDe(traceId: String): Flow[Message, Message, Any] = {
     Flow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
 
@@ -58,6 +57,9 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
         case b: BinaryMessage.Strict ⇒ SonicMessage.fromBinary(b)
         case m: TextMessage.Strict ⇒ SonicMessage.fromJson(m.text)
         case msg ⇒ throw new Exception(s"invalid msg: $msg")
+      }.map {
+        case q: Query ⇒ q.copy(query_id = traceId)
+        case anyOther ⇒ anyOther
       }
 
       val serialize = Flow[SonicMessage].map(_.toWsMessage)
@@ -77,11 +79,16 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
       path("query") {
         pathEndOrSingleSlash {
           cors() {
-            extractUpgradeToWebSocket { upgrade ⇒
-              complete {
-                upgrade.handleMessages(messageSerDe.recover {
-                  case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
-                })
+            //first protocol in list is used as trace_id
+            extractOfferedWsProtocols { protocols ⇒
+              instrument(HandleExtractWebSocketUpgrade, protocols.headOption) { traceId ⇒
+                extractUpgradeToWebSocket { upgrade ⇒
+                  complete {
+                    upgrade.handleMessages(messageSerDe(traceId).recover {
+                      case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
+                    })
+                  }
+                }
               }
             }
           }
@@ -89,9 +96,13 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
       }
     } ~ get {
       path("subscribe" / Segment) { streamId ⇒
-        parameterMap { params ⇒
-          complete {
-            Future.failed(new Exception("not implemented yet"))
+        extractTraceHeader { traceIdMaybe ⇒
+          instrument(HandleSubscribe, traceIdMaybe) { traceId ⇒
+            parameterMap { params ⇒
+              complete {
+                Future.failed(new Exception("not implemented yet"))
+              }
+            }
           }
         }
       }

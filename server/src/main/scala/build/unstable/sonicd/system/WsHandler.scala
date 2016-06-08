@@ -9,7 +9,7 @@ import build.unstable.sonicd.system.SonicController.NewQuery
 import org.reactivestreams._
 
 class WsHandler(controller: ActorRef) extends ActorPublisher[SonicMessage]
-with ActorSubscriber with ActorLogging {
+with ActorSubscriber with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
   import akka.stream.actor.ActorSubscriberMessage._
@@ -20,9 +20,20 @@ with ActorSubscriber with ActorLogging {
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
-      log.error(e, "error in publisher")
+      log.error("error in publisher", e)
       self ! DoneWithQueryExecution.error(e)
       Stop
+  }
+
+  @throws[Exception](classOf[Exception])
+  override def preStart(): Unit = {
+    debug(log, "starting ws handler in path {}", self.path)
+  }
+
+
+  @throws[Exception](classOf[Exception])
+  override def postStop(): Unit = {
+    debug(log, "stopped ws handler in path '{}'", self.path)
   }
 
   def awaitingAck: Receive = {
@@ -49,7 +60,7 @@ with ActorSubscriber with ActorLogging {
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
-      log.error(t, "publisher called onError of wsHandler")
+      log.error("publisher called onError of wsHandler", t)
       self ! DoneWithQueryExecution.error(t)
     }
 
@@ -73,7 +84,7 @@ with ActorSubscriber with ActorLogging {
       context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
 
     case msg@OnError(e) ⇒
-      log.error(e, "error in ws stream")
+      error(log, e, "error in ws stream")
       context.become(closing(DoneWithQueryExecution.error(e)))
 
     case msg: DoneWithQueryExecution ⇒
@@ -108,19 +119,20 @@ with ActorSubscriber with ActorLogging {
             onNext(msg)
             pendingToStream -= 1L
           }
-          else log.warning(s"dropping message $msg: wsHandler is not active")
+          else warning(log, "dropping message {}: wsHandler is not active", msg)
         } catch {
           case e: Exception ⇒
-            log.error(e, s"error onNext: pending: $pendingToStream; demand: $totalDemand")
+            error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
             context.become(closing(DoneWithQueryExecution.error(e)))
         }
     }
     recv orElse commonBehaviour
   }
-
-  def initial: Receive = {
+  
+  def awaitingController(queryId: String): Receive = {
 
     case s: Subscription ⇒
+      trace(log, queryId, MaterializeSource, Variation.Success)
       requestTil(s)
       context.become(materialized(s))
 
@@ -130,17 +142,27 @@ with ActorSubscriber with ActorLogging {
       val pub = ActorPublisher[SonicMessage](handler)
       pub.subscribe(subs)
 
-    case OnNext(msg) ⇒
-      log.debug("client established communication with ws handler")
-      try {
-        val query = msg.asInstanceOf[Query]
-        controller ! NewQuery(query)
-      } catch {
-        case e: Exception ⇒
-          log.error(e, "error while processing query")
-          context.become(closing(DoneWithQueryExecution.error(e)))
-      }
+    case msg: DoneWithQueryExecution ⇒
+      trace(log, queryId, MaterializeSource, Variation.Failure(msg.errors.head))
+      context.become(closing(msg))
+
   }
 
-  override def receive: Receive = initial orElse commonBehaviour
+  def start: Receive = {
+
+    case OnNext(q: Query) ⇒
+      val msg = "client established communication with ws handler"
+      trace(log, q.query_id.get, MaterializeSource, Variation.Attempt, Some(msg))
+      controller ! NewQuery(q)
+      context.become(awaitingController(q.query_id.get) orElse commonBehaviour)
+
+    case OnNext(msg) ⇒
+      val msg = "first message should be a Query"
+      log.error(msg)
+      val e = new ProtocolException(msg)
+      context.become(closing(DoneWithQueryExecution.error(e)))
+
+  }
+
+  override def receive: Receive = start orElse commonBehaviour
 }

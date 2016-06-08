@@ -48,6 +48,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog-core" % "0.1.3",
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
@@ -105,7 +106,6 @@ object Sonic extends Build {
           "org.apache.spark" %% "spark-yarn" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
           "org.apache.spark" %% "spark-sql" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
           //core
-          "build.unstable" %% "tylog-core" % "0.1.3",
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
           "ch.megard" %% "akka-http-cors" % "0.1.2",
           "ch.qos.logback" % "logback-classic" % "1.0.13",
@@ -122,6 +122,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog-core" % "0.1.3",
           "ch.qos.logback" % "logback-classic" % "1.0.13"
         )
       }

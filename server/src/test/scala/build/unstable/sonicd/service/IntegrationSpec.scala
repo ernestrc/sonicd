@@ -23,7 +23,7 @@ import scala.concurrent.{Await, Future}
 
 class IntegrationSpec extends WordSpec with Matchers with ScalatestRouteTest
 with BeforeAndAfterAll with TestSystem with AkkaService with AkkaApi
-with JsonProtocol {
+with JsonProtocol with SonicdLogging {
 
   import Fixture._
   import build.unstable.sonicd.model.Fixture._

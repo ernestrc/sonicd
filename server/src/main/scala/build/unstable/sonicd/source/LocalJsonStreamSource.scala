@@ -263,15 +263,14 @@ object FileWatcher {
 
 }
 
-class FileWatcher(folder: Path, queryId: String) extends Actor with ActorLogging {
+class FileWatcher(folder: Path, queryId: String) extends Actor with SonicdLogging {
 
   import java.nio.file._
-
   import scala.collection.JavaConversions._
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug("starting file watcher of '{}'", queryId)
+    debug(log, "starting file watcher of query {} watching folder {}", queryId, folder)
   }
 
   override def postStop(): Unit = {
@@ -306,13 +305,12 @@ class FileWatcher(folder: Path, queryId: String) extends Actor with ActorLogging
 
   override def receive: Actor.Receive = {
     case Watch ⇒
-      log.debug("watching contents of folder {}", folder)
       val ev = watch()
       if (ev.nonEmpty) {
         ev.foreach(context.parent ! _)
       }
 
       self ! Watch
-    case msg ⇒ log.warning("oops! extraneous message")
+    case msg ⇒ warning(log, "extraneous message received {}", msg)
   }
 }

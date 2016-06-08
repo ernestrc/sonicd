@@ -1,6 +1,7 @@
 package build.unstable.sonicd.examples
 
 import java.net.InetSocketAddress
+import java.util.UUID
 
 import akka.actor._
 import akka.stream.scaladsl.Sink
@@ -18,24 +19,27 @@ import scala.concurrent.{Await, Future}
 object AkkaExample extends App {
 
   val config: JsObject = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
-  val query = Query("10", config)
   val addr = new InetSocketAddress("127.0.0.1", 10001)
 
   implicit val system = ActorSystem()
   implicit val materializer: ActorMaterializer =
     ActorMaterializer(ActorMaterializerSettings(system))
 
-  val stream: Future[DoneWithQueryExecution] =
-    SonicdSource.stream(addr, query).to(Sink.ignore).run()
+  val queryId1 = UUID.randomUUID().toString
+  val query1 = Query("100", config).copy(query_id = queryId1)
 
-  val future: Future[Vector[SonicMessage]] =
-    SonicdSource.run(addr, query)
+  val queryId2 = UUID.randomUUID().toString
+  val query2 = Query("10", config).copy(query_id = queryId2)
 
-  val fDone = Await.result(future, 20.seconds)
-  val sDone = Await.result(stream, 20.seconds)
+  val res1: Future[DoneWithQueryExecution] = SonicdSource.stream(addr, query1).to(Sink.ignore).run()
 
-  assert(sDone.success)
-  assert(fDone.length == 112) //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+  val res2: Future[Vector[SonicMessage]] = SonicdSource.run(addr, query2)
+
+  val done1 = Await.result(res1, 20.seconds)
+  val done2 = Await.result(res2, 20.seconds)
+
+  //assert(done1.success)
+  assert(done2.length == 112) //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
 
   system.terminate()
 
