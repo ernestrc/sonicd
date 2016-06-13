@@ -48,7 +48,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
-          "build.unstable" %% "tylog-core" % "0.1.3",
+          "build.unstable" %% "tylog" % "0.2.4",
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,

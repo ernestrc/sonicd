@@ -9,6 +9,7 @@ import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
 import akka.util.ByteString
+import build.unstable.tylog.Variation
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -68,7 +69,7 @@ object SonicdSource extends SonicdLogging {
           override def onPush(): Unit = {
             val elem = grab(in1)
             if (first) {
-              trace(log, queryId, EstablishCommunication, Variation.Success)
+              trace(log, queryId, EstablishCommunication, Variation.Success, "received first message from gateway")
               first = false
             }
             val msg = SonicMessage.fromBytes(elem.splitAt(4)._2)
@@ -99,7 +100,7 @@ object SonicdSource extends SonicdLogging {
             val elem = grab(in2)
             elem match {
               case t: TraceId ⇒
-                trace(log, t.id, EstablishCommunication, Variation.Attempt)
+                trace(log, t.id, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
                 val bytes = lengthPrefixEncode(t.toBytes)
                 push(out1, bytes)
               case msg ⇒
@@ -173,18 +174,18 @@ object SonicdSource extends SonicdLogging {
       case None ⇒ UUID.randomUUID().toString
     }
 
-    trace(log, id, BuildGraph, Variation.Attempt, Some(s"materializing graph with id $id"))
+    trace(log, id, BuildGraph, Variation.Attempt, "building graph")
     val graph = f(id)
-    trace(log, id, BuildGraph, Variation.Success, Some(s"materialized graph $id"))
+    trace(log, id, BuildGraph, Variation.Success, "materialized graph {}", id)
     graph
   }
 
   def logConnectionCreate(queryId: String)(f: Future[Tcp.OutgoingConnection])
                          (implicit ctx: ExecutionContext): Future[Tcp.OutgoingConnection] = {
-    trace(log, queryId, CreateTcpConnection, Variation.Attempt)
+    trace(log, queryId, CreateTcpConnection, Variation.Attempt, "create new tcp connection")
     f.andThen {
-      case Success(_) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Success)
-      case Failure(e) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Failure(e))
+      case Success(i) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Success, "created new tcp connection")
+      case Failure(e) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Failure(e), "failed to create tcp connection")
     }
   }
 

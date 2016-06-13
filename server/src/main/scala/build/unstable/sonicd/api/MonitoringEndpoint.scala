@@ -12,11 +12,9 @@ class MonitoringEndpoint(responseTimeout: Timeout)
 
   val route: Route = path("version") {
     get {
-      extractTraceHeader { traceIdMaybe ⇒
-        instrument(HandleVersion, traceIdMaybe) { traceId ⇒
-          complete {
-            s"${BuildInfo.version} (${BuildInfo.commit} ${BuildInfo.builtAt})"
-          }
+      instrumentRoute(HandleVersion) { traceId ⇒
+        complete {
+          s"${BuildInfo.version} (${BuildInfo.commit} ${BuildInfo.builtAt})"
         }
       }
     }

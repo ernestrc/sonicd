@@ -11,6 +11,7 @@ import akka.util.ByteString
 import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.SonicController.NewQuery
+import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 
 import scala.collection.mutable.ListBuffer
@@ -199,7 +200,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
             val i = UUID.randomUUID().toString
             i → q.copy(query_id = i)
         }
-        trace(log, id, MaterializeSource, Variation.Attempt)
+        trace(log, id, MaterializeSource, Variation.Attempt, "deserialized query {}: {}", id, query)
         controller ! NewQuery(query)
         context.become(waitingController(id) orElse commonBehaviour)
       case ClientAcknowledge ⇒ connection ! ConfirmedClose
@@ -266,16 +267,17 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   def waitingController(queryId: String): Receive = {
 
     case ev: DoneWithQueryExecution ⇒
-      log.debug("received done msg")
+      val msg = "received done msg"
+      log.debug(msg)
       context.become(closing(ev))
-      trace(log, queryId, MaterializeSource, Variation.Failure(ev.errors.head))
+      trace(log, queryId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
 
     case s: Subscription ⇒
+      val msg = "subscribed to publisher, requesting first element"
       //start streaming
       subscription = new StreamSubscription(s)
       subscription.request(1)
-      trace(log, queryId, MaterializeSource, Variation.Success,
-        Some("subscribed to publisher, requesting first element"))
+      trace(log, queryId, MaterializeSource, Variation.Success, msg)
       context.become(materialized)
 
     case handlerProps: Props ⇒

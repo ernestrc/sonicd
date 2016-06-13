@@ -81,7 +81,7 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
           cors() {
             //first protocol in list is used as trace_id
             extractOfferedWsProtocols { protocols ⇒
-              instrument(HandleExtractWebSocketUpgrade, protocols.headOption) { traceId ⇒
+              instrumentRoute(HandleExtractWebSocketUpgrade, protocols.headOption) { traceId ⇒
                 extractUpgradeToWebSocket { upgrade ⇒
                   complete {
                     upgrade.handleMessages(messageSerDe(traceId).recover {
@@ -96,12 +96,10 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
       }
     } ~ get {
       path("subscribe" / Segment) { streamId ⇒
-        extractTraceHeader { traceIdMaybe ⇒
-          instrument(HandleSubscribe, traceIdMaybe) { traceId ⇒
-            parameterMap { params ⇒
-              complete {
-                Future.failed(new Exception("not implemented yet"))
-              }
+        instrumentRoute(HandleSubscribe) { traceId ⇒
+          parameterMap { params ⇒
+            complete {
+              Future.failed(new Exception("not implemented yet"))
             }
           }
         }

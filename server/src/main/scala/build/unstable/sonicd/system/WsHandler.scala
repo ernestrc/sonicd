@@ -6,6 +6,7 @@ import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrate
 import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.SonicController.NewQuery
+import build.unstable.tylog.Variation
 import org.reactivestreams._
 
 class WsHandler(controller: ActorRef) extends ActorPublisher[SonicMessage]
@@ -132,7 +133,7 @@ with ActorSubscriber with SonicdLogging {
   def awaitingController(queryId: String): Receive = {
 
     case s: Subscription ⇒
-      trace(log, queryId, MaterializeSource, Variation.Success)
+      trace(log, queryId, MaterializeSource, Variation.Success, "subscribed")
       requestTil(s)
       context.become(materialized(s))
 
@@ -143,7 +144,7 @@ with ActorSubscriber with SonicdLogging {
       pub.subscribe(subs)
 
     case msg: DoneWithQueryExecution ⇒
-      trace(log, queryId, MaterializeSource, Variation.Failure(msg.errors.head))
+      trace(log, queryId, MaterializeSource, Variation.Failure(msg.errors.head), "controller send error")
       context.become(closing(msg))
 
   }
@@ -152,7 +153,7 @@ with ActorSubscriber with SonicdLogging {
 
     case OnNext(q: Query) ⇒
       val msg = "client established communication with ws handler"
-      trace(log, q.query_id.get, MaterializeSource, Variation.Attempt, Some(msg))
+      trace(log, q.query_id.get, MaterializeSource, Variation.Attempt, msg)
       controller ! NewQuery(q)
       context.become(awaitingController(q.query_id.get) orElse commonBehaviour)
 
