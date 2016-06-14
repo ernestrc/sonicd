@@ -8,11 +8,11 @@
 </appender>
 
 <appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
-    <file>/var/log/sonicd/sonicd_example.log</file>
+    <file>/var/log/opentok/sonicd_example.log</file>
     <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
         <!-- daily rollover. Make sure the path matches the one in the file element or else
          the rollover logs are placed in the working directory. -->
-        <fileNamePattern>/var/log/sonicd/sonicd_example_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+        <fileNamePattern>/var/log/opentok/sonicd_example_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
         <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
             <maxFileSize>5MB</maxFileSize>
         </timeBasedFileNamingAndTriggeringPolicy>

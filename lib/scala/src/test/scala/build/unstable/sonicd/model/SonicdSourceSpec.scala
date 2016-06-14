@@ -23,7 +23,7 @@ class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll
   implicit val mat = ActorMaterializer(ActorMaterializerSettings(system))
 
   val clientProtocol: Graph[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage], _] =
-    SonicProtocolStage
+    SonicProtocolStage("1")
 
   val tcpFailure1: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
     Flow.fromSinkAndSource(Sink.ignore, Source.failed(new TcpException))

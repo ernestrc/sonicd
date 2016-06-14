@@ -8,7 +8,7 @@ import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin._
 import spray.revolver.RevolverPlugin._
 
-object Sonic extends Build {
+object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.6"
@@ -25,6 +25,10 @@ object Sonic extends Build {
       "-unchecked",
       "-Xlog-free-terms",
       "-deprecation",
+      "-feature",
+      "-Xlint",
+      "-Ywarn-dead-code",
+      "-Ywarn-unused",
       "-encoding", "UTF-8",
       "-target:jvm-1.8"
     )
