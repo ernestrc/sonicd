@@ -12,7 +12,7 @@ var query = {
   }
 };
 
-var client = new Client('ws://localhost:9111');
+var client = new Client('wss://0.0.0.0:443');
 
 client.exec(query, function(err, res) {
   if (err) {

@@ -85,7 +85,7 @@ fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
     })
 }
 
-fn frame(msg: SonicMessage) -> Vec<u8> {
+fn frame(msg: ::serde_json::Value) -> Vec<u8> {
     let qbytes = ::serde_json::to_string(&msg).unwrap().into_bytes();
     let qlen = qbytes.len() as i32;
     let mut fbytes = Vec::new();
@@ -113,11 +113,11 @@ pub fn stream<O, P, M>(query: Query,
 
     let mut stream = try!(TcpStream::connect(&addr).map_err(|e| Error::Connect(e)));
 
-    // set timeout 10s
+    // set timeout 10sString
     stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))).unwrap();
 
     // frame query
-    let fbytes = frame(query.into_msg());
+    let fbytes = frame(query.into_json());
 
     // send query
     stream.write(&fbytes.as_slice()).unwrap();
@@ -127,13 +127,13 @@ pub fn stream<O, P, M>(query: Query,
     loop {
         match get_message(&fd) {
             Ok(msg) => {
-                match msg.event_type.as_ref() {
+                match msg.e.as_ref() {
                     "O" => output(msg),
                     "P" => progress(msg),
                     "T" => metadata(msg),
                     "D" => {
                         res = msg.into_rec();
-                        let fbytes = frame(SonicMessage::ack());
+                        let fbytes = frame(SonicMessage::ack().into_json());
                         // send ack
                         stream.write(&fbytes.as_slice()).unwrap();
                         debug!("disconnected");

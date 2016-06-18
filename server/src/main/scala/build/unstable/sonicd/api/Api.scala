@@ -9,8 +9,10 @@ import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
 import akka.util.CompactByteString
 import build.unstable.sonicd.SonicdConfig
+import build.unstable.sonicd.api.auth.AuthEndpoint
+import build.unstable.sonicd.api.endpoint.{QueryEndpoint, MonitoringEndpoint}
 import build.unstable.sonicd.model.{SonicdLogging, JsonProtocol, Receipt}
-import build.unstable.sonicd.system.{TcpSupervisor, Service, System}
+import build.unstable.sonicd.system.{Service, System}
 
 trait Api {
   val httpHandler: Route
@@ -53,13 +55,16 @@ trait AkkaApi extends Api {
 
   val queryEndpoint = new QueryEndpoint(controllerService, SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
 
-  val monitoringEndpoint = new MonitoringEndpoint(SonicdConfig.ENDPOINT_TIMEOUT)
+  val authEndpoint = new AuthEndpoint(authenticationService, SonicdConfig.ENDPOINT_TIMEOUT)
+
+  val monitoringEndpoint = new MonitoringEndpoint(SonicdConfig.ENDPOINT_TIMEOUT, controllerService)
 
   val httpHandler = logRequest("sonic") {
     Route.seal(pathPrefix(SonicdConfig.API_VERSION) {
       handleExceptions(receiptExceptionHandler) {
         queryEndpoint.route ~
-          monitoringEndpoint.route
+          monitoringEndpoint.route ~
+          authEndpoint.route
       }
     })(RoutingSettings.default,
       rejectionHandler = rejectionHandler.result(),

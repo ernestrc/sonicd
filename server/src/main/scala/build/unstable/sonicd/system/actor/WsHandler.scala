@@ -1,11 +1,12 @@
-package build.unstable.sonicd.system
+package build.unstable.sonicd.system.actor
+
+import java.util.UUID
 
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrategy, RequestStrategy}
 import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.SonicController.NewQuery
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 
@@ -129,11 +130,11 @@ with ActorSubscriber with SonicdLogging {
     }
     recv orElse commonBehaviour
   }
-  
-  def awaitingController(queryId: String): Receive = {
+
+  def awaitingController(traceId: String): Receive = {
 
     case s: Subscription ⇒
-      trace(log, queryId, MaterializeSource, Variation.Success, "subscribed")
+      trace(log, traceId, MaterializeSource, Variation.Success, "subscribed")
       requestTil(s)
       context.become(materialized(s))
 
@@ -144,18 +145,27 @@ with ActorSubscriber with SonicdLogging {
       pub.subscribe(subs)
 
     case msg: DoneWithQueryExecution ⇒
-      trace(log, queryId, MaterializeSource, Variation.Failure(msg.errors.head), "controller send error")
+      trace(log, traceId, MaterializeSource, Variation.Failure(msg.errors.head), "controller send error")
       context.become(closing(msg))
 
+  }
+
+  def newQuery(withTraceId: Query): Unit = {
+    context.become(awaitingController(withTraceId.traceId.get) orElse commonBehaviour)
   }
 
   def start: Receive = {
 
     case OnNext(q: Query) ⇒
+      val withTraceId = {
+        q.traceId match {
+          case Some(id) ⇒ q
+          case None ⇒ q.copy(trace_id = Some(UUID.randomUUID().toString))
+        }
+      }
       val msg = "client established communication with ws handler"
-      trace(log, q.query_id.get, MaterializeSource, Variation.Attempt, msg)
-      controller ! NewQuery(q)
-      context.become(awaitingController(q.query_id.get) orElse commonBehaviour)
+      trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, msg)
+      controller ! withTraceId
 
     case OnNext(msg) ⇒
       val msg = "first message should be a Query"

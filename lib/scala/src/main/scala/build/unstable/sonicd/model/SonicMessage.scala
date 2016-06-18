@@ -16,15 +16,17 @@ sealed trait SonicMessage {
 
   val payload: Option[JsValue]
 
-  val eventType: Option[String]
+  val eventType: String
 
   @transient
   lazy val json: JsValue = {
-    JsObject(Map(
-      ("event_type", eventType.map(JsString.apply).getOrElse(JsNull)),
-      ("variation", variation.map(JsString.apply).getOrElse(JsNull)),
-      ("payload", payload.getOrElse(JsNull))
-    ))
+    val fields = scala.collection.mutable.ListBuffer(
+      SonicMessage.eventType → (JsString(eventType): JsValue))
+
+    variation.foreach(v ⇒ fields.append(SonicMessage.variation → JsString(v)))
+    payload.foreach(p ⇒ fields.append(SonicMessage.payload → p))
+
+    JsObject(fields.toMap)
   }
 
   def toBytes: ByteString = {
@@ -42,12 +44,12 @@ sealed trait SonicMessage {
 case class TypeMetadata(typesHint: Vector[(String, JsValue)]) extends SonicMessage {
   val variation: Option[String] = None
   val payload: Option[JsValue] = Some(typesHint.toJson)
-  val eventType: Option[String] = Some("T")
+  val eventType: String = SonicMessage.meta
 }
 
 case class OutputChunk(data: JsArray) extends SonicMessage {
   val variation: Option[String] = None
-  val eventType = Some("O")
+  val eventType = SonicMessage.out
   val payload: Option[JsValue] = Some(data.toJson)
 }
 
@@ -61,12 +63,12 @@ case class QueryProgress(progress: Option[Double], output: Option[String]) exten
     "output" → output.map(JsString.apply).getOrElse(JsNull)
   )))
   val variation = None
-  override val eventType = Some("P")
+  override val eventType = SonicMessage.progress
 }
 
 case class DoneWithQueryExecution(success: Boolean, errors: Vector[Throwable] = Vector.empty) extends SonicMessage {
 
-  override val eventType = Some("D")
+  override val eventType = SonicMessage.done
   override val variation: Option[String] = if (success) Some("success") else Some("error")
 
   override val payload: Option[JsValue] = {
@@ -90,67 +92,77 @@ object DoneWithQueryExecution {
 case object ClientAcknowledge extends SonicMessage {
   override val variation: Option[String] = None
   override val payload: Option[JsValue] = None
-  override val eventType: Option[String] = Some("A")
-}
-
-//used by tcp handler to carry a client's trace_id with the query
-case class TraceId(id: String) extends SonicMessage {
-  override val variation: Option[String] = Some(id)
-  override val payload: Option[JsValue] = None
-  override val eventType: Option[String] = Some("I")
+  override val eventType: String = SonicMessage.ack
 }
 
 case class Log(message: String) extends SonicMessage {
   override val variation: Option[String] = Some(message)
   override val payload: Option[JsValue] = None
-  override val eventType: Option[String] = Some("L")
+  override val eventType: String = SonicMessage.log
+}
+
+case class Authenticate(user: String, key: String) extends SonicMessage {
+  override val variation: Option[String] = Some(user)
+  override val payload: Option[JsValue] = Some(JsString(key))
+  override val eventType: String = SonicMessage.auth
 }
 
 object SonicMessage {
 
-  def unapply(ev: SonicMessage): Option[(Option[String], Option[String], Option[JsValue])] =
-    Some(ev.eventType, ev.variation, ev.payload)
+  //fields
+  val eventType = "e"
+  val variation = "v"
+  val payload = "p"
+
+  //messages
+  val auth = "H"
+  val query = "Q"
+  val meta = "T"
+  val progress = "P"
+  val log = "L"
+  val out = "O"
+  val ack = "A"
+  val done = "D"
+
+  def unapply(ev: SonicMessage): Option[(String, Option[String], Option[JsValue])] =
+    Some((ev.eventType, ev.variation, ev.payload))
 
   def fromJson(raw: String): SonicMessage = try {
     val fields = raw.parseJson.asJsObject.fields
-    if (fields.contains("event_type")) {
 
-      val variation: Option[String] = Try(fields.get("variation").map(_.convertTo[String])).getOrElse(None)
-      val payload: Option[JsValue] = fields.get("payload")
+    val vari: Option[String] = Try(fields.get(variation).map(_.convertTo[String])).getOrElse(None)
+    val pay: Option[JsValue] = fields.get(payload)
 
-      fields.get("event_type").map(_.convertTo[String]) match {
-        case Some("O") ⇒ payload match {
-          case Some(d: JsArray) ⇒ OutputChunk(d)
+    fields.get(eventType).map(_.convertTo[String]) match {
+      case Some(`out`) ⇒ pay match {
+        case Some(d: JsArray) ⇒ OutputChunk(d)
+        case a ⇒ throw new Exception(s"expecting JsArray found $a")
+      }
+      case Some(`ack`) ⇒ ClientAcknowledge
+      case Some(`log`) ⇒ Log(vari.get)
+      case Some(`meta`) ⇒
+        pay match {
+          case Some(d: JsArray) ⇒ TypeMetadata(d.convertTo[Vector[(String, JsValue)]])
+          case Some(j: JsObject) ⇒ TypeMetadata(j.convertTo[Vector[(String, JsValue)]])
           case a ⇒ throw new Exception(s"expecting JsArray found $a")
         }
-        case Some("A") ⇒ ClientAcknowledge
-        case Some("I") ⇒ TraceId(variation.get)
-        case Some("T") ⇒
-          payload match {
-            case Some(d: JsArray) ⇒ TypeMetadata(d.convertTo[Vector[(String, JsValue)]])
-            case Some(j: JsObject) ⇒ TypeMetadata(j.convertTo[Vector[(String, JsValue)]])
-            case a ⇒ throw new Exception(s"expecting JsArray found $a")
-          }
-
-        case Some("P") ⇒
-          QueryProgress(
-            Try(payload.get.asJsObject.fields.get("progress").map(_.convertTo[Double])).toOption.flatten,
-            Try(payload.get.asJsObject.fields.get("output").map(_.convertTo[String])).toOption.flatten
-          )
-        case Some("Q") ⇒ new Query(None, variation.get, payload.get)
-        case Some("D") ⇒ DoneWithQueryExecution(variation.get == "success",
-          payload.map(_.convertTo[Vector[String]].map(e ⇒ new Exception(e))).getOrElse(Vector.empty))
-        case e ⇒ throw new Exception(s"unexpected event type '$e'")
-      }
-    } else {
-      val queryStr = fields.getOrElse("query",
-        throw new Exception("missing 'query' field in query payload")).convertTo[String]
-      val config: JsValue = fields.getOrElse("config",
-        throw new Exception("missing 'config' field in query payload"))
-      new Query(None, queryStr, config)
+      case Some(`progress`) ⇒
+        QueryProgress(
+          Try(pay.get.asJsObject.fields.get("progress").map(_.convertTo[Double])).toOption.flatten,
+          Try(pay.get.asJsObject.fields.get("output").map(_.convertTo[String])).toOption.flatten
+        )
+      case Some(`query`) ⇒
+        val p = pay.get.asJsObject.fields
+        val traceId = p.get("trace_id").flatMap(_.convertTo[Option[String]])
+        val token = p.get("auth").flatMap(_.convertTo[Option[String]])
+        new Query(None, traceId, token, vari.get, p("config"))
+      case Some(`done`) ⇒ DoneWithQueryExecution(vari.get == "success",
+        pay.map(_.convertTo[Vector[String]].map(e ⇒ new Exception(e))).getOrElse(Vector.empty))
+      case Some(e) ⇒ throw new Exception(s"unexpected event type '$e'")
+      case None ⇒ throw new Exception("no 'e' event_type")
     }
   } catch {
-    case e: Exception ⇒ throw new Exception(s"event deserialization error: ${e.getMessage}", e)
+    case e: Exception ⇒ throw new Exception(s"sonic message deserialization error", e)
   }
 
   def fromBinary(m: BinaryMessage.Strict): SonicMessage =
@@ -160,11 +172,24 @@ object SonicMessage {
     fromJson(b.decodeString("utf-8"))
 }
 
-class Query(val query_id: Option[String], val query: String, val _config: JsValue) extends SonicMessage {
+class Query(val id: Option[Long],
+            //added client
+            val traceId: Option[String],
+            val authToken: Option[String],
+            val query: String,
+            val _config: JsValue)
+  extends SonicMessage {
 
   override val variation: Option[String] = Some(query)
-  override val payload: Option[JsValue] = Some(_config)
-  override val eventType: Option[String] = Some("Q")
+  override val payload: Option[JsValue] = {
+    val fields = scala.collection.mutable.Map(
+      "config" → _config
+    )
+    authToken.foreach(j ⇒ fields.update("auth", JsString(j)))
+    traceId.foreach(t ⇒ fields.update("trace_id", JsString(t)))
+    Some(JsObject(fields.toMap))
+  }
+  override val eventType: String = SonicMessage.query
 
   //CAUTION: leaking this value outside of sonicd-server is a major security risk
   private[sonicd] lazy val config = _config match {
@@ -189,7 +214,8 @@ class Query(val query_id: Option[String], val query: String, val _config: JsValu
       .getOrElse(clazzLoader.loadClass("build.unstable.sonicd.source." + clazzName))
   }
 
-  def copy(query_id: String) = new Query(Some(query_id), query, _config)
+  def copy(query_id: Option[Long] = None, trace_id: Option[String] = None) =
+    new Query(query_id, trace_id, authToken, query, _config)
 }
 
 object Query {
@@ -197,13 +223,16 @@ object Query {
   /**
    * Build a Query from a fully specified source configuration 'config'
    */
-  def apply(query: String, config: JsObject): Query = new Query(None, query, config)
+  def apply(query: String, config: JsObject, authToken: Option[String]): Query =
+    new Query(None, None, authToken, query, config)
 
   /**
    * Build a Query from a configuration alias 'config' for the sonicd server to
    * load from its configuration
    */
-  def apply(query: String, config: JsString): Query = new Query(None, query, config)
+  def apply(query: String, config: JsString, authToken: Option[String]): Query =
+    new Query(None, None, authToken, query, config)
 
-  def unapply(query: Query): Option[(Option[String], String)] = Some((query.query_id, query.query))
+  def unapply(query: Query): Option[(Option[Long], Option[String], String)] =
+    Some((query.id, query.authToken, query.query))
 }

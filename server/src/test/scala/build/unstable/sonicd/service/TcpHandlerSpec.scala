@@ -2,14 +2,12 @@ package build.unstable.sonicd.service
 
 import akka.actor._
 import akka.io.Tcp
-import akka.stream.actor.ActorPublisher
-import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import akka.testkit.{ImplicitSender, TestActorRef, TestKit}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.SyntheticPublisher
-import build.unstable.sonicd.system.SonicController.NewQuery
-import build.unstable.sonicd.system.TcpHandler
+import build.unstable.sonicd.system.actor.SonicController.NewQuery
+import build.unstable.sonicd.system.actor.{SonicController, TcpHandler}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.duration._

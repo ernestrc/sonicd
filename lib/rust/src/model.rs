@@ -5,16 +5,18 @@ use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Query {
-    pub query_id: Option<String>,
+    pub id: Option<String>,
     pub query: String,
+    pub trace_id: Option<String>,
+    pub auth_token: Option<String>,
     pub config: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SonicMessage {
-    pub event_type: String,
-    pub variation: Option<String>,
-    pub payload: Option<Value>,
+    pub e: String,
+    pub v: Option<String>,
+    pub p: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -54,7 +56,7 @@ pub enum Error {
     GetAddr(::std::io::Error),
     ParseAddr(::std::net::AddrParseError),
     ProtocolError(String),
-    HttpError(::curl::ErrCode),
+    HttpError(::curl::Error),
     StreamError(Receipt),
 }
 
@@ -91,44 +93,59 @@ impl fmt::Display for Error {
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 impl Query {
-    pub fn into_msg(&self) -> SonicMessage {
-        SonicMessage {
-            event_type: "Q".to_owned(),
-            variation: Some(self.query.clone()),
-            payload: Some(self.config.clone()),
-        }
+    pub fn into_json(self) -> Value {
+        let mut payload = BTreeMap::new();
+
+        payload.insert("config".to_owned(), self.config.clone());
+        payload.insert("auth".to_owned(), 
+                       self.auth_token.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
+        payload.insert("trace_id".to_owned(), 
+                       self.trace_id.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
+
+        let msg = SonicMessage {
+            e: "Q".to_owned(),
+            v: Some(self.query.clone()),
+            p: Some(Value::Object(payload)),
+        };
+
+        ::serde_json::to_value::<SonicMessage>(&msg)
     }
 }
 
 impl SonicMessage {
+
+    pub fn into_json(self) -> Value {
+        ::serde_json::to_value::<SonicMessage>(&self)
+    }
+
     pub fn ack() -> SonicMessage {
         SonicMessage {
-            event_type: "A".to_owned(),
-            variation: None,
-            payload: None,
+            e: "A".to_owned(),
+            v: None,
+            p: None,
         }
     }
 
     fn payload_into_errors(payload: Option<Value>) -> Vec<String> {
         payload.map(|payload| {
-                   match payload {
-                       Value::Array(data) => {
-                           data.iter()
-                               .map(|s| String::from_str(s.as_string().unwrap()).unwrap())
-                               .collect::<Vec<String>>()
-                       }
-                       e => panic!("expecting JSON array got: {:?}", e),
-                   }
-               })
-               .unwrap_or_else(|| Vec::new())
+            match payload {
+                Value::Array(data) => {
+                    data.iter()
+                        .map(|s| String::from_str(s.as_string().unwrap()).unwrap())
+                        .collect::<Vec<String>>()
+                }
+                e => panic!("expecting JSON array got: {:?}", e),
+            }
+        })
+        .unwrap_or_else(|| Vec::new())
     }
 
 
 
     pub fn into_rec(self) -> Receipt {
         Receipt {
-            success: self.variation.unwrap() == "success",
-            errors: SonicMessage::payload_into_errors(self.payload),
+            success: self.v.unwrap() == "success",
+            errors: SonicMessage::payload_into_errors(self.p),
             message: None,
             request_id: None,
         }

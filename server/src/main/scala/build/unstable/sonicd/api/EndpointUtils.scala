@@ -4,13 +4,12 @@ import java.util.UUID
 
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{Directive1, RouteResult}
+import akka.http.scaladsl.unmarshalling.FromRequestUnmarshaller
 import akka.stream.ActorMaterializer
 import build.unstable.sonicd.model.SonicdLogging
 import build.unstable.tylog.Variation
 
-trait RouteLogging extends SonicdLogging {
-
-  def mat: ActorMaterializer
+trait EndpointUtils extends SonicdLogging {
 
   def extractTraceHeader: Directive1[Option[TraceID]] = {
     extractRequest.tflatMap {
@@ -21,8 +20,6 @@ trait RouteLogging extends SonicdLogging {
 
   def instrumentRoute(callType: CallType, traceIdMaybe: Option[TraceID]): Directive1[TraceID] = {
 
-    //generate request_id if traceId was extracted from header
-    //otherwise generate one and use it for both
     val traceId = traceIdMaybe.getOrElse(UUID.randomUUID().toString)
 
     trace(log, traceId, callType, Variation.Attempt, "")

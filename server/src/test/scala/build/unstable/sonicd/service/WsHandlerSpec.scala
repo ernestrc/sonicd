@@ -6,8 +6,8 @@ import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnNext}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.SonicController.NewQuery
-import build.unstable.sonicd.system.WsHandler
+import build.unstable.sonicd.system.actor.{WsHandler, SonicController}
+import SonicController.NewQuery
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import build.unstable.sonicd.model.JsonProtocol._
 

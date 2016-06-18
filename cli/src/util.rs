@@ -208,13 +208,15 @@ pub fn build(src_alias: &str, mut srcfg: BTreeMap<String, Value>, query: &str) -
     let source_config = srcfg.remove(src_alias);
 
     let config: Value = try!(match source_config {
-        Some(o@Value::Object) => Ok(o),
+        Some(o@Value::Object(_)) => Ok(o),
         None => Ok(Value::String(src_alias.to_owned())),
         _ => Err(Receipt::error(format!("source '{}' config is not an object", &src_alias))),
     });
 
     Ok(Query {
-        query_id: None,
+        id: None,
+        trace_id: None,
+        auth_token: None,
         query: query.to_owned(),
         config: config,
     })

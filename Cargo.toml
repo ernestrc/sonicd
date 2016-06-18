@@ -1,6 +1,6 @@
 [package]
 name = "sonicd"
-version = "0.4.0"
+version = "0.4.4"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 
 [lib]

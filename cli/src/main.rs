@@ -46,7 +46,7 @@ Options:
   --silent, -S          output data only
   -r, --rows-only       print rows only
   -h, --help            show this message
-  --version             show daemon and cli version
+  --version             show server and cli version
 ");
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -69,13 +69,13 @@ fn _main(args: Args) -> Result<Receipt> {
     } else if args.flag_execute {
         args.arg_query.clone()
     } else {
-        let daemon_v = try!(version(&config.sonicd, &config.http_port)
+        let server_v = try!(version(&config.sonicd, &config.http_port)
                             .map_err(|e| Receipt::error(format!("{}", e))));
 
-        println!("sonic cli version {} ({}); daemon version {}",
+        println!("sonic cli version {} ({}); server version {}",
         VERSION,
         COMMIT.unwrap_or_else(|| "dev"),
-        daemon_v);
+        server_v);
         return Ok(Receipt::success());
     };
 
@@ -87,7 +87,7 @@ fn _main(args: Args) -> Result<Receipt> {
     pb.format("╢░░_╟");
 
     let fn_out = |msg: SonicMessage| {
-        match msg.payload {
+        match msg.p {
             Some(Value::Array(d)) => {
                 println!("{}", d.iter().fold(String::new(), |acc, x| {
                     format!("{}{:?}\t",acc, x)
@@ -99,7 +99,7 @@ fn _main(args: Args) -> Result<Receipt> {
 
     let fn_meta = |msg: SonicMessage| {
         if !args.flag_rows_only {
-            match msg.payload {
+            match msg.p {
                 Some(Value::Array(d)) => {
                     debug!("recv type metadata: {:?}", d);
                     println!("{}", d.iter().fold(String::new(), |acc, col| {
@@ -113,13 +113,13 @@ fn _main(args: Args) -> Result<Receipt> {
 
     let fn_prog = |msg: SonicMessage| {
         if !args.flag_silent {
-            let fields = msg.payload.unwrap();
+            let fields = msg.p.unwrap();
             fields.find("progress").and_then(|p| {
                 p.as_f64().map(|pi| {
                     if pi >= 99.0 {
                         pb.finish();
                     } else if pi >= 1.0 {
-                        pb.add(pi as usize);
+                        pb.add(pi as u64);
                     }
                 })
             });

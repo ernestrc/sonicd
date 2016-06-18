@@ -99,9 +99,9 @@ object SonicdSource extends SonicdLogging {
           override def onPush(): Unit = {
             val elem = grab(in2)
             elem match {
-              case t: TraceId ⇒
-                trace(log, t.id, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
-                val bytes = lengthPrefixEncode(t.toBytes)
+              case q: Query ⇒
+                trace(log, q.traceId.get, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
+                val bytes = lengthPrefixEncode(q.toBytes)
                 push(out1, bytes)
               case msg ⇒
                 val bytes = lengthPrefixEncode(msg.toBytes)
@@ -169,14 +169,14 @@ object SonicdSource extends SonicdLogging {
   }
 
   def logGraphBuild[T](query: Query)(f: String ⇒ T): T = {
-    val id = query.query_id match {
+    val traceId = query.traceId match {
       case Some(i) ⇒ i
       case None ⇒ UUID.randomUUID().toString
     }
 
-    trace(log, id, BuildGraph, Variation.Attempt, "building graph")
-    val graph = f(id)
-    trace(log, id, BuildGraph, Variation.Success, "materialized graph {}", id)
+    trace(log, traceId, BuildGraph, Variation.Attempt, "building graph for query {}", query.query)
+    val graph = f(traceId)
+    trace(log, traceId, BuildGraph, Variation.Success, "materialized graph {}", traceId)
     graph
   }
 
@@ -204,7 +204,7 @@ object SonicdSource extends SonicdLogging {
 
             import GraphDSL.Implicits._
 
-            val q = b.add(Source(Vector(TraceId(qid), query)))
+            val q = b.add(Source.single(query))
             val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
             val protocol = b.add(SonicProtocolStage(qid))
             val framing = b.add(framingStage)
@@ -255,7 +255,7 @@ object SonicdSource extends SonicdLogging {
 
             import GraphDSL.Implicits._
 
-            val q = b.add(Source(Vector(TraceId(qid), query)))
+            val q = b.add(Source.single(query))
             val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
             val protocol = b.add(SonicProtocolStage(qid))
             val framing = b.add(framingStage)
