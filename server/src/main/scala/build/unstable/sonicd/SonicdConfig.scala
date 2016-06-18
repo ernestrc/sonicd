@@ -26,6 +26,7 @@ abstract class FromResourcesConfig(config: Config) {
 
   val AUTH_WORKERS: Int = config.getInt("sonicd.auth-workers")
 
+  //TODO
   lazy val API_KEYS: List[ApiKey] = List.empty //config.getStringList("sonicd.api-keys")
 
   lazy val SPARK_MASTER = Try(config.getString("sonicd.spark.master"))

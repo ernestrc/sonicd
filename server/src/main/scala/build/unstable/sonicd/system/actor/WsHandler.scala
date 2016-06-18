@@ -150,10 +150,6 @@ with ActorSubscriber with SonicdLogging {
 
   }
 
-  def newQuery(withTraceId: Query): Unit = {
-    context.become(awaitingController(withTraceId.traceId.get) orElse commonBehaviour)
-  }
-
   def start: Receive = {
 
     case OnNext(q: Query) ⇒
@@ -166,6 +162,7 @@ with ActorSubscriber with SonicdLogging {
       val msg = "client established communication with ws handler"
       trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, msg)
       controller ! withTraceId
+      context.become(awaitingController(withTraceId.traceId.get) orElse commonBehaviour)
 
     case OnNext(msg) ⇒
       val msg = "first message should be a Query"

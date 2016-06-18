@@ -2,19 +2,16 @@ package build.unstable.sonicd.system.actor
 
 import akka.actor.{Actor, ActorLogging, ActorRef}
 import akka.http.scaladsl.model.DateTime
-import akka.pattern._
 import build.unstable.sonicd.api.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.{Authenticate, Query}
 import com.facebook.presto.jdbc.internal.guava.io.BaseEncoding
 
 import scala.collection.mutable
-import scala.concurrent.Future
 import scala.util.Try
 
 class AuthenticationActor(apiKeys: List[ApiKey]) extends Actor with ActorLogging {
 
   import AuthenticationActor._
-  import context.dispatcher
 
   val eventBus = context.system.eventStream
 

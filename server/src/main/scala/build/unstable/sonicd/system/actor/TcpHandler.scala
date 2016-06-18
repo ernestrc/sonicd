@@ -260,28 +260,28 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       }
   }
 
-  def waitingController(traceId: String): Receive = {
+  def waitingController(traceId: String): Receive =
+    framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+      case ev: DoneWithQueryExecution ⇒
+        val msg = "received done msg"
+        log.debug(msg)
+        context.become(closing(ev))
+        trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
 
-    case ev: DoneWithQueryExecution ⇒
-      val msg = "received done msg"
-      log.debug(msg)
-      context.become(closing(ev))
-      trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
+      case s: Subscription ⇒
+        val msg = "subscribed to publisher, requesting first element"
+        //start streaming
+        subscription = new StreamSubscription(s)
+        subscription.request(1)
+        trace(log, traceId, MaterializeSource, Variation.Success, msg)
+        context.become(materialized)
 
-    case s: Subscription ⇒
-      val msg = "subscribed to publisher, requesting first element"
-      //start streaming
-      subscription = new StreamSubscription(s)
-      subscription.request(1)
-      trace(log, traceId, MaterializeSource, Variation.Success, msg)
-      context.become(materialized)
-
-    case handlerProps: Props ⇒
-      log.debug("received props {}", handlerProps)
-      handler = context.actorOf(handlerProps)
-      val pub = ActorPublisher[SonicMessage](handler)
-      pub.subscribe(subs)
-  }
+      case handlerProps: Props ⇒
+        log.debug("received props {}", handlerProps)
+        handler = context.actorOf(handlerProps)
+        val pub = ActorPublisher[SonicMessage](handler)
+        pub.subscribe(subs)
+    }
 
   def receive: Receive = framing(deserializeAndHandleQueryFrame) orElse commonBehaviour
 }

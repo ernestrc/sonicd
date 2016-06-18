@@ -3,20 +3,19 @@ package build.unstable.sonicd.service
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
-import akka.stream.actor.ActorSubscriberMessage.{OnComplete, OnNext}
-import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.actor.{WsHandler, SonicController}
-import SonicController.NewQuery
-import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
+import akka.stream.actor.ActorSubscriberMessage.OnNext
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestKit}
 import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonicd.model._
+import build.unstable.sonicd.system.actor.WsHandler
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 class WsHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender
 with ImplicitSubscriber with ImplicitGuardian {
 
-  import build.unstable.sonicd.model.Fixture._
   import Fixture._
+  import build.unstable.sonicd.model.Fixture._
 
   def this() = this(ActorSystem("WsHandlerSpec"))
 
@@ -66,7 +65,8 @@ with ImplicitSubscriber with ImplicitGuardian {
   def newHandlerOnStreamingState(props: Props): ActorRef = {
     val wsHandler = newWatchedHandler()
     wsHandler ! OnNext(syntheticQuery)
-    expectMsg(NewQuery(syntheticQuery))
+    val q = expectMsgType[Query]
+    assert(q.traceId.nonEmpty)
 
     wsHandler ! props
     wsHandler
@@ -78,7 +78,8 @@ with ImplicitSubscriber with ImplicitGuardian {
 
       wsHandler ! OnNext(syntheticQuery)
 
-      expectMsg(NewQuery(syntheticQuery))
+      val q = expectMsgType[Query]
+      assert(q.traceId.nonEmpty)
 
       val done = DoneWithQueryExecution.error(new Exception("BOOM"))
       wsHandler ! done
@@ -98,7 +99,8 @@ with ImplicitSubscriber with ImplicitGuardian {
 
       wsHandler ! OnNext(syntheticQuery)
 
-      expectMsg(NewQuery(syntheticQuery))
+      val q = expectMsgType[Query]
+      assert(q.traceId.nonEmpty)
 
       subscription.request(1)
       val done = DoneWithQueryExecution.error(new Exception("BOOM"))
@@ -109,7 +111,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       expectTerminated(wsHandler)
     }
 
-    "should send all messages for tcp writing until completed is called" in {
+    "should forward all messages until completed is called" in {
       val wsHandler = newHandlerOnStreamingState(zombiePubProps)
 
       wsHandler ! Request(1)

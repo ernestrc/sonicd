@@ -6,8 +6,7 @@ import akka.testkit.{ImplicitSender, TestActorRef, TestKit}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.actor.SonicController.NewQuery
-import build.unstable.sonicd.system.actor.{SonicController, TcpHandler}
+import build.unstable.sonicd.system.actor.TcpHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.duration._
@@ -20,7 +19,7 @@ class MockController(msg: Any) extends Actor {
   override def receive: Receive = {
     case Terminated(ref) ⇒
       isTerminated = true
-    case NewQuery(query) ⇒
+    case query: Query ⇒
       isMaterialized = true
       sender() ! msg
       context watch sender()
@@ -72,7 +71,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     tcpHandler ! Tcp.Received(queryBytes)
     //expectMsg(Tcp.ResumeReading)
     //expectMsgType[NewQuery]
-    receiveN(2) //race condition between resume and q
+    val rcv = receiveN(2) //race condition between resume and q
+
+    assert(rcv.find(_.isInstanceOf[Query]).get.asInstanceOf[Query].traceId.nonEmpty)
 
     tcpHandler ! props
     tcpHandler
@@ -139,7 +140,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     expectMsg(Tcp.ResumeReading)
     tcpHandler ! Tcp.Received(queryBytes)
 
-    expectMsgType[NewQuery]
+    expectMsgType[Query]
 
     val done = DoneWithQueryExecution.error(new Exception("oops"))
 
