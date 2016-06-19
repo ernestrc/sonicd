@@ -2,20 +2,19 @@ package build.unstable.sonicd.source
 
 import java.io.File
 
-import akka.actor._
+import akka.actor.{Actor, ActorContext, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
+import build.unstable.sonicd.model.{JsonProtocol, DataSource, SonicMessage, SonicdLogging}
 import build.unstable.sonicd.source.file.{FileWatcher, LocalFilePublisher}
 import spray.json._
+import JsonProtocol._
 
 /**
  * Watches JSON files in 'path' local to Sonicd instance and exposes contents as a stream.
  *
  * Takes an optional 'tail' parameter to configure if only new data should be streamed.
  */
-class LocalJsonStreamSource(config: JsObject, queryId: String,
-                            query: String, context: ActorContext)
+class RawFileStreamSource(config: JsObject, queryId: String, query: String, context: ActorContext)
   extends DataSource(config, queryId, query, context) {
 
   val handlerProps: Props = {
@@ -25,18 +24,20 @@ class LocalJsonStreamSource(config: JsObject, queryId: String,
     val glob = FileWatcher.parseGlob(path)
     val watchers = LocalFilePublisher.getWatchers(glob, context)
 
-    Props(classOf[LocalJsonPublisher], queryId,
+    Props(classOf[LocalRawFilePublisher], queryId,
       query, tail, glob.fileFilterMaybe, watchers)
+
   }
 }
 
-class LocalJsonPublisher(val queryId: String,
-                         val rawQuery: String,
-                         val tail: Boolean,
-                         val fileFilterMaybe: Option[String],
-                         val watchersPair: Vector[(File, ActorRef)])
+class LocalRawFilePublisher(val queryId: String,
+                            val rawQuery: String,
+                            val tail: Boolean,
+                            val fileFilterMaybe: Option[String],
+                            val watchersPair: Vector[(File, ActorRef)])
   extends Actor with ActorPublisher[SonicMessage] with SonicdLogging with LocalFilePublisher {
 
   override def parseUTF8Data(raw: String): Map[String, JsValue] =
-    raw.parseJson.asJsObject.fields
+    Map("raw" → JsString(raw))
+
 }

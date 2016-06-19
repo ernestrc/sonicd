@@ -11,15 +11,6 @@ fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
         .map_err(|e| Error::ParseAddr(e))
 }
 
-pub fn frame(msg: SonicMessage) -> Vec<u8> {
-    let qbytes = msg.into_bytes();
-    let qlen = qbytes.len() as i32;
-    let mut fbytes = Vec::new();
-    fbytes.write_i32::<BigEndian>(qlen).unwrap();
-    fbytes.extend(qbytes.as_slice());
-    fbytes
-}
-
 pub fn read_message(fd: &i32) -> Result<SonicMessage> {
 
     let len_buf = &mut [0; 4];
@@ -46,9 +37,18 @@ pub fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
             .map_err(|e| Error::GetAddr(e))
             .and_then(|mut a| {
                 a.next()
-                 .unwrap()
-                 .map_err(|e| Error::GetAddr(e))
-                 .map(|a| SocketAddr::new(a.ip(), *port))
+                    .unwrap()
+                    .map_err(|e| Error::GetAddr(e))
+                    .map(|a| SocketAddr::new(a.ip(), *port))
             })
     })
+}
+
+fn frame(msg: ::serde_json::Value) -> Vec<u8> {
+    let qbytes = ::serde_json::to_string(&msg).unwrap().into_bytes();
+    let qlen = qbytes.len() as i32;
+    let mut fbytes = Vec::new();
+    fbytes.write_i32::<BigEndian>(qlen).unwrap();
+    fbytes.extend(qbytes.as_slice());
+    fbytes
 }

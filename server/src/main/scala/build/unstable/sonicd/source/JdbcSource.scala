@@ -199,7 +199,11 @@ class JdbcExecutor(queryId: String,
   def streaming(): Receive = {
     case Request(n) ⇒
       var i = n
-      while (i > 0 && (if (rs.next()) true else { isDone = true; false })) {
+      while (i > 0 && (if (rs.next()) true
+      else {
+        isDone = true;
+        false
+      })) {
         val data = scala.collection.mutable.ListBuffer.empty[JsValue]
         var pos = 1
         while (pos <= classMeta.size) {
@@ -260,10 +264,12 @@ class JdbcExecutor(queryId: String,
         val rsmd = rs.getMetaData
         val columnCount = rsmd.getColumnCount
 
+        import scala.language.existentials
+
         // The column count starts from 1
         val m = (1 to columnCount).foldLeft(Vector.empty[(String, JsValue)] → Vector.empty[Class[_]]) {
           case ((columns, met), i) ⇒
-            val (typeHint, clazz) = rsmd.getColumnClassName(i) match {
+            val (typeHint, clazz): (JsValue, Class[_]) = rsmd.getColumnClassName(i) match {
               case "java.lang.String" ⇒ JsString("") → classOf[String]
               case "java.lang.Boolean" ⇒ JsBoolean(true) → classOf[Boolean]
               case "java.lang.Object" ⇒ JsObject.empty → classOf[AnyRef]
@@ -274,7 +280,7 @@ class JdbcExecutor(queryId: String,
                 JsNumber(0) → classOf[Long]
               case e ⇒ JsString(rsmd.getColumnClassName(i)) → classOf[Any]
             }
-            (columns :+(rsmd.getColumnLabel(i), typeHint), met :+ clazz)
+            (columns :+((rsmd.getColumnLabel(i), typeHint)), met :+ clazz)
         }
         classMeta = m._2
         context.parent ! TypeMetadata(m._1)

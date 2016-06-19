@@ -1,11 +1,10 @@
 package build.unstable.sonicd.system
 
 import akka.actor.{ActorRef, Props}
-import akka.http.scaladsl.Http
-import akka.io.{Tcp, IO}
-import akka.stream._
-
-import scala.concurrent.duration._
+import akka.io.{IO, Tcp}
+import akka.routing.RoundRobinPool
+import build.unstable.sonicd.SonicdConfig
+import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController, TcpSupervisor}
 
 /**
  * Trait that declares the actors that make up our service
@@ -17,13 +16,20 @@ trait Service {
     */
   val tcpIoService: ActorRef
 
-  /** listens for new connections and creates instances of [[WsHandler]] */
+  /** listens for new connections and creates instances of [[build.unstable.sonicd.system.actor.TcpHandler]] */
   val tcpService: ActorRef
 
   /**
-   * responds to api commands and monitors [[WsHandler]] and [[WsHandler]]
+   * instantiates [[build.unstable.sonicd.model.DataSource]] subclasses in
+   * response to Query commands. Monitors [[build.unstable.sonicd.system.actor.TcpHandler]] and
+   * [[build.unstable.sonicd.system.actor.WsHandler]]. Handles resource authorization
    */
   val controllerService: ActorRef
+
+  /**
+   * creates and validates auth tokens
+   */
+  val authenticationService: ActorRef
 }
 
 /**
@@ -33,9 +39,14 @@ trait Service {
 trait AkkaService extends Service {
   this: System ⇒
 
-  val controllerService: ActorRef = system.actorOf(Props(classOf[SonicController], materializer), "controller")
+  val authenticationService: ActorRef = system.actorOf(
+    RoundRobinPool(SonicdConfig.AUTH_WORKERS)
+      .props(Props(classOf[AuthenticationActor], SonicdConfig.API_KEYS)), "authentication")
 
   val tcpIoService: ActorRef = IO(Tcp)
+
+  val controllerService: ActorRef = system.actorOf(Props(classOf[SonicController],
+    authenticationService), "controller")
 
   val tcpService = system.actorOf(Props(classOf[TcpSupervisor], controllerService), "tcpSupervisor")
 

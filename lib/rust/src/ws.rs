@@ -1,4 +1,4 @@
-use model::{Query, SonicMessage, Receipt, Result};
+use model::{Query, SonicMessage, Result};
 use std::rc::Rc;
 use std::cell::Cell;
 use libws::{Sender, Message, Handler, Handshake, CloseCode};

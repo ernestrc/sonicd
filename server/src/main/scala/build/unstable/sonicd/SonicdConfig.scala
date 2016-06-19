@@ -3,6 +3,7 @@ package build.unstable.sonicd
 import java.util.concurrent.TimeUnit
 
 import akka.util.Timeout
+import build.unstable.sonicd.api.auth.ApiKey
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.collection.JavaConversions._
 import scala.concurrent.duration.{FiniteDuration, Duration}
@@ -22,6 +23,11 @@ abstract class FromResourcesConfig(config: Config) {
   val API_VERSION = "v1"
 
   val JDBC_FETCHSIZE = Try(config.getInt("sonicd.jdbc.fetch-size")).getOrElse(1000)
+
+  val AUTH_WORKERS: Int = config.getInt("sonicd.auth-workers")
+
+  //TODO
+  lazy val API_KEYS: List[ApiKey] = List.empty //config.getStringList("sonicd.api-keys")
 
   lazy val SPARK_MASTER = Try(config.getString("sonicd.spark.master"))
   lazy val SPARK_HOME = Try(config.getString("sonicd.spark.home"))

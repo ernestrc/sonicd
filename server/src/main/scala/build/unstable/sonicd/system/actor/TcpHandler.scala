@@ -1,4 +1,4 @@
-package build.unstable.sonicd.system
+package build.unstable.sonicd.system.actor
 
 import java.util.UUID
 
@@ -10,7 +10,6 @@ import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.util.ByteString
 import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.SonicController.NewQuery
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 
@@ -144,7 +143,6 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   }
 
   private def writeOne(): Unit = {
-    val msg = storage.head
     connection ! storage.head
   }
 
@@ -173,7 +171,6 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   var subscription: StreamSubscription = null
   var cancellableCompleted: Cancellable = null
   var dataBuffer = ByteString.empty
-  var traceId: Option[String] = None
 
   def commonBehaviour: Receive = {
 
@@ -194,17 +191,16 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
   def deserializeAndHandleQueryFrame(data: ByteString): Unit = {
     SonicMessage.fromBytes(data) match {
       case q: Query ⇒
-        val (id, query) = traceId match {
-          case Some(i) ⇒ i → q.copy(query_id = i)
-          case None ⇒
-            val i = UUID.randomUUID().toString
-            i → q.copy(query_id = i)
+        val withTraceId = {
+          q.traceId match {
+            case Some(id) ⇒ q
+            case None ⇒ q.copy(trace_id = Some(UUID.randomUUID().toString))
+          }
         }
-        trace(log, id, MaterializeSource, Variation.Attempt, "deserialized query {}: {}", id, query)
-        controller ! NewQuery(query)
-        context.become(waitingController(id) orElse commonBehaviour)
-      case ClientAcknowledge ⇒ connection ! ConfirmedClose
-      case TraceId(id) ⇒ traceId = Some(id)
+        trace(log, withTraceId.traceId.get, MaterializeSource,
+          Variation.Attempt, "deserialized query {}", withTraceId.query)
+        controller ! withTraceId
+        context.become(waitingController(withTraceId.traceId.get) orElse commonBehaviour)
       case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
     }
   }
@@ -264,28 +260,28 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
       }
   }
 
-  def waitingController(queryId: String): Receive = {
+  def waitingController(traceId: String): Receive =
+    framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+      case ev: DoneWithQueryExecution ⇒
+        val msg = "received done msg"
+        log.debug(msg)
+        context.become(closing(ev))
+        trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
 
-    case ev: DoneWithQueryExecution ⇒
-      val msg = "received done msg"
-      log.debug(msg)
-      context.become(closing(ev))
-      trace(log, queryId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
+      case s: Subscription ⇒
+        val msg = "subscribed to publisher, requesting first element"
+        //start streaming
+        subscription = new StreamSubscription(s)
+        subscription.request(1)
+        trace(log, traceId, MaterializeSource, Variation.Success, msg)
+        context.become(materialized)
 
-    case s: Subscription ⇒
-      val msg = "subscribed to publisher, requesting first element"
-      //start streaming
-      subscription = new StreamSubscription(s)
-      subscription.request(1)
-      trace(log, queryId, MaterializeSource, Variation.Success, msg)
-      context.become(materialized)
-
-    case handlerProps: Props ⇒
-      log.debug("received props {}", handlerProps)
-      handler = context.actorOf(handlerProps)
-      val pub = ActorPublisher[SonicMessage](handler)
-      pub.subscribe(subs)
-  }
+      case handlerProps: Props ⇒
+        log.debug("received props {}", handlerProps)
+        handler = context.actorOf(handlerProps)
+        val pub = ActorPublisher[SonicMessage](handler)
+        pub.subscribe(subs)
+    }
 
   def receive: Receive = framing(deserializeAndHandleQueryFrame) orElse commonBehaviour
 }

@@ -1,4 +1,4 @@
-use libsonicd::{Receipt, Query, ClientConfig, Result, Error};
+use libsonicd::{Query, ClientConfig, Result, Error};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -212,7 +212,9 @@ pub fn build(src_alias: &str, mut srcfg: BTreeMap<String, Value>, query: &str) -
     });
 
     Ok(Query {
-        query_id: None,
+        id: None,
+        trace_id: None,
+        auth_token: None,
         query: query.to_owned(),
         config: config,
     })

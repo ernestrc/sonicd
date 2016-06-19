@@ -110,7 +110,7 @@ fn main() {
     };
 
     // TODO
-    let handlers = Vec::empty();
+    let handlers = Vec::new();
 
     loop {
 

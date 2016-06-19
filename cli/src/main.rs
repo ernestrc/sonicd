@@ -46,13 +46,13 @@ Options:
   --silent, -S          output data only
   -r, --rows-only       print rows only
   -h, --help            show this message
-  --version             show daemon and cli version
+  --version             show server and cli version
 ");
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONIC_COMMIT");
 
-fn _main(args: Args) -> Result<Receipt> {
+fn _main(args: Args) -> Result<()> {
 
     let config: ClientConfig = if args.flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &args.flag_c);
@@ -69,13 +69,13 @@ fn _main(args: Args) -> Result<Receipt> {
     } else if args.flag_execute {
         args.arg_query.clone()
     } else {
-        let daemon_v = try!(version(&config.sonicd, &config.http_port));
+        let server_v = try!(version(&config.sonicd, &config.http_port));
 
-        println!("sonic cli version {} ({}); daemon version {}",
+        println!("sonic cli version {} ({}); server version {}",
         VERSION,
         COMMIT.unwrap_or_else(|| "dev"),
-        daemon_v);
-        return Ok(Receipt::success());
+        server_v);
+        return Ok(());
     };
 
     let injected = try!(inject_vars(&query, &vars));
@@ -86,7 +86,7 @@ fn _main(args: Args) -> Result<Receipt> {
     pb.format("╢░░_╟");
 
     let fn_out = |msg: SonicMessage| {
-        match msg.payload {
+        match msg.p {
             Some(Value::Array(d)) => {
                 println!("{}", d.iter().fold(String::new(), |acc, x| {
                     format!("{}{:?}\t",acc, x)
@@ -98,7 +98,7 @@ fn _main(args: Args) -> Result<Receipt> {
 
     let fn_meta = |msg: SonicMessage| {
         if !args.flag_rows_only {
-            match msg.payload {
+            match msg.p {
                 Some(Value::Array(d)) => {
                     debug!("recv type metadata: {:?}", d);
                     println!("{}", d.iter().fold(String::new(), |acc, col| {
@@ -112,7 +112,7 @@ fn _main(args: Args) -> Result<Receipt> {
 
     let fn_prog = |msg: SonicMessage| {
         if !args.flag_silent {
-            let fields = msg.payload.unwrap();
+            let fields = msg.p.unwrap();
             fields.find("progress").and_then(|p| {
                 p.as_f64().map(|pi| {
                     if pi >= 99.0 {
@@ -131,7 +131,7 @@ fn _main(args: Args) -> Result<Receipt> {
 
     try!(stream(query, &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta));
 
-    Ok(Receipt::success())
+    Ok(())
 }
 
 fn main() {
@@ -143,14 +143,7 @@ fn main() {
     debug!("Parsed args {:?}", args);
 
     match _main(args) {
-        Ok(r) => {
-            if !r.success {
-                io::stderr().write(&format!("{}", r).as_bytes()).unwrap();
-                process::exit(1)
-            } else if r.message.is_some() {
-                io::stderr().write(&format!("{}", r).as_bytes()).unwrap();
-            }
-        },
+        Ok(_) => {},
         Err(r) =>  {
             io::stderr().write(&format!("{}", r).as_bytes()).unwrap();
             process::exit(1)

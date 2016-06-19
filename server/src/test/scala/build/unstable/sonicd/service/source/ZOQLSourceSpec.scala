@@ -1,12 +1,5 @@
 package build.unstable.sonicd.service.source
 
-import akka.actor.{ActorSystem, Props}
-import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
-import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.source.{ZuoraObjectQueryLanguageSource, ZOQLPublisher, JdbcPublisher, JdbcSource}
-import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
-import spray.json._
-
 // FIXME solve DI in Zuora Source and implement tests
 /*
 class ZOQLSourceSpec(_system: ActorSystem)

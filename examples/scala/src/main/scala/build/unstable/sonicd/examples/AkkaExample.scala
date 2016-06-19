@@ -26,10 +26,10 @@ object AkkaExample extends App {
     ActorMaterializer(ActorMaterializerSettings(system))
 
   val queryId1 = UUID.randomUUID().toString
-  val query1 = Query("100", config).copy(query_id = queryId1)
+  val query1 = Query("100", config, None).copy(trace_id = Some(queryId1))
 
   val queryId2 = UUID.randomUUID().toString
-  val query2 = Query("10", config).copy(query_id = queryId2)
+  val query2 = Query("10", config, None).copy(trace_id = Some(queryId2))
 
   val res1: Future[DoneWithQueryExecution] = SonicdSource.stream(addr, query1).to(Sink.ignore).run()
 
