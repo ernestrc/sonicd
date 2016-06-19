@@ -10,9 +10,9 @@ import spray.revolver.RevolverPlugin._
 
 object Sonic extends Build {
 
-  val scalaV = "2.11.7"
-  val akkaV = "2.4.4"
-  val sonicdV = "0.4.2"
+  val scalaV = "2.11.8"
+  val akkaV = "2.4.6"
+  val sonicdV = "0.4.4"
   val sparkV = "1.6.1"
 
   val commonSettings = Seq(
@@ -20,7 +20,7 @@ object Sonic extends Build {
     version := sonicdV,
     scalaVersion := scalaV,
     licenses +=("MIT", url("https://opensource.org/licenses/MIT")),
-    publishMavenStyle := false,
+    resolvers += Resolver.bintrayRepo("ernestrc", "maven"),
     scalacOptions := Seq(
       "-unchecked",
       "-Xlog-free-terms",
@@ -48,6 +48,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog" % "0.2.4",
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
@@ -106,6 +107,7 @@ object Sonic extends Build {
           "org.apache.spark" %% "spark-sql" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
           //core
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "ch.megard" %% "akka-http-cors" % "0.1.2",
           "ch.qos.logback" % "logback-classic" % "1.0.13",
           "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
           "com.h2database" % "h2" % "1.3.175" % "test"
@@ -120,6 +122,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog-core" % "0.1.3",
           "ch.qos.logback" % "logback-classic" % "1.0.13"
         )
       }

@@ -11,6 +11,7 @@ import akka.util.ByteString
 import build.unstable.sonicd.model._
 
 import scala.collection.mutable
+import scala.util.control.NonFatal
 
 class SonicController(materializer: Materializer) extends Actor with ActorLogging {
 
@@ -28,7 +29,7 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
 
   // logging turned off as children errors are not system errors
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true) {
-    case e: Exception ⇒ Restart
+    case NonFatal(e) ⇒ Restart
   }
 
   val handlers = mutable.Map.empty[ActorPath, String]
@@ -38,14 +39,6 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
       JsonProtocol.receiptJsonFormat.write(rec).compactPrint.getBytes(Charset.defaultCharset())
     ))
 
-  def newQuery(q: Query): (String, DataSource) = {
-    val id = UUID.randomUUID().toString
-    val query = q.copy(id)
-    val source = query.getSourceClass.getConstructors()(0)
-      .newInstance(query.config, query.query_id.get, query.query, context)
-      .asInstanceOf[DataSource]
-    (id, source)
-  }
 
   override def receive: Receive = {
 
@@ -61,7 +54,10 @@ class SonicController(materializer: Materializer) extends Actor with ActorLoggin
       log.debug("client posted new query {}", q)
       val handler = sender()
       try {
-        val (queryId, source) = newQuery(query)
+        val queryId = query.query_id.get
+        val source = query.getSourceClass.getConstructors()(0)
+          .newInstance(query.config, query.query_id.get, query.query, context)
+          .asInstanceOf[DataSource]
         log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
         context watch handler

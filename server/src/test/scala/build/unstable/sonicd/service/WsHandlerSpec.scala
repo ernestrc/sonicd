@@ -50,9 +50,15 @@ with ImplicitSubscriber with ImplicitGuardian {
     wsHandler ! done
     expectMsg(done)
   }
+  
+  def clientAcknowledge(wsHandler: ActorRef) = {
+    val ack = OnNext(ClientAcknowledge)
+    wsHandler ! ack
+  }
 
   def expectComplete(wsHandler: ActorRef) {
-    wsHandler ! OnComplete
+    //wsHandler ! OnComplete
+    clientAcknowledge(wsHandler)
     expectMsg("complete")
     expectTerminated(wsHandler)
   }
@@ -78,9 +84,9 @@ with ImplicitSubscriber with ImplicitGuardian {
       wsHandler ! done
       wsHandler ! Request(1)
       expectMsg(done)
+      clientAcknowledge(wsHandler)
       expectMsg("complete")
       expectTerminated(wsHandler)
-
     }
 
     "should not call onComplete twice (respect ReactiveStreams rules)" in {
@@ -98,6 +104,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val done = DoneWithQueryExecution.error(new Exception("BOOM"))
       wsHandler ! done
       expectMsg(done)
+      clientAcknowledge(wsHandler)
       expectMsg("complete")
       expectTerminated(wsHandler)
     }

@@ -4,5 +4,5 @@ import spray.json._
 
 object Fixture {
   val config = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
-  val syntheticQuery = Query("10", config)
+  val syntheticQuery = Query("10", config).copy(query_id = "1")
 }

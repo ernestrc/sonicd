@@ -2,7 +2,7 @@ package build.unstable.sonicd
 
 import java.nio.charset.Charset
 
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
+import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
@@ -35,7 +35,7 @@ package object model {
     }
 
     def toWsMessage: Message =
-      BinaryMessage.Strict(ByteString(json.compactPrint.getBytes(Charset.forName("utf-8"))))
+      TextMessage.Strict(json.compactPrint)
 
     def isDone: Boolean = this.isInstanceOf[DoneWithQueryExecution]
   }
@@ -94,6 +94,13 @@ package object model {
     override val eventType: Option[String] = Some("A")
   }
 
+  //used by tcp handler to carry a client's trace_id with the query
+  case class TraceId(id: String) extends SonicMessage {
+    override val variation: Option[String] = Some(id)
+    override val payload: Option[JsValue] = None
+    override val eventType: Option[String] = Some("I")
+  }
+
   object SonicMessage {
 
     def unapply(ev: SonicMessage): Option[(Option[String], Option[String], Option[JsValue])] =
@@ -112,6 +119,7 @@ package object model {
             case a ⇒ throw new Exception(s"expecting JsArray found $a")
           }
           case Some("A") ⇒ ClientAcknowledge
+          case Some("I") ⇒ TraceId(variation.get)
           case Some("T") ⇒
             payload match {
               case Some(d: JsArray) ⇒ TypeMetadata(d.convertTo[Vector[(String, JsValue)]])

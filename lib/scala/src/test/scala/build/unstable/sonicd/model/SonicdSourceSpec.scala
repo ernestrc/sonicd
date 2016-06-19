@@ -33,8 +33,6 @@ class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll
   val tcpFailure2: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
     tcpFailure1.mapMaterializedValue(_ ⇒ Future.failed[Tcp.OutgoingConnection](new TcpException))
 
-  val noFraming: Flow[ByteString, ByteString, NotUsed] = Flow[ByteString].map(a ⇒ a)
-
   val foldMessages: Sink[SonicMessage, Future[Vector[SonicMessage]]] =
     Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty)(_ :+ _)
 
@@ -68,12 +66,12 @@ class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll
 
   "SonicProtocolStage" should {
     "bubble up exception correctly if upstream connection stage fails" in {
-      val f1 = runTestGraph(Source.empty, tcpFailure1, noFraming, foldMessages)
+      val f1 = runTestGraph(Source.empty, tcpFailure1, SonicdSource.framingStage, foldMessages)
       whenReady(f1.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
       }
-      val f2 = runTestGraph(Source.empty, tcpFailure2, noFraming, foldMessages)
+      val f2 = runTestGraph(Source.empty, tcpFailure2, SonicdSource.framingStage, foldMessages)
       whenReady(f2.failed) { ex ⇒
         ex shouldBe an[TcpException]
         ex.getMessage shouldBe tcpError
@@ -86,7 +84,7 @@ class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll
           .mapMaterializedValue(_ ⇒ Future.successful(
             Tcp.OutgoingConnection(new InetSocketAddress(1), new InetSocketAddress(2))))
 
-      val f = runTestGraph(Source.empty, tcpFlow, noFraming, foldMessages)
+      val f = runTestGraph(Source.empty, tcpFlow, SonicdSource.framingStage, foldMessages)
       whenReady(f.failed) { ex ⇒
         ex shouldBe an[IncompleteStreamException]
       }

@@ -2,20 +2,23 @@ package build.unstable.sonicd.model
 
 import java.net.InetSocketAddress
 import java.nio.{ByteBuffer, ByteOrder}
+import java.util.UUID
 
 import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
 import akka.util.ByteString
+import build.unstable.tylog.Variation
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
-object SonicdSource {
+object SonicdSource extends SonicdLogging {
 
   class IncompleteStreamException extends Exception("stream was closed before done event was sent")
 
-  case object SonicProtocolStage
+  case class SonicProtocolStage(queryId: String)
     extends GraphStage[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage]] {
     val in1: Inlet[ByteString] = Inlet("ServerIncoming")
     val out2: Outlet[SonicMessage] = Outlet("ClientOutgoing")
@@ -30,6 +33,8 @@ object SonicdSource {
 
         var close: Option[ByteString] =
           Some(lengthPrefixEncode(ClientAcknowledge.toBytes))
+
+        var first: Boolean = true
 
         var last: Option[DoneWithQueryExecution] = None
 
@@ -63,6 +68,10 @@ object SonicdSource {
 
           override def onPush(): Unit = {
             val elem = grab(in1)
+            if (first) {
+              trace(log, queryId, EstablishCommunication, Variation.Success, "received first message from gateway")
+              first = false
+            }
             val msg = SonicMessage.fromBytes(elem.splitAt(4)._2)
             push(out2, msg)
             if (msg.isDone) {
@@ -89,8 +98,15 @@ object SonicdSource {
 
           override def onPush(): Unit = {
             val elem = grab(in2)
-            val bytes = lengthPrefixEncode(elem.toBytes)
-            push(out1, bytes)
+            elem match {
+              case t: TraceId ⇒
+                trace(log, t.id, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
+                val bytes = lengthPrefixEncode(t.toBytes)
+                push(out1, bytes)
+              case msg ⇒
+                val bytes = lengthPrefixEncode(msg.toBytes)
+                push(out1, bytes)
+            }
           }
         })
 
@@ -138,9 +154,7 @@ object SonicdSource {
         fieldOffset = 0,
         maximumFrameLength = 1000000 /* 1 MB */ ,
         byteOrder = ByteOrder.BIG_ENDIAN)
-      ).recover {
-      case e: Exception ⇒ DoneWithQueryExecution.error(e).toBytes
-    }
+      )
 
   /**
    * runs the given query against the sonicd instance
@@ -154,31 +168,55 @@ object SonicdSource {
     run(query, Tcp().outgoingConnection(address))
   }
 
+  def logGraphBuild[T](query: Query)(f: String ⇒ T): T = {
+    val id = query.query_id match {
+      case Some(i) ⇒ i
+      case None ⇒ UUID.randomUUID().toString
+    }
+
+    trace(log, id, BuildGraph, Variation.Attempt, "building graph")
+    val graph = f(id)
+    trace(log, id, BuildGraph, Variation.Success, "materialized graph {}", id)
+    graph
+  }
+
+  def logConnectionCreate(queryId: String)(f: Future[Tcp.OutgoingConnection])
+                         (implicit ctx: ExecutionContext): Future[Tcp.OutgoingConnection] = {
+    trace(log, queryId, CreateTcpConnection, Variation.Attempt, "create new tcp connection")
+    f.andThen {
+      case Success(i) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Success, "created new tcp connection")
+      case Failure(e) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Failure(e), "failed to create tcp connection")
+    }
+  }
+
   //FIXME seems to complete when tcp connection throws exception
   def run(query: Query,
           connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
 
-    val foldMessages = Sink.fold[Vector[SonicMessage], SonicMessage] (Vector.empty) (_:+ _)
 
-    RunnableGraph.fromGraph(GraphDSL.create(foldMessages) {
-      implicit b ⇒
-        fold ⇒
+    logGraphBuild(query) { qid ⇒
+      val foldMessages = Sink.fold[Vector[SonicMessage], SonicMessage] (Vector.empty) (_:+ _)
 
-          import GraphDSL.Implicits._
+      RunnableGraph.fromGraph(GraphDSL.create(foldMessages) {
+        implicit b ⇒
+          fold ⇒
 
-          val conn = b.add(connection)
-          val protocol = b.add(SonicProtocolStage)
-          val framing = b.add(framingStage)
-          val q = b.add(Source.single(query))
+            import GraphDSL.Implicits._
 
-          q ~> protocol.in2
-          protocol.out1 ~> conn
-          protocol.in1 <~ framing <~ conn
-          protocol.out2 ~> fold
+            val q = b.add(Source(Vector(TraceId(qid), query)))
+            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
+            val protocol = b.add(SonicProtocolStage(qid))
+            val framing = b.add(framingStage)
 
-          ClosedShape
-    }).run()
+            q ~> protocol.in2
+            protocol.out1 ~> conn
+            protocol.in1 <~ framing <~ conn
+            protocol.out2 ~> fold
+
+            ClosedShape
+      }).run()
+    }
   }
 
   /**
@@ -202,33 +240,35 @@ object SonicdSource {
 
     import system.dispatcher
 
-    val last = Sink.last[SonicMessage].mapMaterializedValue {
-      f ⇒
-        f.map {
-          case d: DoneWithQueryExecution ⇒ d
-          case m ⇒ DoneWithQueryExecution.error(new Exception(s"protocol error: unknown last message: $m"))
-        }
+    logGraphBuild(query) { qid ⇒
+      val last = Sink.last[SonicMessage].mapMaterializedValue {
+        f ⇒
+          f.map {
+            case d: DoneWithQueryExecution ⇒ d
+            case m ⇒ DoneWithQueryExecution.error(new Exception(s"protocol error: unknown last message: $m"))
+          }
+      }
+
+      Source.fromGraph(GraphDSL.create(last) {
+        implicit b ⇒
+          last ⇒
+
+            import GraphDSL.Implicits._
+
+            val q = b.add(Source(Vector(TraceId(qid), query)))
+            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
+            val protocol = b.add(SonicProtocolStage(qid))
+            val framing = b.add(framingStage)
+            val bcast = b.add(Broadcast[SonicMessage] (2))
+
+            q ~> protocol.in2
+            protocol.out1 ~> conn
+            protocol.in1 <~ framing <~ conn
+            protocol.out2 ~> bcast
+            bcast.out(1) ~> last
+
+            SourceShape(bcast.out(0))
+      })
     }
-
-    Source.fromGraph(GraphDSL.create(last) {
-      implicit b ⇒
-        last ⇒
-
-          import GraphDSL.Implicits._
-
-          val q = b.add(Source.single(query))
-          val conn = b.add(connection)
-          val protocol = b.add(SonicProtocolStage)
-          val framing = b.add(framingStage)
-          val bcast = b.add(Broadcast[SonicMessage] (2))
-
-          q ~> protocol.in2
-          protocol.out1 ~> conn
-          protocol.in1 <~ framing <~ conn
-          protocol.out2 ~> bcast
-          bcast.out(1) ~> last
-
-          SourceShape(bcast.out(0))
-    })
   }
 }
