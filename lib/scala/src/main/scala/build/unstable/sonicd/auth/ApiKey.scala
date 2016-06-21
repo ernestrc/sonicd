@@ -1,4 +1,4 @@
-package build.unstable.sonicd.api.auth
+package build.unstable.sonicd.auth
 
 import java.net.InetAddress
 

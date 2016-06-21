@@ -7,6 +7,7 @@ import akka.http.scaladsl.server.{Directive1, Directives, Rejection}
 import akka.pattern.ask
 import akka.stream.{Materializer, ActorMaterializer}
 import akka.util.Timeout
+import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{SonicMessage, Authenticate, JsonProtocol, SonicdLogging}
 import build.unstable.sonicd.system.actor.AuthenticationActor

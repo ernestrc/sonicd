@@ -3,7 +3,7 @@ package build.unstable.sonicd
 import java.util.concurrent.TimeUnit
 
 import akka.util.Timeout
-import build.unstable.sonicd.api.auth.ApiKey
+import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.model.SonicdLogging
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import spray.json._

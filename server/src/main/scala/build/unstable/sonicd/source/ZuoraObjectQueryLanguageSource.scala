@@ -11,6 +11,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
+import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ZuoraService._
@@ -24,8 +25,9 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
 
-class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends DataSource(config, queryId, query, context) {
+class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String,
+                                     query: String, context: ActorContext, apiUser: Option[ApiUser])
+  extends DataSource(config, queryId, query, context, apiUser) {
 
   val MIN_RECORDS = 100
 
@@ -81,7 +83,8 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
   // STATE
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
   var streamed = 0
-  var effectiveBatchSize: Int = batchSize //can be overriden if query has limit
+  var effectiveBatchSize: Int = batchSize
+  //can be overriden if query has limit
   var metaSent = false
 
   // HELPERS
@@ -99,7 +102,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
       } else ListBuffer.empty[SonicMessage]
       // unfortunately zuora doesn't give us any type information at runtime
       // the only way to pass type information would be to hardcode types in the table describes
-       v.foreach { n ⇒
+      v.foreach { n ⇒
         val child = n.xml.child
         val values = fields.map(k ⇒ child.find(_.label equalsIgnoreCase k).map(_.text).getOrElse(""))
         buf.append(OutputChunk(values))
@@ -122,7 +125,9 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
     case res: QueryResult ⇒
       val totalSize = res.size
 
-      if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
+      if (res.done || streamLimit.isDefined && {
+        streamed += effectiveBatchSize; streamed == streamLimit.get
+      }) {
         log.info(s"successfully fetched $totalSize zuora objects")
         self ! DoneWithQueryExecution(success = true)
       } else {
@@ -375,8 +380,12 @@ object ZuoraService {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Body>
           <ns1:login>
-            <ns1:username>{user}</ns1:username>
-            <ns1:password>{pwd}</ns1:password>
+            <ns1:username>
+              {user}
+            </ns1:username>
+            <ns1:password>
+              {pwd}
+            </ns1:password>
           </ns1:login>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
@@ -395,15 +404,21 @@ object ZuoraService {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Header>
           <ns2:SessionHeader>
-            <ns2:session>{session}</ns2:session>
+            <ns2:session>
+              {session}
+            </ns2:session>
           </ns2:SessionHeader>
           <ns2:QueryOptions>
-            <ns2:batchSize>{batchSize}</ns2:batchSize>
+            <ns2:batchSize>
+              {batchSize}
+            </ns2:batchSize>
           </ns2:QueryOptions>
         </SOAP-ENV:Header>
         <SOAP-ENV:Body>
           <ns1:query>
-            <ns1:queryString>{zoql}</ns1:queryString>
+            <ns1:queryString>
+              {zoql}
+            </ns1:queryString>
           </ns1:query>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
@@ -415,13 +430,19 @@ object ZuoraService {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Header>
           <ns2:SessionHeader>
-            <ns2:session>{session}</ns2:session>
+            <ns2:session>
+              {session}
+            </ns2:session>
           </ns2:SessionHeader> <ns2:QueryOptions>
-          <ns2:batchSize>{batchSize}</ns2:batchSize>
+          <ns2:batchSize>
+            {batchSize}
+          </ns2:batchSize>
         </ns2:QueryOptions>
         </SOAP-ENV:Header> <SOAP-ENV:Body>
         <ns1:queryMore>
-          <ns1:queryLocator>{queryLocator}</ns1:queryLocator>
+          <ns1:queryLocator>
+            {queryLocator}
+          </ns1:queryLocator>
         </ns1:queryMore>
       </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>

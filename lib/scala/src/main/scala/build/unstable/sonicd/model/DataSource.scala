@@ -1,22 +1,19 @@
 package build.unstable.sonicd.model
 
 import akka.actor._
-import build.unstable.sonicd.model.DataSource.{LongLong, ConfigurationException}
+import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.model.DataSource.ConfigurationException
+import build.unstable.sonicd.model.JsonProtocol._
 import spray.json._
-import JsonProtocol._
-
-import scala.runtime.RichLong
 
 object DataSource {
 
   class ConfigurationException(missing: String) extends Exception(s"config is missing '$missing' field")
 
-  //to get around "the result type of an implicit conversion must be more specific than AnyRef"
-  case class LongLong(long: Long)
-
 }
 
-abstract class DataSource(config: JsObject, queryId: String, query: String, context: ActorContext) {
+abstract class DataSource(config: JsObject, queryId: String, query: String,
+                          context: ActorContext, user: Option[ApiUser]) {
 
   def securityLevel: Option[Int] = config.fields.get("security").map(_.convertTo[Int])
 

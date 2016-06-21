@@ -1,4 +1,4 @@
-package build.unstable.sonicd.api
+package build.unstable.sonicd
 
 import build.unstable.sonicd.model.JsonProtocol._
 import spray.json._

@@ -8,6 +8,7 @@ import akka.pattern._
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
+import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.{BuildInfo, Sonicd, SonicdConfig}
@@ -17,8 +18,8 @@ import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
 import scala.util.{Failure, Success}
 
-class PrestoSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends DataSource(config, queryId, query, context) {
+class PrestoSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[ApiUser])
+  extends DataSource(config, queryId, query, context, apiUser) {
 
   def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
     Props(classOf[PrestoSupervisor], masterUrl, masterPort)

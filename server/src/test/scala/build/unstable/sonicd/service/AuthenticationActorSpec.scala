@@ -5,7 +5,8 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.api.auth.{ApiKey, ApiUser}
+import build.unstable.sonicd.api.auth.ApiUser
+import build.unstable.sonicd.auth.{ApiUser, ApiKey}
 import build.unstable.sonicd.model.Authenticate
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import com.auth0.jwt.JWTSigner
