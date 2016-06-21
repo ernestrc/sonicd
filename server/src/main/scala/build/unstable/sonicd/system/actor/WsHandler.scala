@@ -9,6 +9,7 @@ import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrate
 import build.unstable.sonicd.model.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
+import JsonProtocol._
 import org.reactivestreams._
 
 import scala.util.{Failure, Success}
@@ -49,10 +50,8 @@ with ActorSubscriber with SonicdLogging {
     log.debug("switched to closing behaviour with ev {}", done)
     if (isActive && totalDemand > 0) {
       onNext(done)
-      context.become(awaitingAck)
-    }
-
-    {
+      awaitingAck
+    } else {
       case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
       case Request(n) =>
         if (isActive) {
@@ -138,12 +137,12 @@ with ActorSubscriber with SonicdLogging {
 
     //auth cmd failed
     case Failure(e) ⇒
-      trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
+      trace(log, traceId, GenerateToken, Variation.Failure(e), "")
       context.become(closing(DoneWithQueryExecution.error(e)))
 
     //auth cmd succeded
     case Success(token: AuthenticationActor.Token) ⇒
-      trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
+      trace(log, traceId, GenerateToken, Variation.Success, "received new token '{}'", token)
       onNext(OutputChunk(Vector(token)))
       context.become(closing(DoneWithQueryExecution.success))
 
@@ -175,14 +174,12 @@ with ActorSubscriber with SonicdLogging {
       }
       withTraceId match {
         case q: Query ⇒
-          trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt,
-            "deserialized query {}", q)
+          trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, "recv query {}", q)
 
           controller ! SonicController.NewQuery(q, clientAddress)
 
         case a: Authenticate ⇒
-          trace(log, withTraceId.traceId.get, GenerateToken, Variation.Attempt,
-            "deserialized authenticate cmd {}", a)
+          trace(log, withTraceId.traceId.get, GenerateToken, Variation.Attempt, "recv authenticate cmd {}", a)
 
           authService ! a
       }

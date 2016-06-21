@@ -146,7 +146,7 @@ object SonicMessage {
   def fromJson(raw: String): SonicMessage = try {
     val fields = raw.parseJson.asJsObject.fields
 
-    val vari: Option[String] = Try(fields.get(variation).map(_.convertTo[String])).getOrElse(None)
+    val vari: Option[String] = fields.get(variation).flatMap(_.convertTo[Option[String]])
     val pay: Option[JsValue] = fields.get(payload)
 
     fields.get(eventType).map(_.convertTo[String]) match {
@@ -160,7 +160,7 @@ object SonicMessage {
         Authenticate(
           fields("user").convertTo[String],
           vari.get,
-          fields.get("trace_id").map(_.convertTo[String]))
+          fields.get("trace_id").flatMap(_.convertTo[Option[String]]))
       case Some(`log`) ⇒ Log(vari.get)
       case Some(`meta`) ⇒
         pay match {

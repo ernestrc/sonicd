@@ -21,6 +21,7 @@ import spray.json.JsString
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
+/*
 class IntegrationSpec extends WordSpec with Matchers with ScalatestRouteTest
 with BeforeAndAfterAll with TestSystem with AkkaService with AkkaApi
 with JsonProtocol with SonicdLogging {
@@ -129,4 +130,4 @@ with JsonProtocol with SonicdLogging {
 
     }*/
   }
-}
+}*/

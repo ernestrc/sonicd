@@ -53,7 +53,8 @@ trait AkkaApi extends Api {
             Receipt.error(e, "Oops! There was an unexpected Error")).toString()))))
   }
 
-  val queryEndpoint = new QueryEndpoint(controllerService, SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
+  val queryEndpoint = new QueryEndpoint(controllerService, authenticationService,
+    SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
 
   val authEndpoint = new AuthEndpoint(authenticationService, SonicdConfig.ENDPOINT_TIMEOUT)
 

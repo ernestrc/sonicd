@@ -1,5 +1,7 @@
 package build.unstable.sonicd.service
 
+import java.net.InetAddress
+
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
@@ -7,8 +9,11 @@ import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestKit}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
+import build.unstable.sonicd.system.actor.SonicController.NewQuery
 import build.unstable.sonicd.system.actor.WsHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
+
+import scala.util.{Failure, Success}
 
 class WsHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender
@@ -24,8 +29,9 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def newWatchedHandler(): ActorRef = {
-    val wsHandler = guardian.underlyingActor.context.actorOf(Props(classOf[WsHandler], self)
-      .withDispatcher(CallingThreadDispatcher.Id))
+    val wsHandler = guardian.underlyingActor.context.actorOf(
+      Props(classOf[WsHandler], self, self, Some(InetAddress.getLocalHost))
+        .withDispatcher(CallingThreadDispatcher.Id))
 
     watch(wsHandler)
     ActorPublisher.apply[SonicMessage](wsHandler).subscribe(subs)
@@ -49,7 +55,7 @@ with ImplicitSubscriber with ImplicitGuardian {
     wsHandler ! done
     expectMsg(done)
   }
-  
+
   def clientAcknowledge(wsHandler: ActorRef) = {
     val ack = OnNext(ClientAcknowledge)
     wsHandler ! ack
@@ -65,35 +71,76 @@ with ImplicitSubscriber with ImplicitGuardian {
   def newHandlerOnStreamingState(props: Props): ActorRef = {
     val wsHandler = newWatchedHandler()
     wsHandler ! OnNext(syntheticQuery)
-    val q = expectMsgType[Query]
+    val q = expectMsgType[NewQuery]
 
     //make sure that traceId is injected
-    assert(q.traceId.nonEmpty)
+    assert(q.query.traceId.nonEmpty)
 
     wsHandler ! props
     wsHandler
   }
 
   "WsHandler" should {
+    "should handle authenticate message" in {
+      val wsHandler = newWatchedHandler()
+
+      wsHandler ! Request(1)
+      wsHandler ! OnNext(Authenticate("serrallonga", "a", None))
+
+      val q = expectMsgType[Authenticate]
+      assert(q.traceId.nonEmpty)
+
+      val done = Success("token")
+      wsHandler ! done
+      wsHandler ! Request(1)
+      expectMsg(OutputChunk(Vector(done.get)))
+      wsHandler ! Request(1)
+      expectMsg(DoneWithQueryExecution.success)
+
+      clientAcknowledge(wsHandler)
+      expectMsg("complete")
+      expectTerminated(wsHandler)
+    }
+
+    "should handle authenticate message and auth error" in {
+      val wsHandler = newWatchedHandler()
+
+      wsHandler ! Request(1)
+      wsHandler ! OnNext(Authenticate("serrallonga", "a", None))
+
+      val q = expectMsgType[Authenticate]
+      assert(q.traceId.nonEmpty)
+
+      val done: Failure[String] = Failure(new Exception("BOOM"))
+      wsHandler ! done
+      wsHandler ! Request(1)
+      expectMsg(DoneWithQueryExecution.error(done.failed.get))
+
+      clientAcknowledge(wsHandler)
+      expectMsg("complete")
+      expectTerminated(wsHandler)
+    }
+
     "should handle error event when controller fails to instantiate publisher" in {
       val wsHandler = newWatchedHandler()
 
       wsHandler ! OnNext(syntheticQuery)
 
-      val q = expectMsgType[Query]
-      assert(q.traceId.nonEmpty)
+      val q = expectMsgType[NewQuery]
+      assert(q.query.traceId.nonEmpty)
 
       val done = DoneWithQueryExecution.error(new Exception("BOOM"))
       wsHandler ! done
       wsHandler ! Request(1)
       expectMsg(done)
+
       clientAcknowledge(wsHandler)
       expectMsg("complete")
       expectTerminated(wsHandler)
     }
 
     "should not call onComplete twice (respect ReactiveStreams rules)" in {
-      val wsHandler = guardian.underlying.actor.context.actorOf(Props(classOf[WsHandler], self)
+      val wsHandler = guardian.underlying.actor.context.actorOf(Props(classOf[WsHandler], self, self, None)
         .withDispatcher(CallingThreadDispatcher.Id))
 
       watch(wsHandler)
@@ -101,8 +148,8 @@ with ImplicitSubscriber with ImplicitGuardian {
 
       wsHandler ! OnNext(syntheticQuery)
 
-      val q = expectMsgType[Query]
-      assert(q.traceId.nonEmpty)
+      val q = expectMsgType[NewQuery]
+      assert(q.query.traceId.nonEmpty)
 
       subscription.request(1)
       val done = DoneWithQueryExecution.error(new Exception("BOOM"))
@@ -128,8 +175,6 @@ with ImplicitSubscriber with ImplicitGuardian {
       expectComplete(wsHandler)
 
     }
-
-    //todo make sure that authenticate gets injected a traceId
 
     "should materialize stream and propagates messages to downstream subscriber" in {
       val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
