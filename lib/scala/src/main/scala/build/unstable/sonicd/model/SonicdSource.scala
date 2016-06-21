@@ -18,7 +18,7 @@ object SonicdSource extends SonicdLogging {
 
   class IncompleteStreamException extends Exception("stream was closed before done event was sent")
 
-  case class SonicProtocolStage(queryId: String)
+  case class SonicProtocolStage(traceId: String)
     extends GraphStage[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage]] {
     val in1: Inlet[ByteString] = Inlet("ServerIncoming")
     val out2: Outlet[SonicMessage] = Outlet("ClientOutgoing")
@@ -69,7 +69,7 @@ object SonicdSource extends SonicdLogging {
           override def onPush(): Unit = {
             val elem = grab(in1)
             if (first) {
-              trace(log, queryId, EstablishCommunication, Variation.Success, "received first message from gateway")
+              trace(log, traceId, EstablishCommunication, Variation.Success, "received first message from gateway")
               first = false
             }
             val msg = SonicMessage.fromBytes(elem.splitAt(4)._2)
@@ -99,8 +99,8 @@ object SonicdSource extends SonicdLogging {
           override def onPush(): Unit = {
             val elem = grab(in2)
             elem match {
-              case q: Query ⇒
-                trace(log, q.traceId.get, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
+              case q: InitMessage ⇒
+                trace(log, traceId, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
                 val bytes = lengthPrefixEncode(q.toBytes)
                 push(out1, bytes)
               case msg ⇒
@@ -168,24 +168,26 @@ object SonicdSource extends SonicdLogging {
     run(query, Tcp().outgoingConnection(address))
   }
 
-  def logGraphBuild[T](query: Query)(f: String ⇒ T): T = {
-    val traceId = query.traceId match {
-      case Some(i) ⇒ i
-      case None ⇒ UUID.randomUUID().toString
+  def logGraphBuild[T](query: Query)(f: Query ⇒ T): T = {
+    val (withTraceId, traceId) = query.traceId match {
+      case Some(i) ⇒ query → i
+      case None ⇒
+        val id = UUID.randomUUID().toString
+        query.copy(trace_id = Some(id)) -> id
     }
 
     trace(log, traceId, BuildGraph, Variation.Attempt, "building graph for query {}", query.query)
-    val graph = f(traceId)
+    val graph = f(withTraceId)
     trace(log, traceId, BuildGraph, Variation.Success, "materialized graph {}", traceId)
     graph
   }
 
-  def logConnectionCreate(queryId: String)(f: Future[Tcp.OutgoingConnection])
+  def logConnectionCreate(traceId: String)(f: Future[Tcp.OutgoingConnection])
                          (implicit ctx: ExecutionContext): Future[Tcp.OutgoingConnection] = {
-    trace(log, queryId, CreateTcpConnection, Variation.Attempt, "create new tcp connection")
+    trace(log, traceId, CreateTcpConnection, Variation.Attempt, "create new tcp connection")
     f.andThen {
-      case Success(i) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Success, "created new tcp connection")
-      case Failure(e) ⇒ trace(log, queryId, CreateTcpConnection, Variation.Failure(e), "failed to create tcp connection")
+      case Success(i) ⇒ trace(log, traceId, CreateTcpConnection, Variation.Success, "created new tcp connection")
+      case Failure(e) ⇒ trace(log, traceId, CreateTcpConnection, Variation.Failure(e), "failed to create tcp connection")
     }
   }
 
@@ -195,7 +197,7 @@ object SonicdSource extends SonicdLogging {
          (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
 
 
-    logGraphBuild(query) { qid ⇒
+    logGraphBuild(query) { withTraceId ⇒
       val foldMessages = Sink.fold[Vector[SonicMessage], SonicMessage] (Vector.empty) (_:+ _)
 
       RunnableGraph.fromGraph(GraphDSL.create(foldMessages) {
@@ -203,10 +205,11 @@ object SonicdSource extends SonicdLogging {
           fold ⇒
 
             import GraphDSL.Implicits._
+            val traceId = withTraceId.traceId.get
 
-            val q = b.add(Source.single(query))
-            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
-            val protocol = b.add(SonicProtocolStage(qid))
+            val q = b.add(Source.single(withTraceId))
+            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(traceId)(_)(system.dispatcher)))
+            val protocol = b.add(SonicProtocolStage(traceId))
             val framing = b.add(framingStage)
 
             q ~> protocol.in2
@@ -240,7 +243,7 @@ object SonicdSource extends SonicdLogging {
 
     import system.dispatcher
 
-    logGraphBuild(query) { qid ⇒
+    logGraphBuild(query) { withTraceId ⇒
       val last = Sink.last[SonicMessage].mapMaterializedValue {
         f ⇒
           f.map {
@@ -254,10 +257,11 @@ object SonicdSource extends SonicdLogging {
           last ⇒
 
             import GraphDSL.Implicits._
+            val traceId = withTraceId.traceId.get
 
-            val q = b.add(Source.single(query))
-            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(qid)(_)(system.dispatcher)))
-            val protocol = b.add(SonicProtocolStage(qid))
+            val q = b.add(Source.single(withTraceId))
+            val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(traceId)(_)(system.dispatcher)))
+            val protocol = b.add(SonicProtocolStage(traceId))
             val framing = b.add(framingStage)
             val bcast = b.add(Broadcast[SonicMessage] (2))
 

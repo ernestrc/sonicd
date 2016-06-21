@@ -8,10 +8,10 @@ import akka.pattern.ask
 import akka.stream.{Materializer, ActorMaterializer}
 import akka.util.Timeout
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{Authenticate, JsonProtocol, SonicdLogging}
+import build.unstable.sonicd.model.{SonicMessage, Authenticate, JsonProtocol, SonicdLogging}
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import build.unstable.tylog.Variation
-import spray.json.RootJsonFormat
+import spray.json.{JsValue, RootJsonFormat}
 
 import scala.util.{Failure, Success, Try}
 
@@ -24,7 +24,14 @@ trait AuthDirectives {
 
   case class LoginFailed(e: Throwable) extends Rejection
 
-  implicit val authJsonFormatter: RootJsonFormat[Authenticate] = jsonFormat3(Authenticate.apply)
+  implicit val authJsonFormatter: RootJsonFormat[Authenticate] = new RootJsonFormat[Authenticate] {
+    override def write(obj: Authenticate): JsValue = obj.json
+
+    override def read(json: JsValue): Authenticate = SonicMessage.fromJson(json) match {
+      case a: Authenticate ⇒ a
+      case e ⇒ throw new Exception(s"expected Authenticate message found: $e")
+    }
+  }
 
   def createAuthToken(authService: ActorRef, t: Timeout, traceId: String): Directive1[AuthenticationActor.Token] =
     entity(as[Authenticate]).flatMap { authCmd =>

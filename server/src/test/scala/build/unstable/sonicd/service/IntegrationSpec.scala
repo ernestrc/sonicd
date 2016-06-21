@@ -21,7 +21,6 @@ import spray.json.JsString
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
-/*
 class IntegrationSpec extends WordSpec with Matchers with ScalatestRouteTest
 with BeforeAndAfterAll with TestSystem with AkkaService with AkkaApi
 with JsonProtocol with SonicdLogging {
@@ -61,52 +60,51 @@ with JsonProtocol with SonicdLogging {
   }
 
   "sonicd tcp " should {
-    /*
-      "run a simple query using the tcp api" in {
+    "run a simple query using the tcp api" in {
 
-        val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
-        val stream: Future[DoneWithQueryExecution] =
-          SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
+      val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
+      val stream: Future[DoneWithQueryExecution] =
+        SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
 
-        val sDone = Await.result(stream, 20.seconds)
-        val fDone = Await.result(future, 20.seconds)
+      val sDone = Await.result(stream, 20.seconds)
+      val fDone = Await.result(future, 20.seconds)
 
-        assert(sDone.success)
-        fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
-      }
+      assert(sDone.success)
+      fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+    }
 
-      "run a query against a source that is configured server side" in {
+    "run a query against a source that is configured server side" in {
 
-        val syntheticQuery = new Query(None, "10", JsString("test_server_config"))
-        val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
-        val stream: Future[DoneWithQueryExecution] =
-          SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
+      val syntheticQuery = new Query(None, None, None, "10", JsString("test_server_config"))
+      val future: Future[Vector[SonicMessage]] = SonicdSource.run(tcpAddr, syntheticQuery)
+      val stream: Future[DoneWithQueryExecution] =
+        SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
 
-        val sDone = Await.result(stream, 20.seconds)
-        val fDone = Await.result(future, 20.seconds)
+      val sDone = Await.result(stream, 20.seconds)
+      val fDone = Await.result(future, 20.seconds)
 
-        assert(sDone.success)
-        fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
-      }
+      assert(sDone.success)
+      fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+    }
 
-      "should bubble exception thrown by source" in {
-        val query = Query("select * from nonesense", H2Config) //table nonesense doesn't exist
+    "should bubble exception thrown by source" in {
+      val query = Query("select * from nonesense", H2Config, None) //table nonesense doesn't exist
 
-        val future: Future[Vector[SonicMessage]] =
-          SonicdSource.run(tcpAddr, query)
-        val stream: Future[DoneWithQueryExecution] =
-          SonicdSource.stream(tcpAddr, query).to(Sink.ignore).run()
+      val future: Future[Vector[SonicMessage]] =
+        SonicdSource.run(tcpAddr, query)
+      val stream: Future[DoneWithQueryExecution] =
+        SonicdSource.stream(tcpAddr, query).to(Sink.ignore).run()
 
-        val sThrown = intercept[Exception] {
+      val sThrown = intercept[Exception] {
           Await.result(stream, 20.seconds)
         }
-        assert(sThrown.getMessage.contains("not found"))
+      assert(sThrown.getMessage.contains("not found"))
 
-        val thrown = intercept[Exception] {
+      val thrown = intercept[Exception] {
           Await.result(future, 20.seconds)
         }
-        assert(thrown.getMessage.contains("not found"))
-      }*/
+      assert(thrown.getMessage.contains("not found"))
+    }
 
     /*
     "should bubble exception thrown by the tcp stage" in {
@@ -130,4 +128,4 @@ with JsonProtocol with SonicdLogging {
 
     }*/
   }
-}*/
+}
