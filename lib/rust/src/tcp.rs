@@ -44,7 +44,7 @@ pub fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
     })
 }
 
-fn frame(msg: ::serde_json::Value) -> Vec<u8> {
+pub fn frame(msg: ::serde_json::Value) -> Vec<u8> {
     let qbytes = ::serde_json::to_string(&msg).unwrap().into_bytes();
     let qlen = qbytes.len() as i32;
     let mut fbytes = Vec::new();

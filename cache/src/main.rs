@@ -27,6 +27,8 @@ use std::os::unix::io::{RawFd, AsRawFd};
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONICD_COMMIT");
 
+//FIXME this is WIP
+
 // TODO https://github.com/BurntSushi/chan-signal
 // use nix::sys::signal;
 fn ssig() {}
@@ -110,7 +112,7 @@ fn main() {
     };
 
     // TODO
-    let handlers = Vec::new();
+    //let handlers = Vec::new();
 
     loop {
 

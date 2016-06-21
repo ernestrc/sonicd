@@ -163,7 +163,7 @@ impl SonicMessage {
         Self::from_slice(buf.as_slice())
     }
 
-    fn payload_into_errors(payload: Option<Value>) -> Vec<String> {
+    pub fn payload_into_errors(payload: Option<Value>) -> Vec<String> {
         payload.map(|payload| {
             match payload {
                 Value::Array(data) => {
