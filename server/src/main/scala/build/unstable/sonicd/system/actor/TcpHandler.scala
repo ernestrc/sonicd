@@ -196,7 +196,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
   def deserializeAndHandleInitCommands(data: ByteString): Unit = {
     SonicMessage.fromBytes(data) match {
-      case i: InitMessage ⇒
+      case i: SonicCommand ⇒
         val withTraceId = {
           i.traceId match {
             case Some(id) ⇒ i
@@ -249,7 +249,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
               context.unbecome()
             } else writeOne()
           case WritingResumed ⇒ writeOne()
-          case CommandFailed(Write(_, _)) =>
+          case Tcp.CommandFailed(Write(_, _)) =>
             connection ! ResumeWriting
         }, discardOld = false)
     }

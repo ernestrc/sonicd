@@ -32,7 +32,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
           trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
           throw new TokenVerificationFailed(e)
       }
-    }.flatMap(ApiUser.fromClaims)
+    }.flatMap(ApiUser.fromJWTClaims)
   }
 
   def createToken(key: String, user: String, traceId: String): Try[Token] = {
@@ -43,7 +43,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
         val seconds = apiKey.tokenExpires.getOrElse(globalTokenDuration)
 
         signOpts.setExpirySeconds(seconds.toSeconds.toInt)
-        val claims = apiKey.toClaims(user)
+        val claims = apiKey.toJWTClaims(user)
         trace(log, traceId, JWTSignToken, Variation.Attempt,
           "signing token for {} with api key {} with expiration {}(s)", user, key, seconds)
         try {

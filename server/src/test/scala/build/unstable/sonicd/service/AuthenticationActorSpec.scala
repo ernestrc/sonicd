@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.api.auth.{ApiKey, ApiUser, Mode}
+import build.unstable.sonicd.api.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.Authenticate
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import com.auth0.jwt.JWTSigner
@@ -23,8 +23,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     TestKit.shutdownActorSystem(system)
   }
 
-  val apiKeys = ApiKey("1", Mode.Read, 1, Some(List(InetAddress.getByName("localhost"))), None) ::
-    ApiKey("2", Mode.ReadWrite, 3, None, None) :: Nil
+  val apiKeys = ApiKey("1", ApiKey.Mode.Read, 1, Some(List(InetAddress.getByName("localhost"))), None) ::
+    ApiKey("2", ApiKey.Mode.ReadWrite, 3, None, None) :: Nil
   val tokenExpiration: FiniteDuration = 10.seconds
   val secret = "super-secret"
 
@@ -45,10 +45,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val token = tokenMaybe.get
 
       val verified = actor.underlyingActor.verifier.verify(token)
-      val user = ApiUser.fromClaims(verified)
+      val user = ApiUser.fromJWTClaims(verified)
 
       assert(user.get.authorization == 1)
-      assert(user.get.mode == Mode.Read)
+      assert(user.get.mode == ApiKey.Mode.Read)
       assert(user.get.user == "pepito")
       assert(user.get.allowedIps.get == List(InetAddress.getByName("localhost")))
     }
@@ -64,7 +64,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     "verify token and return logged user if verification was successful" in {
       val actor = newActor()
-      val token = actor.underlyingActor.signer.sign(apiKeys.head.toClaims("serrallonga"))
+      val token = actor.underlyingActor.signer.sign(apiKeys.head.toJWTClaims("serrallonga"))
 
       actor ! AuthenticationActor.ValidateToken(token, "1")
       val res = expectMsgType[Try[AuthenticationActor.Token]]
@@ -89,7 +89,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         val opts = new JWTSigner.Options()
         opts.setExpirySeconds(tokenDuration.toSeconds.toInt)
         val apiKey = apiKeys.head
-        val token = actor.underlyingActor.signer.sign(apiKey.toClaims("serrallonga"), opts)
+        val token = actor.underlyingActor.signer.sign(apiKey.toJWTClaims("serrallonga"), opts)
 
         //expire token
         Thread.sleep(1000)
@@ -107,7 +107,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         val opts = new JWTSigner.Options()
         opts.setExpirySeconds(tokenDuration.toSeconds.toInt)
         val apiKey = apiKeys.head.copy(tokenExpires = Some(tokenDuration))
-        val token = actor.underlyingActor.signer.sign(apiKey.toClaims("serrallonga"), opts)
+        val token = actor.underlyingActor.signer.sign(apiKey.toJWTClaims("serrallonga"), opts)
 
         //expire token
         Thread.sleep(1000)

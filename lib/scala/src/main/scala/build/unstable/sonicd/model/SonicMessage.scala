@@ -101,15 +101,14 @@ case class Log(message: String) extends SonicMessage {
   override val eventType: String = SonicMessage.log
 }
 
-sealed trait InitMessage {
-  this: SonicMessage ⇒
+sealed trait SonicCommand extends SonicMessage {
   val traceId: Option[String]
 
-  def setTraceId(trace_id: String): InitMessage
+  def setTraceId(trace_id: String): SonicCommand
 }
 
 case class Authenticate(user: String, key: String, traceId: Option[String])
-  extends SonicMessage with InitMessage {
+  extends SonicCommand {
   override val variation: Option[String] = Some(key)
   override val payload: Option[JsValue] = Some(JsObject(Map(
     "user" → JsString(user),
@@ -117,7 +116,7 @@ case class Authenticate(user: String, key: String, traceId: Option[String])
   )))
   override val eventType: String = SonicMessage.auth
 
-  override def setTraceId(trace_id: String): InitMessage =
+  override def setTraceId(trace_id: String): SonicCommand =
     copy(traceId = Some(trace_id))
 
   override def toString: String = s"Authenticate($user)"
@@ -200,9 +199,9 @@ class Query(val id: Option[Long],
             val authToken: Option[String],
             val query: String,
             val _config: JsValue)
-  extends SonicMessage with InitMessage {
+  extends SonicCommand {
 
-  override def setTraceId(trace_id: String): InitMessage =
+  override def setTraceId(trace_id: String): SonicCommand =
     copy(trace_id = Some(trace_id))
 
   override val variation: Option[String] = Some(query)

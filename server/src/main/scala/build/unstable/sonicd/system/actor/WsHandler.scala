@@ -165,7 +165,7 @@ with ActorSubscriber with SonicdLogging {
 
   def start: Receive = {
 
-    case OnNext(i: InitMessage) ⇒
+    case OnNext(i: SonicCommand) ⇒
       val withTraceId = {
         i.traceId match {
           case Some(id) ⇒ i

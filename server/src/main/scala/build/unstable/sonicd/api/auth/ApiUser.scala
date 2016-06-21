@@ -7,12 +7,12 @@ import spray.json._
 
 import scala.util.Try
 
-case class ApiUser(user: String, authorization: Int, mode: Mode, allowedIps: Option[List[InetAddress]]) {
+case class ApiUser(user: String, authorization: Int, mode: ApiKey.Mode, allowedIps: Option[List[InetAddress]]) {
 }
 
 object ApiUser {
-  def fromClaims(verifiedClaims: java.util.Map[String, AnyRef]): Try[ApiUser] = Try {
-    Mode(verifiedClaims.get("mode").asInstanceOf[String]).flatMap { mode ⇒
+  def fromJWTClaims(verifiedClaims: java.util.Map[String, AnyRef]): Try[ApiUser] = Try {
+    ApiKey.Mode(verifiedClaims.get("mode").asInstanceOf[String]).flatMap { mode ⇒
       Try {
         ApiUser(
           verifiedClaims.get("user").asInstanceOf[String],

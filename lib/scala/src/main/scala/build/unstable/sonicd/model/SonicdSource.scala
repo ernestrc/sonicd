@@ -10,11 +10,15 @@ import akka.stream.scaladsl._
 import akka.stream.stage._
 import akka.util.ByteString
 import build.unstable.tylog.Variation
+import JsonProtocol._
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object SonicdSource extends SonicdLogging {
+
+
+  /* HELPERS */
 
   class IncompleteStreamException extends Exception("stream was closed before done event was sent")
 
@@ -99,7 +103,7 @@ object SonicdSource extends SonicdLogging {
           override def onPush(): Unit = {
             val elem = grab(in2)
             elem match {
-              case q: InitMessage ⇒
+              case q: SonicCommand ⇒
                 trace(log, traceId, EstablishCommunication, Variation.Attempt, "sending first message to gateway")
                 val bytes = lengthPrefixEncode(q.toBytes)
                 push(out1, bytes)
@@ -156,27 +160,15 @@ object SonicdSource extends SonicdLogging {
         byteOrder = ByteOrder.BIG_ENDIAN)
       )
 
-  /**
-   * runs the given query against the sonicd instance
-   * in address
-   *
-   * @param address sonicd instance address
-   * @param query query to run
-   */
-  def run(address: InetSocketAddress, query: Query)
-         (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
-    run(query, Tcp().outgoingConnection(address))
-  }
-
-  def logGraphBuild[T](query: Query)(f: Query ⇒ T): T = {
-    val (withTraceId, traceId) = query.traceId match {
-      case Some(i) ⇒ query → i
+  def logGraphBuild[T](msg: SonicCommand)(f: SonicCommand ⇒ T): T = {
+    val (withTraceId, traceId) = msg.traceId match {
+      case Some(i) ⇒ msg → i
       case None ⇒
         val id = UUID.randomUUID().toString
-        query.copy(trace_id = Some(id)) -> id
+        msg.setTraceId(id) -> id
     }
 
-    trace(log, traceId, BuildGraph, Variation.Attempt, "building graph for query {}", query.query)
+    trace(log, traceId, BuildGraph, Variation.Attempt, "building graph command {}", msg)
     val graph = f(withTraceId)
     trace(log, traceId, BuildGraph, Variation.Success, "materialized graph {}", traceId)
     graph
@@ -192,9 +184,9 @@ object SonicdSource extends SonicdLogging {
   }
 
   //FIXME seems to complete when tcp connection throws exception
-  def run(query: Query,
-          connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
-         (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
+  private final def runCommand(query: SonicCommand,
+                               connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
+                              (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
 
 
     logGraphBuild(query) { withTraceId ⇒
@@ -222,6 +214,26 @@ object SonicdSource extends SonicdLogging {
     }
   }
 
+
+  /* API */
+
+  /**
+   * runs the given query against the sonicd instance
+   * in address
+   *
+   * @param address sonicd instance address
+   * @param query query to run
+   */
+  def run(query: Query, address: InetSocketAddress)
+         (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] =
+    run(query, Tcp().outgoingConnection(address))
+
+  def run(query: Query,
+          connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
+         (implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
+    runCommand(query, connection)
+  }
+
   /**
    * builds [[akka.stream.scaladsl.Source]] of SonicMessage.
    * The materialized value corresponds to the number of messages
@@ -231,15 +243,15 @@ object SonicdSource extends SonicdLogging {
    * @param address sonicd instance address
    * @param query query to run
    */
-  def stream(address: InetSocketAddress, query: Query)
-            (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
+  final def stream(address: InetSocketAddress, query: Query)
+                  (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
     stream(query, Tcp().outgoingConnection(address))
   }
 
   //FIXME seems to not bubble up exception from tcp connection
   //instead throws NoSuchElement (in Sink.last)
-  def stream(query: Query, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
-            (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
+  final def stream(query: Query, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
+                  (implicit system: ActorSystem): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
 
     import system.dispatcher
 
@@ -263,7 +275,7 @@ object SonicdSource extends SonicdLogging {
             val conn = b.add(connection.mapMaterializedValue(logConnectionCreate(traceId)(_)(system.dispatcher)))
             val protocol = b.add(SonicProtocolStage(traceId))
             val framing = b.add(framingStage)
-            val bcast = b.add(Broadcast[SonicMessage] (2))
+            val bcast = b.add(Broadcast[SonicMessage](2))
 
             q ~> protocol.in2
             protocol.out1 ~> conn
@@ -274,5 +286,22 @@ object SonicdSource extends SonicdLogging {
             SourceShape(bcast.out(0))
       })
     }
+  }
+
+  /**
+   * Authenticates a user and returns a token. Future will fail if api-key is invalid
+   */
+  def authenticate(user: String, apiKey: String, address: InetSocketAddress)
+                  (implicit system: ActorSystem, mat: ActorMaterializer): Future[String] =
+    authenticate(user, apiKey, Tcp().outgoingConnection(address))
+
+  def authenticate(user: String, apiKey: String, connection: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]])
+                  (implicit system: ActorSystem, mat: ActorMaterializer): Future[String] = {
+    import mat.executionContext
+    runCommand(Authenticate(user, apiKey, None), connection)
+      .flatMap(_.find(_.isInstanceOf[OutputChunk])
+        .map(o ⇒ o.asInstanceOf[OutputChunk].data.elements.headOption.map(v ⇒ Future(v.convertTo[String]))
+          .getOrElse(Future.failed(new Exception("protocol error: output chunk is empty"))))
+        .getOrElse(Future.failed(new Exception("protocol error: no output chunk in result"))))
   }
 }

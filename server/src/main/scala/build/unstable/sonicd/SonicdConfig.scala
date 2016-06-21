@@ -4,16 +4,17 @@ import java.util.concurrent.TimeUnit
 
 import akka.util.Timeout
 import build.unstable.sonicd.api.auth.ApiKey
-import com.typesafe.config.{Config, ConfigFactory}
-import scala.collection.JavaConversions._
-import scala.concurrent.duration.{FiniteDuration, Duration}
+import build.unstable.sonicd.model.SonicdLogging
+import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
+import spray.json._
 
+import scala.collection.JavaConversions._
+import scala.concurrent.duration.{Duration, FiniteDuration, _}
 import scala.util.Try
-import scala.concurrent.duration._
 
 object SonicdConfig extends FromResourcesConfig(ConfigFactory.load())
 
-abstract class FromResourcesConfig(config: Config) {
+abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
   val DEV: Boolean = config.getBoolean("sonicd.dev")
 
@@ -33,7 +34,19 @@ abstract class FromResourcesConfig(config: Config) {
   assert(TOKEN_DURATION.isFinite() && TOKEN_DURATION > 1.minute,
     "token duration must be finite and greater than 1 minute")
 
-  lazy val API_KEYS: List[ApiKey] = List.empty //config.getStringList("sonicd.api-keys")
+  lazy val API_KEYS: List[ApiKey] = {
+    val raw = config.getList("sonicd.api-keys")
+      .render(ConfigRenderOptions.concise())
+
+      info(log, "parsed api-keys cson: {}", raw)
+
+    raw.parseJson match {
+      case JsArray(v) ⇒ v.map(_.convertTo[ApiKey]).toList
+      case _ ⇒ throw new Exception("'sonicd.api-keys' must be an array of JSON objects")
+    }
+  }
+
+  assert(API_KEYS.distinct.size == API_KEYS.size)
 
   lazy val SPARK_MASTER = Try(config.getString("sonicd.spark.master"))
   lazy val SPARK_HOME = Try(config.getString("sonicd.spark.home"))

@@ -2,14 +2,14 @@ package build.unstable.sonicd.service
 
 import java.net.InetAddress
 
-import akka.actor.{Terminated, ActorSystem, Props}
+import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.Timeout
-import build.unstable.sonicd.api.auth.{ApiUser, Mode, ApiKey}
+import build.unstable.sonicd.api.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.{DoneWithQueryExecution, Query}
 import build.unstable.sonicd.system.actor.AuthenticationActor.ValidateToken
-import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController}
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
+import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController}
 import com.auth0.jwt.JWTSigner
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
@@ -46,8 +46,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     "authorize queries on sources with security" in {
       val c = newActor
       val config = """{"class" : "SyntheticSource", "security" : 1}""".parseJson.asJsObject
-      val claims = ApiKey("1", Mode.Read, 1, None, None).toClaims("bandit")
-      val user = ApiUser.fromClaims(claims)
+      val claims = ApiKey("1", ApiKey.Mode.Read, 1, None, None).toJWTClaims("bandit")
+      val user = ApiUser.fromJWTClaims(claims)
       val auth = signer.sign(claims)
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
@@ -66,8 +66,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       {
         val c = newActor
         val config = """{"class" : "SyntheticSource", "security" : 2}""".parseJson.asJsObject
-        val claims = ApiKey("1", Mode.Read, 1, None, None).toClaims("bandit")
-        val user = ApiUser.fromClaims(claims)
+        val claims = ApiKey("1", ApiKey.Mode.Read, 1, None, None).toJWTClaims("bandit")
+        val user = ApiUser.fromJWTClaims(claims)
         val auth = signer.sign(claims)
         val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
@@ -104,8 +104,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val c = newActor
       val config = """{"class" : "SyntheticSource", "security" : 1}""".parseJson.asJsObject
       val allowedIps = InetAddress.getByName("10.0.0.1") :: Nil
-      val claims = ApiKey("1", Mode.Read, 1, Some(allowedIps), None).toClaims("bandit")
-      val user = ApiUser.fromClaims(claims)
+      val claims = ApiKey("1", ApiKey.Mode.Read, 1, Some(allowedIps), None).toJWTClaims("bandit")
+      val user = ApiUser.fromJWTClaims(claims)
       val auth = signer.sign(claims)
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
@@ -126,8 +126,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val c = newActor
       val config = """{"class" : "SyntheticSource", "security" : 1}""".parseJson.asJsObject
       val allowedIps = InetAddress.getByName("localhost") :: Nil
-      val claims = ApiKey("1", Mode.Read, 1, Some(allowedIps), None).toClaims("bandit")
-      val user = ApiUser.fromClaims(claims)
+      val claims = ApiKey("1", ApiKey.Mode.Read, 1, Some(allowedIps), None).toJWTClaims("bandit")
+      val user = ApiUser.fromJWTClaims(claims)
       val auth = signer.sign(claims)
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
