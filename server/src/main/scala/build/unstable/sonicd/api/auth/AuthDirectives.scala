@@ -24,19 +24,19 @@ trait AuthDirectives {
 
   case class LoginFailed(e: Throwable) extends Rejection
 
-  implicit val authJsonFormatter: RootJsonFormat[Authenticate] = jsonFormat2(Authenticate.apply)
+  implicit val authJsonFormatter: RootJsonFormat[Authenticate] = jsonFormat3(Authenticate.apply)
 
   def createAuthToken(authService: ActorRef, t: Timeout, traceId: String): Directive1[AuthenticationActor.Token] =
     entity(as[Authenticate]).flatMap { authCmd =>
       onSuccess {
-        trace(log, traceId, CreateToken, Variation.Attempt, "")
+        trace(log, traceId, GenerateToken, Variation.Attempt, "")
         authService.ask(authCmd)(t)
           .mapTo[Try[AuthenticationActor.Token]]
           .andThen {
             case Success(token) ⇒
-              trace(log, traceId, CreateToken, Variation.Success, "created token {}", token)
+              trace(log, traceId, GenerateToken, Variation.Success, "created token {}", token)
             case Failure(e) ⇒
-              trace(log, traceId, CreateToken, Variation.Failure(e), "failed to create token")
+              trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
           }(mat.executionContext)
       }.flatMap {
         case Success(token) ⇒ provide(token)
@@ -48,7 +48,7 @@ trait AuthDirectives {
     headerValueByName("SONICD-AUTH").flatMap { token ⇒
       onSuccess {
         trace(log, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
-        authService.ask(AuthenticationActor.ValidateToken(token))(t)
+        authService.ask(AuthenticationActor.ValidateToken(token, traceId))(t)
           .mapTo[Try[ApiUser]]
           .andThen {
             case Success(res) ⇒

@@ -24,7 +24,6 @@ case class ApiKey(key: String,
     val claims = scala.collection.mutable.Map[String, AnyRef](
       "authorization" → authorization.toString,
       "user" → user,
-      "key" → key,
       "mode" → mode.toString
     )
 

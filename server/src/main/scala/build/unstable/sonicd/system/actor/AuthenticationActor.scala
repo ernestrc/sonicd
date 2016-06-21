@@ -1,9 +1,10 @@
 package build.unstable.sonicd.system.actor
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.Actor
 import akka.http.scaladsl.model.DateTime
 import build.unstable.sonicd.api.auth.{ApiKey, ApiUser}
-import build.unstable.sonicd.model.Authenticate
+import build.unstable.sonicd.model.{Authenticate, SonicdLogging}
+import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
 
 import scala.concurrent.duration.FiniteDuration
@@ -11,25 +12,30 @@ import scala.util.control.NonFatal
 import scala.util.{Failure, Try}
 
 class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
-                          globalTokenDuration: FiniteDuration) extends Actor with ActorLogging {
+                          globalTokenDuration: FiniteDuration)
+  extends Actor with SonicdLogging {
 
   import AuthenticationActor._
 
   val signer = new JWTSigner(secret)
   val verifier = new JWTVerifier(secret)
 
-  def validateToken(token: Token): Try[ApiUser] = {
-    Try(verifier.verify(token)).recover {
-      case NonFatal(e) ⇒ throw new TokenVerificationFailed(e)
-    }.flatMap { verifiedClaims ⇒
-      val apiKey = verifiedClaims.get("key").asInstanceOf[String]
-      apiKeys.find(_.key == apiKey)
-        .map(_ ⇒ ApiUser.fromClaims(verifiedClaims))
-        .getOrElse(Failure(new AuthenticationException(s"invalid token: unknown api-key")))
-    }
+  def validateToken(token: Token, traceId: String): Try[ApiUser] = {
+    Try {
+      try {
+        trace(log, traceId, JWTVerifyToken, Variation.Attempt, "verifying token {}", token)
+        val verifiedClaims = verifier.verify(token)
+        trace(log, traceId, JWTVerifyToken, Variation.Success, "token is valid {}", token)
+        verifiedClaims
+      } catch {
+        case NonFatal(e) ⇒
+          trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
+          throw new TokenVerificationFailed(e)
+      }
+    }.flatMap(ApiUser.fromClaims)
   }
 
-  def createToken(key: String, user: String): Try[Token] = {
+  def createToken(key: String, user: String, traceId: String): Try[Token] = {
     apiKeys.find(_.key == key).map { apiKey ⇒
       Try {
         val signOpts = new JWTSigner.Options()
@@ -38,16 +44,27 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
 
         signOpts.setExpirySeconds(seconds.toSeconds.toInt)
         val claims = apiKey.toClaims(user)
-        signer.sign(claims, signOpts)
+        trace(log, traceId, JWTSignToken, Variation.Attempt,
+          "signing token for {} with api key {} with expiration {}(s)", user, key, seconds)
+        try {
+          val token = signer.sign(claims, signOpts)
+          trace(log, traceId, JWTSignToken, Variation.Success, "signed new token {}", token)
+          token
+        } catch {
+          case NonFatal(e) ⇒
+            trace(log, traceId, JWTSignToken, Variation.Failure(e), "failed to sign token for key {} and user {}", key, user)
+            throw e
+        }
       }
     }.getOrElse(Failure(new AuthenticationException(s"invalid api-key: $key")))
   }
 
   override def receive: Receive = {
 
-    case ValidateToken(token) ⇒ sender() ! validateToken(token)
+    case v: ValidateToken ⇒ sender() ! validateToken(v.token, v.traceId)
 
-    case Authenticate(user, key) ⇒ sender() ! createToken(key, user)
+    case cmd@Authenticate(user, key, traceId) ⇒
+      sender() ! createToken(key, user, traceId.get)
 
   }
 }
@@ -56,7 +73,7 @@ object AuthenticationActor {
 
   type Token = String
 
-  case class ValidateToken(token: Token)
+  case class ValidateToken(token: Token, traceId: String)
 
   case class AuthorizationConfirmed(id: String, user: ApiUser, until: DateTime)
 

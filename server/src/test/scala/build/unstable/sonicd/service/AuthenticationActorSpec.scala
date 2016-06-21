@@ -4,7 +4,7 @@ import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
-import akka.testkit.{ImplicitSender, TestActorRef, TestKit}
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonicd.api.auth.{ApiKey, ApiUser, Mode}
 import build.unstable.sonicd.model.Authenticate
 import build.unstable.sonicd.system.actor.AuthenticationActor
@@ -17,7 +17,7 @@ import scala.util.Try
 class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
-  def this() = this(ActorSystem("TcpHandlerSpec"))
+  def this() = this(ActorSystem("AuthenticationActorSpec"))
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)
@@ -31,14 +31,15 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   def newActor(keys: List[ApiKey] = apiKeys,
                secret: String = secret,
                tokenExpiration: FiniteDuration = tokenExpiration): TestActorRef[AuthenticationActor] = {
-    TestActorRef[AuthenticationActor](Props(classOf[AuthenticationActor], apiKeys, secret, tokenExpiration))
+    TestActorRef[AuthenticationActor](Props(classOf[AuthenticationActor], apiKeys, secret, tokenExpiration)
+    .withDispatcher(CallingThreadDispatcher.Id))
   }
 
   "Authentication actor" should {
     "create tokens from authenticate commands when api key is valid" in {
       val actor = newActor()
 
-      actor ! Authenticate("pepito", "1")
+      actor ! Authenticate("pepito", "1", Some("1"))
       val tokenMaybe = expectMsgType[Try[String]]
 
       val token = tokenMaybe.get
@@ -49,12 +50,12 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       assert(user.get.authorization == 1)
       assert(user.get.mode == Mode.Read)
       assert(user.get.user == "pepito")
-      assert(user.get.allowedIps.get == List("1.2.3.4"))
+      assert(user.get.allowedIps.get == List(InetAddress.getByName("localhost")))
     }
 
     "reject invalid api keys" in {
       val actor = newActor()
-      actor ! Authenticate("grillo", "invalidKey")
+      actor ! Authenticate("grillo", "invalidKey", Some("1"))
       val tokenMaybe = expectMsgType[Try[String]]
       assert(tokenMaybe.isFailure)
 
@@ -65,7 +66,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val actor = newActor()
       val token = actor.underlyingActor.signer.sign(apiKeys.head.toClaims("serrallonga"))
 
-      actor ! AuthenticationActor.ValidateToken(token)
+      actor ! AuthenticationActor.ValidateToken(token, "1")
       val res = expectMsgType[Try[AuthenticationActor.Token]]
       res.get
     }
@@ -73,24 +74,11 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     "verify token and return failure if token is not JWT" in {
       val actor = newActor()
 
-      actor ! AuthenticationActor.ValidateToken("invalidToken")
+      actor ! AuthenticationActor.ValidateToken("invalidToken", "2")
       val res = expectMsgType[Try[AuthenticationActor.Token]]
       assert(res.isFailure)
 
       assert(res.failed.get.isInstanceOf[AuthenticationActor.TokenVerificationFailed])
-
-    }
-
-    "verify token and return failure if api key is not valid" in {
-      val actor = newActor()
-      val apiKey = apiKeys.head.copy(key = "3")
-      val token = actor.underlyingActor.signer.sign(apiKey.toClaims("serrallonga"))
-
-      actor ! AuthenticationActor.ValidateToken(token)
-      val res = expectMsgType[Try[AuthenticationActor.Token]]
-      assert(res.isFailure)
-
-      assert(res.failed.get.isInstanceOf[AuthenticationActor.AuthenticationException])
 
     }
 
@@ -106,7 +94,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         //expire token
         Thread.sleep(1000)
 
-        actor ! AuthenticationActor.ValidateToken(token)
+        actor ! AuthenticationActor.ValidateToken(token, "2")
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 
@@ -124,7 +112,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         //expire token
         Thread.sleep(1000)
 
-        actor ! AuthenticationActor.ValidateToken(token)
+        actor ! AuthenticationActor.ValidateToken(token, "2")
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 

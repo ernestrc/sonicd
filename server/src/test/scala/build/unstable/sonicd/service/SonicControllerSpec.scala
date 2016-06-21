@@ -3,7 +3,7 @@ package build.unstable.sonicd.service
 import java.net.InetAddress
 
 import akka.actor.{Terminated, ActorSystem, Props}
-import akka.testkit.{ImplicitSender, TestActorRef, TestKit}
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.Timeout
 import build.unstable.sonicd.api.auth.{ApiUser, Mode, ApiKey}
 import build.unstable.sonicd.model.{DoneWithQueryExecution, Query}
@@ -19,14 +19,15 @@ import scala.concurrent.duration._
 class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
-  def this() = this(ActorSystem("TcpHandlerSpec"))
+  def this() = this(ActorSystem("SonicControllerSpec"))
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)
   }
 
   def newActor: TestActorRef[SonicController] =
-    TestActorRef[SonicController](Props(classOf[SonicController], self, 1.seconds:Timeout))
+    TestActorRef[SonicController](Props(classOf[SonicController], self, 1.seconds:Timeout)
+      .withDispatcher(CallingThreadDispatcher.Id))
 
   val signer = new JWTSigner("secret")
 
@@ -40,8 +41,6 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       c.underlyingActor.handled shouldBe 1
       c.underlyingActor.handlers(1) shouldBe self.path
 
-      c ! Terminated(self)(false, true)
-      assert(c.underlyingActor.handlers.isEmpty)
     }
 
     "authorize queries on sources with security" in {

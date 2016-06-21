@@ -10,6 +10,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.util.ByteString
 import build.unstable.sonicd.model.Exceptions.ProtocolException
+import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
@@ -17,12 +18,14 @@ import org.reactivestreams.{Subscriber, Subscription}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
+import scala.util.{Failure, Success}
 
-class TcpSupervisor(controller: ActorRef) extends Actor with SonicdLogging {
+class TcpSupervisor(controller: ActorRef, authService: ActorRef)
+  extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.info(s"tcp supervisor $self is up and awaiting Tcp.Bound message")
+    info(log, "tcp supervisor {} is up and awaiting Tcp.Bound message", self)
   }
 
   override def supervisorStrategy: SupervisorStrategy =
@@ -35,16 +38,17 @@ class TcpSupervisor(controller: ActorRef) extends Actor with SonicdLogging {
     case c@Tcp.Connected(remote, local) =>
       debug(log, "new connection: remoteAddr: {}; localAddr: {}", remote, local)
       val connection = sender()
-      val handler = context.actorOf(Props(classOf[TcpHandler], controller, connection, remote.getAddress))
+      val handler = context.actorOf(Props(classOf[TcpHandler], controller,
+        authService, connection, remote.getAddress))
       connection ! Tcp.Register(handler)
       listener ! Tcp.ResumeAccepting(1)
   }
 
   override def receive: Actor.Receive = {
 
-    case Tcp.CommandFailed(_: Tcp.Bind) => context stop self
+    case Tcp.CommandFailed(_: Tcp.Bind) ⇒ context stop self
 
-    case b@Tcp.Bound(localAddress) =>
+    case b@Tcp.Bound(localAddress) ⇒
       info(log, "ready and listening for new connections on {}", localAddress)
       val listener = sender()
       listener ! Tcp.ResumeAccepting(1)
@@ -61,7 +65,8 @@ object TcpHandler {
 
 }
 
-class TcpHandler(controller: ActorRef, connection: ActorRef, clientAddress: InetAddress)
+class TcpHandler(controller: ActorRef, authService: ActorRef,
+                 connection: ActorRef, clientAddress: InetAddress)
   extends Actor with SonicdLogging {
 
   import TcpHandler._
@@ -189,19 +194,30 @@ class TcpHandler(controller: ActorRef, connection: ActorRef, clientAddress: Inet
     case PeerClosed ⇒ debug(log, "peer closed")
   }
 
-  def deserializeAndHandleQueryFrame(data: ByteString): Unit = {
+  def deserializeAndHandleInitCommands(data: ByteString): Unit = {
     SonicMessage.fromBytes(data) match {
-      case q: Query ⇒
+      case i: InitMessage ⇒
         val withTraceId = {
-          q.traceId match {
-            case Some(id) ⇒ q
-            case None ⇒ q.copy(trace_id = Some(UUID.randomUUID().toString))
+          i.traceId match {
+            case Some(id) ⇒ i
+            case None ⇒ i.setTraceId(UUID.randomUUID().toString)
           }
         }
-        trace(log, withTraceId.traceId.get, MaterializeSource,
-          Variation.Attempt, "deserialized query {}", withTraceId.query)
-        controller ! SonicController.NewQuery(withTraceId, Some(clientAddress))
-        context.become(waitingController(withTraceId.traceId.get) orElse commonBehaviour)
+        withTraceId match {
+          case q: Query ⇒
+            trace(log, withTraceId.traceId.get, MaterializeSource,
+              Variation.Attempt, "deserialized query {}", withTraceId)
+
+            controller ! SonicController.NewQuery(q, Some(clientAddress))
+
+          case a: Authenticate ⇒
+            trace(log, withTraceId.traceId.get, GenerateToken,
+              Variation.Attempt, "deserialized auth cmd {}", withTraceId)
+
+            authService ! withTraceId
+        }
+
+        context.become(waitingReply(withTraceId.traceId.get) orElse commonBehaviour)
       case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
     }
   }
@@ -261,13 +277,24 @@ class TcpHandler(controller: ActorRef, connection: ActorRef, clientAddress: Inet
       }
   }
 
-  def waitingController(traceId: String): Receive =
+  def waitingReply(traceId: String): Receive =
     framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+      //auth cmd failed
+      case Failure(e) ⇒
+        trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
+        context.become(closing(DoneWithQueryExecution.error(e)))
+
+      //auth cmd succeded
+      case Success(token: AuthenticationActor.Token) ⇒
+        trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
+        self ! OutputChunk(Vector(token))
+        self ! DoneWithQueryExecution.success
+        context.become(materialized)
+
       case ev: DoneWithQueryExecution ⇒
-        val msg = "received done msg"
-        log.debug(msg)
         context.become(closing(ev))
-        trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head), msg)
+        trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head),
+          "controller failed to materialize source")
 
       case s: Subscription ⇒
         val msg = "subscribed to publisher, requesting first element"
@@ -284,5 +311,5 @@ class TcpHandler(controller: ActorRef, connection: ActorRef, clientAddress: Inet
         pub.subscribe(subs)
     }
 
-  def receive: Receive = framing(deserializeAndHandleQueryFrame) orElse commonBehaviour
+  def receive: Receive = framing(deserializeAndHandleInitCommands) orElse commonBehaviour
 }

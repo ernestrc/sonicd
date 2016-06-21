@@ -101,10 +101,26 @@ case class Log(message: String) extends SonicMessage {
   override val eventType: String = SonicMessage.log
 }
 
-case class Authenticate(user: String, key: String) extends SonicMessage {
-  override val variation: Option[String] = Some(user)
-  override val payload: Option[JsValue] = Some(JsString(key))
+sealed trait InitMessage {
+  this: SonicMessage ⇒
+  val traceId: Option[String]
+
+  def setTraceId(trace_id: String): InitMessage
+}
+
+case class Authenticate(user: String, key: String, traceId: Option[String])
+  extends SonicMessage with InitMessage {
+  override val variation: Option[String] = Some(key)
+  override val payload: Option[JsValue] = Some(JsObject(Map(
+    "user" → JsString(user),
+    "trace_id" → traceId.map(JsString.apply).getOrElse(JsNull)
+  )))
   override val eventType: String = SonicMessage.auth
+
+  override def setTraceId(trace_id: String): InitMessage =
+    copy(traceId = Some(trace_id))
+
+  override def toString: String = s"Authenticate($user)"
 }
 
 object SonicMessage {
@@ -139,6 +155,12 @@ object SonicMessage {
         case a ⇒ throw new Exception(s"expecting JsArray found $a")
       }
       case Some(`ack`) ⇒ ClientAcknowledge
+      case Some(`auth`) ⇒
+        val fields = pay.get.asJsObject.fields
+        Authenticate(
+          fields("user").convertTo[String],
+          vari.get,
+          fields.get("trace_id").map(_.convertTo[String]))
       case Some(`log`) ⇒ Log(vari.get)
       case Some(`meta`) ⇒
         pay match {
@@ -178,7 +200,10 @@ class Query(val id: Option[Long],
             val authToken: Option[String],
             val query: String,
             val _config: JsValue)
-  extends SonicMessage {
+  extends SonicMessage with InitMessage {
+
+  override def setTraceId(trace_id: String): InitMessage =
+    copy(trace_id = Some(trace_id))
 
   override val variation: Option[String] = Some(query)
   override val payload: Option[JsValue] = {

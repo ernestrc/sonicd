@@ -29,7 +29,11 @@ trait SonicdLogging extends TypedLogging {
 
   case object ValidateToken extends CallType
 
-  case object CreateToken extends CallType
+  case object GenerateToken extends CallType
+  
+  case object JWTSignToken extends CallType
+  
+  case object JWTVerifyToken extends CallType
 
   final lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
 

@@ -114,7 +114,8 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
           trace(log, query.traceId.get, ValidateToken,
             Variation.Attempt, "sending token {} for validation", token)
 
-          authService.ask(AuthenticationActor.ValidateToken(token))(authenticationTimeout)
+          authService.ask(
+            AuthenticationActor.ValidateToken(token, query.traceId.get))(authenticationTimeout)
             .mapTo[Try[ApiUser]]
             .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
             .andThen {

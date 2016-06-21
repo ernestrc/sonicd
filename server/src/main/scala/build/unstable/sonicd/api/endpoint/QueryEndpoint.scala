@@ -16,7 +16,7 @@ import ch.megard.akka.http.cors.CorsDirectives
 
 import scala.concurrent.Future
 
-class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
+class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
                    (implicit val mat: ActorMaterializer, system: ActorSystem)
   extends CorsDirectives with EndpointUtils {
 
@@ -24,7 +24,7 @@ class QueryEndpoint(controller: ActorRef, responseTimeout: Timeout, actorTimeout
 
   def wsFlowHandler(clientAddress: RemoteAddress): Flow[SonicMessage, SonicMessage, Any] = {
 
-    val wsHandler = system.actorOf(Props(classOf[WsHandler], controller, clientAddress.toOption))
+    val wsHandler = system.actorOf(Props(classOf[WsHandler], controller, authService, clientAddress.toOption))
     Flow.fromSinkAndSource[SonicMessage, SonicMessage](
     Sink.fromSubscriber(ActorSubscriber(wsHandler)),
     Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))

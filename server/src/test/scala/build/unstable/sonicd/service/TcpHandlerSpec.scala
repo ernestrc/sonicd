@@ -73,6 +73,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     //expectMsgType[NewQuery]
     val rcv = receiveN(2) //race condition between resume and q
 
+    //make sure that traceId is injected
     assert(rcv.find(_.isInstanceOf[Query]).get.asInstanceOf[Query].traceId.nonEmpty)
 
     tcpHandler ! props
@@ -132,14 +133,14 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     expectTerminated(tcpHandler)
   }
 
-  //todo
+  //todo make sure that authenticate gets injected a traceId
   "should handle authenticate cmd" in {
     val tcpHandler =
       TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
     watch(tcpHandler)
 
     expectMsg(Tcp.ResumeReading)
-    val (qChunk1, qChunk2) = Authenticate("test", "1234").toBytes.splitAt(10)
+    val (qChunk1, qChunk2) = Authenticate("test", "1234", Some("1")).toBytes.splitAt(10)
 
     tcpHandler ! Tcp.Received(qChunk1)
     expectMsg(Tcp.ResumeReading)
@@ -448,6 +449,4 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     clientAcknowledge(tcpHandler)
     expectTerminated(tcpHandler)
   }
-
-  //TODO make sure that traceId is added
 }

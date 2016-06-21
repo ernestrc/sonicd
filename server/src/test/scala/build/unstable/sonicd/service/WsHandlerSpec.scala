@@ -66,6 +66,8 @@ with ImplicitSubscriber with ImplicitGuardian {
     val wsHandler = newWatchedHandler()
     wsHandler ! OnNext(syntheticQuery)
     val q = expectMsgType[Query]
+
+    //make sure that traceId is injected
     assert(q.traceId.nonEmpty)
 
     wsHandler ! props
@@ -127,6 +129,8 @@ with ImplicitSubscriber with ImplicitGuardian {
 
     }
 
+    //todo make sure that authenticate gets injected a traceId
+
     "should materialize stream and propagates messages to downstream subscriber" in {
       val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
 
@@ -142,12 +146,6 @@ with ImplicitSubscriber with ImplicitGuardian {
       tail.tail.head shouldBe a[DoneWithQueryExecution]
 
       expectComplete(wsHandler)
-
-    }
-
-    //TODO make sure that traceId is added
-
-    "propagates cancels properly" in { //in materialized mode
 
     }
   }

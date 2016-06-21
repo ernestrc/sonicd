@@ -11,7 +11,9 @@ import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 
-class WsHandler(controller: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
+import scala.util.{Failure, Success}
+
+class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
 with ActorSubscriber with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
@@ -132,7 +134,18 @@ with ActorSubscriber with SonicdLogging {
     recv orElse commonBehaviour
   }
 
-  def awaitingController(traceId: String): Receive = {
+  def awaitingReply(traceId: String): Receive = {
+
+    //auth cmd failed
+    case Failure(e) ⇒
+      trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
+      context.become(closing(DoneWithQueryExecution.error(e)))
+
+    //auth cmd succeded
+    case Success(token: AuthenticationActor.Token) ⇒
+      trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
+      onNext(OutputChunk(Vector(token)))
+      context.become(closing(DoneWithQueryExecution.success))
 
     case s: Subscription ⇒
       trace(log, traceId, MaterializeSource, Variation.Success, "subscribed")
@@ -153,17 +166,27 @@ with ActorSubscriber with SonicdLogging {
 
   def start: Receive = {
 
-    case OnNext(q: Query) ⇒
+    case OnNext(i: InitMessage) ⇒
       val withTraceId = {
-        q.traceId match {
-          case Some(id) ⇒ q
-          case None ⇒ q.copy(trace_id = Some(UUID.randomUUID().toString))
+        i.traceId match {
+          case Some(id) ⇒ i
+          case None ⇒ i.setTraceId(UUID.randomUUID().toString)
         }
       }
-      val msg = "client established communication with ws handler"
-      trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, msg)
-      controller ! SonicController.NewQuery(withTraceId, clientAddress)
-      context.become(awaitingController(withTraceId.traceId.get) orElse commonBehaviour)
+      withTraceId match {
+        case q: Query ⇒
+          trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt,
+            "deserialized query {}", q)
+
+          controller ! SonicController.NewQuery(q, clientAddress)
+
+        case a: Authenticate ⇒
+          trace(log, withTraceId.traceId.get, GenerateToken, Variation.Attempt,
+            "deserialized authenticate cmd {}", a)
+
+          authService ! a
+      }
+      context.become(awaitingReply(withTraceId.traceId.get) orElse commonBehaviour)
 
     case OnNext(msg) ⇒
       val msg = "first message should be a Query"
