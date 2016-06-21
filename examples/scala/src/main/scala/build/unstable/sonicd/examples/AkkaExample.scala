@@ -33,7 +33,7 @@ object AkkaExample extends App {
 
   val res1: Future[DoneWithQueryExecution] = SonicdSource.stream(addr, query1).to(Sink.ignore).run()
 
-  val res2: Future[Vector[SonicMessage]] = SonicdSource.run(addr, query2)
+  val res2: Future[Vector[SonicMessage]] = SonicdSource.run(query2, addr)
 
   val done1 = Await.result(res1, 20.seconds)
   val done2 = Await.result(res2, 20.seconds)
