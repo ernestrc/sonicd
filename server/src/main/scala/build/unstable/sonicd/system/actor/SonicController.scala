@@ -50,7 +50,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
       val source = query.getSourceClass.getConstructors()(0)
-        .newInstance(query.config, query.id.get.toString, query.query, context)
+        .newInstance(query.config, query.id.get.toString, query.query, context, user)
         .asInstanceOf[DataSource]
 
       debug(log, "successfully instantiated source {} for query with id '{}'", source, queryId)

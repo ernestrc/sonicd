@@ -28,6 +28,7 @@ client.run(query, function(err, res) {
     console.log(e);
   });
 
+  client.close();
   console.log('exec is done!');
 
 });
@@ -104,6 +105,8 @@ client.authenticate(USER, API_KEY, function(err, token) {
     res.forEach(function(e) {
       console.log(e);
     });
+
+    client.close();
 
     console.log('secured exec is done!');
 
