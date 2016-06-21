@@ -27,7 +27,9 @@ trait SonicdLogging extends TypedLogging {
 
   case object MaterializeSource extends CallType
 
-  case object GetTokenValidation extends CallType
+  case object ValidateToken extends CallType
+
+  case object CreateToken extends CallType
 
   final lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
 

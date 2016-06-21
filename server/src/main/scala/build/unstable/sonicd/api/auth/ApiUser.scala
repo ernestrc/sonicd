@@ -1,6 +1,26 @@
 package build.unstable.sonicd.api.auth
 
-//TODO this should be the result of decoding a jwt token
-case class ApiUser(user: String, autorization: Int, mode: Mode, ip: Option[String]) {
-  override def toString: String = s"$user@$ip"
+import java.net.InetAddress
+
+import build.unstable.sonicd.model.JsonProtocol._
+import spray.json._
+
+import scala.util.Try
+
+case class ApiUser(user: String, authorization: Int, mode: Mode, allowedIps: Option[List[InetAddress]]) {
+}
+
+object ApiUser {
+  def fromClaims(verifiedClaims: java.util.Map[String, AnyRef]): Try[ApiUser] = Try {
+    Mode(verifiedClaims.get("mode").asInstanceOf[String]).flatMap { mode ⇒
+      Try {
+        ApiUser(
+          verifiedClaims.get("user").asInstanceOf[String],
+          verifiedClaims.get("authorization").asInstanceOf[String].toInt,
+          mode,
+          Option(verifiedClaims.get("from").asInstanceOf[String]).map(_.parseJson.convertTo[List[InetAddress]])
+        )
+      }
+    }
+  }.flatten
 }

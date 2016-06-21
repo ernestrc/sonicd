@@ -145,6 +145,8 @@ with ImplicitSubscriber with ImplicitGuardian {
 
     }
 
+    //TODO make sure that traceId is added
+
     "propagates cancels properly" in { //in materialized mode
 
     }

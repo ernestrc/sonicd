@@ -1,5 +1,6 @@
 package build.unstable.sonicd.system.actor
 
+import java.net.InetAddress
 import java.util.UUID
 
 import akka.actor.SupervisorStrategy.Stop
@@ -10,7 +11,7 @@ import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 
-class WsHandler(controller: ActorRef) extends ActorPublisher[SonicMessage]
+class WsHandler(controller: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
 with ActorSubscriber with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
@@ -145,7 +146,7 @@ with ActorSubscriber with SonicdLogging {
       pub.subscribe(subs)
 
     case msg: DoneWithQueryExecution ⇒
-      trace(log, traceId, MaterializeSource, Variation.Failure(msg.errors.head), "controller send error")
+      trace(log, traceId, MaterializeSource, Variation.Failure(msg.errors.head), "error materializing source")
       context.become(closing(msg))
 
   }
@@ -161,7 +162,7 @@ with ActorSubscriber with SonicdLogging {
       }
       val msg = "client established communication with ws handler"
       trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, msg)
-      controller ! withTraceId
+      controller ! SonicController.NewQuery(withTraceId, clientAddress)
       context.become(awaitingController(withTraceId.traceId.get) orElse commonBehaviour)
 
     case OnNext(msg) ⇒

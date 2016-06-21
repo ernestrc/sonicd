@@ -1,22 +1,23 @@
 package build.unstable.sonicd.system.actor
 
+import java.net.InetAddress
 import java.nio.charset.Charset
 
 import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
-import akka.stream._
-import akka.util.ByteString
+import akka.pattern._
+import akka.util.{ByteString, Timeout}
 import build.unstable.sonicd.api.auth.ApiUser
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.actor.SonicController.{TokenValidationResult, UnauthorizedException}
+import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
 
 import scala.collection.mutable
-import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
+import scala.util.{Failure, Success, Try}
 
-class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
+class SonicController(authService: ActorRef, authenticationTimeout: Timeout) extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -32,6 +33,8 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
     case NonFatal(e) ⇒ Restart
   }
 
+  import context.dispatcher
+
 
   /* HELPERS */
 
@@ -40,7 +43,8 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
       JsonProtocol.receiptJsonFormat.write(rec).compactPrint.getBytes(Charset.defaultCharset())
     ))
 
-  def prepareMaterialization(handler: ActorRef, q: Query, user: Option[ApiUser]): Unit = {
+  def prepareMaterialization(handler: ActorRef, q: Query,
+                             user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {
       handled += 1
       val queryId = handled
@@ -51,11 +55,11 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
 
       debug(log, "successfully instantiated source {} for query with id '{}'", source, queryId)
 
-      if (isAuthorized(user, source.securityLevel)) {
+      if (isAuthorized(user, source.securityLevel, clientAddress)) {
         context watch handler
         handlers.update(queryId, handler.path)
         handler ! source.handlerProps
-      } else handler ! DoneWithQueryExecution.error(new UnauthorizedException(user))
+      } else handler ! DoneWithQueryExecution.error(new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
         error(log, e, "error when preparing stream materialization")
@@ -63,10 +67,12 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
     }
   }
 
-  def isAuthorized(user: Option[ApiUser], security: Option[Int]): Boolean = {
-    (user, security) match {
-      case (_, None) ⇒ true
-      case (Some(u), Some(s)) if u.autorization >= s ⇒ true
+  def isAuthorized(user: Option[ApiUser], security: Option[Int], clientAddress: Option[InetAddress]): Boolean = {
+    (user, security, clientAddress) match {
+      case (None, None, _) ⇒ true
+      case (Some(u), None, Some(a)) if u.allowedIps.isEmpty || u.allowedIps.get.contains(a) ⇒ true
+      case (Some(u), Some(s), a) if u.authorization >= s
+        && (u.allowedIps.isEmpty || (a.isDefined && u.allowedIps.get.contains(a.get))) ⇒ true
       case _ ⇒ false
     }
   }
@@ -77,6 +83,8 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
   val handlers = mutable.Map.empty[Long, ActorPath]
   var handled: Long = 0
 
+  case class TokenValidationResult(user: Try[ApiUser], query: Query,
+                                   handler: ActorRef, clientAddress: Option[InetAddress])
 
   /* BEHAVIOUR */
 
@@ -90,24 +98,35 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
     }
       log.debug("handler terminated. living handlers: {}", handlers)
 
-    case TokenValidationResult(result, query, handler) ⇒
-      result match {
-        case Success(user) ⇒ prepareMaterialization(handler, query, Some(user))
-          trace(log, query.traceId.get, GetTokenValidation, Variation.Success, "validated token")
-        case Failure(e) ⇒ handler ! DoneWithQueryExecution.error(e)
-          trace(log, query.traceId.get, GetTokenValidation, Variation.Failure(e), "token validation failed")
-      }
+    case TokenValidationResult(Failure(e), _, handler, _) ⇒
+      handler ! DoneWithQueryExecution.error(e)
 
-    case query: Query ⇒
-      debug(log, "client posted new query {}", query)
+    case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
+      prepareMaterialization(handler, query, Some(user), clientAddress)
+
+    case NewQuery(query, clientAddress) ⇒
+      debug(log, "client from {} posted new query {}", clientAddress, query)
       val handler = sender()
 
       query.authToken match {
         case Some(token) ⇒
-          trace(log, query.traceId.get, GetTokenValidation,
+
+          trace(log, query.traceId.get, ValidateToken,
             Variation.Attempt, "sending token {} for validation", token)
-          authService ! AuthenticationActor.ValidateTokenForQuery(token, query, handler)
-        case None ⇒ prepareMaterialization(handler, query, None)
+
+          authService.ask(AuthenticationActor.ValidateToken(token))(authenticationTimeout)
+            .mapTo[Try[ApiUser]]
+            .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
+            .andThen {
+              case Success(res) ⇒
+                trace(log, query.traceId.get, ValidateToken, Variation.Success,
+                  "validated token {} for user {}", token, res.user)
+              case Failure(e) ⇒
+                trace(log, query.traceId.get, ValidateToken, Variation.Failure(e),
+                  "token validation for token {} failed", token)
+            }.pipeTo(self)
+
+        case None ⇒ prepareMaterialization(handler, query, None, clientAddress)
       }
 
     case m ⇒ warning(log, "oops! It looks like I received the wrong message: {}", m)
@@ -117,12 +136,13 @@ class SonicController(authService: ActorRef) extends Actor with SonicdLogging {
 
 object SonicController {
 
-  class UnauthorizedException(user: Option[ApiUser])
-    extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized to access this source")
-      .getOrElse("unauthenticated user cannot access this source"))
+  case class NewQuery(query: Query, clientAddress: Option[InetAddress])
+
+  class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
+    extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
+      s"to access this source from ${clientAddress.getOrElse("unknown address")}")
+      .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}"))
 
   case object GetHandlers
-
-  case class TokenValidationResult(user: Try[ApiUser], query: Query, handler: ActorRef)
 
 }

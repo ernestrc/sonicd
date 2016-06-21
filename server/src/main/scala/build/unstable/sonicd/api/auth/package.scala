@@ -16,5 +16,5 @@ package object auth {
       case "rw" | "write" ⇒ Mode.ReadWrite
     }
   }
-  implicit val apiKeyJsonFormat: RootJsonFormat[ApiKey] = jsonFormat3(ApiKey.apply)
+  implicit val apiKeyJsonFormat: RootJsonFormat[ApiKey] = jsonFormat5(ApiKey.apply)
 }

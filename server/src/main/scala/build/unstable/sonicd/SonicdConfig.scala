@@ -9,6 +9,7 @@ import scala.collection.JavaConversions._
 import scala.concurrent.duration.{FiniteDuration, Duration}
 
 import scala.util.Try
+import scala.concurrent.duration._
 
 object SonicdConfig extends FromResourcesConfig(ConfigFactory.load())
 
@@ -25,8 +26,13 @@ abstract class FromResourcesConfig(config: Config) {
   val JDBC_FETCHSIZE = Try(config.getInt("sonicd.jdbc.fetch-size")).getOrElse(1000)
 
   val AUTH_WORKERS: Int = config.getInt("sonicd.auth-workers")
+  val AUTH_SECRET: String = config.getString("sonicd.auth-secret")
+  val TOKEN_DURATION: FiniteDuration = FiniteDuration(config.getDuration("sonicd.token-duration").getSeconds,
+    TimeUnit.SECONDS)
 
-  //TODO
+  assert(TOKEN_DURATION.isFinite() && TOKEN_DURATION > 1.minute,
+    "token duration must be finite and greater than 1 minute")
+
   lazy val API_KEYS: List[ApiKey] = List.empty //config.getStringList("sonicd.api-keys")
 
   lazy val SPARK_MASTER = Try(config.getString("sonicd.spark.master"))

@@ -1,5 +1,6 @@
 package build.unstable.sonicd.system.actor
 
+import java.net.InetAddress
 import java.util.UUID
 
 import akka.actor.SupervisorStrategy.Stop
@@ -34,7 +35,7 @@ class TcpSupervisor(controller: ActorRef) extends Actor with SonicdLogging {
     case c@Tcp.Connected(remote, local) =>
       debug(log, "new connection: remoteAddr: {}; localAddr: {}", remote, local)
       val connection = sender()
-      val handler = context.actorOf(Props(classOf[TcpHandler], controller, connection))
+      val handler = context.actorOf(Props(classOf[TcpHandler], controller, connection, remote.getAddress))
       connection ! Tcp.Register(handler)
       listener ! Tcp.ResumeAccepting(1)
   }
@@ -60,7 +61,7 @@ object TcpHandler {
 
 }
 
-class TcpHandler(controller: ActorRef, connection: ActorRef)
+class TcpHandler(controller: ActorRef, connection: ActorRef, clientAddress: InetAddress)
   extends Actor with SonicdLogging {
 
   import TcpHandler._
@@ -199,7 +200,7 @@ class TcpHandler(controller: ActorRef, connection: ActorRef)
         }
         trace(log, withTraceId.traceId.get, MaterializeSource,
           Variation.Attempt, "deserialized query {}", withTraceId.query)
-        controller ! withTraceId
+        controller ! SonicController.NewQuery(withTraceId, Some(clientAddress))
         context.become(waitingController(withTraceId.traceId.get) orElse commonBehaviour)
       case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
     }

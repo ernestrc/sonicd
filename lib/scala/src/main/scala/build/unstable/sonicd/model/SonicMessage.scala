@@ -208,6 +208,8 @@ class Query(val id: Option[Long],
   private[sonicd] def clazzName: String = config.fields.getOrElse("class",
     throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
+  override def toString: String = s"Query($id,$query,$traceId)"
+
   private[sonicd] def getSourceClass: Class[_] = {
     val clazzLoader = this.getClass.getClassLoader
     Try(clazzLoader.loadClass(clazzName))
