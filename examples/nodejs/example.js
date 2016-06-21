@@ -2,9 +2,13 @@
 
 //var Client = require('sonicd').Client;
 var Client = require('../../lib/nodejs/lib.js').Client;
+var assert = require('assert');
+
+var client = new Client('wss://0.0.0.0:443');
+
 
 var query = {
-  query: '20000',
+  query: '5',
   config: {
     "class" : "SyntheticSource",
     "seed" : 1000,
@@ -12,24 +16,27 @@ var query = {
   }
 };
 
-var client = new Client('wss://0.0.0.0:443');
+/* UNAUTHENTICATED Client.prototype.run */
 
-//client.exec(query, function(err, res) {
-//  if (err) {
-//    console.log(err);
-//    return;
-//  }
-//
-//  res.forEach(function(e) {
-//    console.log(e);
-//  });
-//
-//  console.log('exec is done!');
-//
-//});
+client.run(query, function(err, res) {
+  if (err) {
+    console.log(err);
+    return;
+  }
+
+  res.forEach(function(e) {
+    console.log(e);
+  });
+
+  console.log('exec is done!');
+
+});
+
+/* UNAUTHENTICATED Client.prototype.stream */
+
+var stream = client.stream(query);
 
 var done = 0;
-var stream = client.stream(query);
 
 stream.on('data', function(data) {
   console.log(data);
@@ -55,3 +62,50 @@ stream.on('done', function() {
 stream.on('error', function(err) {
   console.log('stream error: ' + err);
 });
+
+
+
+var query2 = {
+  query: '5',
+  config: 'secured_test',
+};
+
+/* AUTHENTICATED Client.prototype.run */
+
+//`secured_test` source can be accessed without
+//an auth token that grants
+//authorization equal or higher than 3.
+client.run(query2, function(err, res) {
+  assert.throws(function () {
+    if (err) {
+      throw err;
+    }
+  });
+})
+
+
+var API_KEY = '1234';
+var USER = 'serrallonga';
+
+//first we need to authenticate
+client.authenticate(USER, API_KEY, function(err, token) {
+  if (err) {
+    throw err;
+  }
+
+  query2.authToken = token;
+
+  client.run(query2, function(err, res) {
+    if (err) {
+      console.log(err);
+      return;
+    }
+
+    res.forEach(function(e) {
+      console.log(e);
+    });
+
+    console.log('secured exec is done!');
+
+  });
+})

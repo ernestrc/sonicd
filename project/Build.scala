@@ -2,7 +2,7 @@ import com.typesafe.sbt.SbtGit.GitKeys._
 import sbt.Keys._
 import sbt._
 import sbtassembly.AssemblyKeys._
-import sbtassembly.{MergeStrategy, PathList}
+import sbtassembly.{PathList, MergeStrategy}
 import sbtbuildinfo.BuildInfoKeys._
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin._
@@ -36,10 +36,8 @@ object Build extends sbt.Build {
   val meta = """META.INF(.)*""".r
 
   val assemblyStrategy = assemblyMergeStrategy in assembly := {
-    case PathList(ps@_*) if ps.last endsWith ".class" => MergeStrategy.last //FIXME dangerous!
-    case PathList(ps@_*) if ps.last endsWith ".jar" => MergeStrategy.last
-    case PathList("javax", "servlet", xs@_*) => MergeStrategy.last
     case "reference.conf" => MergeStrategy.concat
+    case "application.conf" => MergeStrategy.discard
     case meta(_) => MergeStrategy.discard
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value

@@ -16,8 +16,6 @@ object SonicdConfig extends FromResourcesConfig(ConfigFactory.load())
 
 abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
-  val DEV: Boolean = config.getBoolean("sonicd.dev")
-
   val HTTP_PORT = config.getInt("sonicd.http-port")
   val TCP_PORT = config.getInt("sonicd.tcp-port")
   val INTERFACE = config.getString("sonicd.interface")
@@ -34,17 +32,13 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   assert(TOKEN_DURATION.isFinite() && TOKEN_DURATION > 1.minute,
     "token duration must be finite and greater than 1 minute")
 
-  lazy val API_KEYS: List[ApiKey] = {
-    val raw = config.getList("sonicd.api-keys")
+  lazy val API_KEYS: List[ApiKey] =
+    config.getList("sonicd.api-keys")
       .render(ConfigRenderOptions.concise())
-
-      info(log, "parsed api-keys cson: {}", raw)
-
-    raw.parseJson match {
+      .parseJson match {
       case JsArray(v) ⇒ v.map(_.convertTo[ApiKey]).toList
       case _ ⇒ throw new Exception("'sonicd.api-keys' must be an array of JSON objects")
     }
-  }
 
   assert(API_KEYS.distinct.size == API_KEYS.size)
 

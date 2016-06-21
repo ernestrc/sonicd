@@ -56,11 +56,9 @@ with JsonProtocol with SonicdLogging {
   Class.forName(H2Driver)
   val testConnection = DriverManager.getConnection(H2Url, "SONICD", "")
 
-  //TODO
+  /* is tested with the node bindings
   "sonicd ws api" should {
-    "run a simple query using the ws api" in {
-    }
-  }
+  }*/
 
   "sonicd tcp api" should {
     "run a simple query using the tcp api" in {
