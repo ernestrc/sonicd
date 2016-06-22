@@ -3,16 +3,16 @@ package build.unstable.sonicd.source
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
-import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{DataSource, SonicMessage}
-import spray.json.{JsArray, JsString, JsNumber, JsObject}
+import spray.json.{JsArray, JsNumber, JsObject, JsString}
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
 
-class SyntheticSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[ApiUser])
+class SyntheticSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[RequestContext])
   extends DataSource(config, queryId, query, context, apiUser) {
 
   val handlerProps: Props = {

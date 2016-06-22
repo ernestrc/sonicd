@@ -4,18 +4,18 @@ import java.io.File
 
 import akka.actor.{Actor, ActorContext, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
-import build.unstable.sonicd.auth.ApiUser
-import build.unstable.sonicd.model.{JsonProtocol, DataSource, SonicMessage, SonicdLogging}
+import build.unstable.sonicd.auth.RequestContext
+import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonicd.model.{DataSource, JsonProtocol, SonicMessage, SonicdLogging}
 import build.unstable.sonicd.source.file.{FileWatcher, LocalFilePublisher}
 import spray.json._
-import JsonProtocol._
 
 /**
  * Watches JSON files in 'path' local to Sonicd instance and exposes contents as a stream.
  *
  * Takes an optional 'tail' parameter to configure if only new data should be streamed.
  */
-class RawFileStreamSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[ApiUser])
+class RawFileStreamSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[RequestContext])
   extends DataSource(config, queryId, query, context, apiUser) {
 
   val handlerProps: Props = {

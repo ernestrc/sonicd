@@ -8,7 +8,7 @@ import akka.actor._
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.pattern._
 import akka.util.{ByteString, Timeout}
-import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
@@ -44,7 +44,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
     ))
 
   def prepareMaterialization(handler: ActorRef, q: Query,
-                             user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
+                             user: Option[RequestContext], clientAddress: Option[InetAddress]): Unit = {
     try {
       handled += 1
       val queryId = handled
@@ -67,7 +67,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
     }
   }
 
-  def isAuthorized(user: Option[ApiUser], security: Option[Int], clientAddress: Option[InetAddress]): Boolean = {
+  def isAuthorized(user: Option[RequestContext], security: Option[Int], clientAddress: Option[InetAddress]): Boolean = {
     (user, security, clientAddress) match {
       case (None, None, _) ⇒ true
       case (Some(u), None, Some(a)) if u.allowedIps.isEmpty || u.allowedIps.get.contains(a) ⇒ true
@@ -83,7 +83,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
   val handlers = mutable.Map.empty[Long, ActorPath]
   var handled: Long = 0
 
-  case class TokenValidationResult(user: Try[ApiUser], query: Query,
+  case class TokenValidationResult(user: Try[RequestContext], query: Query,
                                    handler: ActorRef, clientAddress: Option[InetAddress])
 
   /* BEHAVIOUR */
@@ -116,7 +116,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
           authService.ask(
             AuthenticationActor.ValidateToken(token, query.traceId.get))(authenticationTimeout)
-            .mapTo[Try[ApiUser]]
+            .mapTo[Try[RequestContext]]
             .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
             .andThen {
               case Success(res) ⇒
@@ -139,7 +139,7 @@ object SonicController {
 
   case class NewQuery(query: Query, clientAddress: Option[InetAddress])
 
-  class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
+  class UnauthorizedException(user: Option[RequestContext], clientAddress: Option[InetAddress])
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
       s"to access this source from ${clientAddress.getOrElse("unknown address")}")
       .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}"))

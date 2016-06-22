@@ -1,7 +1,7 @@
 package build.unstable.sonicd.model
 
 import akka.actor._
-import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.DataSource.ConfigurationException
 import build.unstable.sonicd.model.JsonProtocol._
 import spray.json._
@@ -13,7 +13,7 @@ object DataSource {
 }
 
 abstract class DataSource(config: JsObject, queryId: String, query: String,
-                          context: ActorContext, user: Option[ApiUser]) {
+                          context: ActorContext, user: Option[RequestContext]) {
 
   def securityLevel: Option[Int] = config.fields.get("security").map(_.convertTo[Int])
 

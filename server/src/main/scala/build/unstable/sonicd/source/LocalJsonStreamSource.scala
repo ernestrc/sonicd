@@ -4,7 +4,7 @@ import java.io.File
 
 import akka.actor._
 import akka.stream.actor.ActorPublisher
-import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.file.{FileWatcher, LocalFilePublisher}
@@ -16,7 +16,7 @@ import spray.json._
  * Takes an optional 'tail' parameter to configure if only new data should be streamed.
  */
 class LocalJsonStreamSource(config: JsObject, queryId: String,
-                            query: String, context: ActorContext, apiUser: Option[ApiUser])
+                            query: String, context: ActorContext, apiUser: Option[RequestContext])
   extends DataSource(config, queryId, query, context, apiUser) {
 
   val handlerProps: Props = {

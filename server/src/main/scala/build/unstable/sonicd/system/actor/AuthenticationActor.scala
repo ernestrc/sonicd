@@ -2,7 +2,7 @@ package build.unstable.sonicd.system.actor
 
 import akka.actor.Actor
 import akka.http.scaladsl.model.DateTime
-import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonicd.auth.{ApiKey, RequestContext}
 import build.unstable.sonicd.model.{Authenticate, SonicdLogging}
 import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
@@ -20,7 +20,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
   val signer = new JWTSigner(secret)
   val verifier = new JWTVerifier(secret)
 
-  def validateToken(token: Token, traceId: String): Try[ApiUser] = {
+  def validateToken(token: Token, traceId: String): Try[RequestContext] = {
     Try {
       try {
         trace(log, traceId, JWTVerifyToken, Variation.Attempt, "verifying token {}", token)
@@ -32,7 +32,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
           trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
           throw new TokenVerificationFailed(e)
       }
-    }.flatMap(ApiUser.fromJWTClaims)
+    }.flatMap(RequestContext.fromJWTClaims)
   }
 
   def createToken(key: String, user: String, traceId: String): Try[Token] = {
@@ -75,7 +75,7 @@ object AuthenticationActor {
 
   case class ValidateToken(token: Token, traceId: String)
 
-  case class AuthorizationConfirmed(id: String, user: ApiUser, until: DateTime)
+  case class AuthorizationConfirmed(id: String, user: RequestContext, until: DateTime)
 
   class AuthenticationException(msg: String) extends Exception(msg)
 

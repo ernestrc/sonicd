@@ -2,16 +2,16 @@ package build.unstable.sonicd.service.source
 
 import java.sql.{Connection, DriverManager, Statement}
 
-import akka.actor.{ActorRef, ActorContext, ActorSystem, Props}
+import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.auth.ApiUser
-import build.unstable.sonicd.model.{JsonProtocol, OutputChunk, TypeMetadata, DoneWithQueryExecution}
+import build.unstable.sonicd.auth.RequestContext
+import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonicd.model.{DoneWithQueryExecution, JsonProtocol, OutputChunk, TypeMetadata}
 import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
-import build.unstable.sonicd.source.{JdbcExecutor, JdbcConnectionsHandler, JdbcPublisher}
+import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
-import JsonProtocol._
 
 class JdbcSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
@@ -265,7 +265,7 @@ class JdbcSourceSpec(_system: ActorSystem)
 }
 
 //override dispatchers
-class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[ApiUser])
+class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[RequestContext])
   extends build.unstable.sonicd.source.JdbcSource(config, queryId, query, context, apiUser) {
 
   override val executorProps: (Connection, Statement) ⇒ Props = { (conn, stmt) ⇒

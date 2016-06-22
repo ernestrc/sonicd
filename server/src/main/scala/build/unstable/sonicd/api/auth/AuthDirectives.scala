@@ -3,13 +3,13 @@ package build.unstable.sonicd.api.auth
 import akka.actor.ActorRef
 import akka.http.scaladsl.server.Directive.SingleValueModifiers
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.{Directive1, Directives, Rejection}
+import akka.http.scaladsl.server.{Directive1, Rejection}
 import akka.pattern.ask
-import akka.stream.{Materializer, ActorMaterializer}
+import akka.stream.Materializer
 import akka.util.Timeout
-import build.unstable.sonicd.auth.ApiUser
+import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{SonicMessage, Authenticate, JsonProtocol, SonicdLogging}
+import build.unstable.sonicd.model.{Authenticate, SonicMessage, SonicdLogging}
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import build.unstable.tylog.Variation
 import spray.json.{JsValue, RootJsonFormat}
@@ -52,12 +52,12 @@ trait AuthDirectives {
       }
     }
 
-  def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[ApiUser] =
+  def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[RequestContext] =
     headerValueByName("SONICD-AUTH").flatMap { token ⇒
       onSuccess {
         trace(log, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
         authService.ask(AuthenticationActor.ValidateToken(token, traceId))(t)
-          .mapTo[Try[ApiUser]]
+          .mapTo[Try[RequestContext]]
           .andThen {
             case Success(res) ⇒
               trace(log, traceId, ValidateToken, Variation.Success, "validated token {}", token)

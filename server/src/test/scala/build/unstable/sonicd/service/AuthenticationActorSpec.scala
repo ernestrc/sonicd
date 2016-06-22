@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonicd.auth.{ApiKey, RequestContext}
 import build.unstable.sonicd.model.Authenticate
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import com.auth0.jwt.JWTSigner
@@ -45,7 +45,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val token = tokenMaybe.get
 
       val verified = actor.underlyingActor.verifier.verify(token)
-      val user = ApiUser.fromJWTClaims(verified)
+      val user = RequestContext.fromJWTClaims(verified)
 
       assert(user.get.authorization == 1)
       assert(user.get.mode == ApiKey.Mode.Read)
