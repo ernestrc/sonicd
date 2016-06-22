@@ -10,11 +10,9 @@ import akka.stream.scaladsl.Sink
 import akka.testkit.TestKit
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.api.AkkaApi
-import build.unstable.sonicd.api.auth.ApiUser
 import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.AkkaService
-import build.unstable.sonicd.system.actor.AuthenticationActor.AuthenticationException
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
 import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory

@@ -5,8 +5,7 @@ import java.net.InetAddress
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.Timeout
-import build.unstable.sonicd.api.auth.ApiUser
-import build.unstable.sonicd.auth.{ApiUser, ApiKey}
+import build.unstable.sonicd.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.{DoneWithQueryExecution, Query}
 import build.unstable.sonicd.system.actor.AuthenticationActor.ValidateToken
 import build.unstable.sonicd.system.actor.SonicController.NewQuery

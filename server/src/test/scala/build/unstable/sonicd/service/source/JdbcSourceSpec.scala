@@ -5,6 +5,7 @@ import java.sql.{Connection, DriverManager, Statement}
 import akka.actor.{ActorRef, ActorContext, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model.{JsonProtocol, OutputChunk, TypeMetadata, DoneWithQueryExecution}
 import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
 import build.unstable.sonicd.source.{JdbcExecutor, JdbcConnectionsHandler, JdbcPublisher}
@@ -41,7 +42,7 @@ class JdbcSourceSpec(_system: ActorSystem)
   }
 
   def newPublisher(query: String): ActorRef = {
-    val src = new JdbcSource(H2Config, "test", query, controller.underlyingActor.context)
+    val src = new JdbcSource(H2Config, "test", query, controller.underlyingActor.context, None)
     val ref = controller.underlyingActor.context.actorOf(src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
@@ -264,8 +265,8 @@ class JdbcSourceSpec(_system: ActorSystem)
 }
 
 //override dispatchers
-class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends build.unstable.sonicd.source.JdbcSource(config, queryId, query, context) {
+class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[ApiUser])
+  extends build.unstable.sonicd.source.JdbcSource(config, queryId, query, context, apiUser) {
 
   override val executorProps: (Connection, Statement) ⇒ Props = { (conn, stmt) ⇒
     Props(classOf[JdbcExecutor], queryId, query, conn, stmt, initializationStmts)
