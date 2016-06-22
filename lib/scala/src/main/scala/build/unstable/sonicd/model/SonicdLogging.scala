@@ -35,6 +35,13 @@ trait SonicdLogging extends TypedLogging {
   
   case object JWTVerifyToken extends CallType
 
+  //jdbc source
+  case object GetJdbcHandle extends CallType
+
+  case object RunInitializationStatements extends CallType
+
+  case object ExecuteStatement extends CallType
+
   final lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
 
 }

@@ -7,7 +7,7 @@ import akka.http.scaladsl.server.{Directive1, Rejection}
 import akka.pattern.ask
 import akka.stream.Materializer
 import akka.util.Timeout
-import build.unstable.sonicd.auth.RequestContext
+import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{Authenticate, SonicMessage, SonicdLogging}
 import build.unstable.sonicd.system.actor.AuthenticationActor
@@ -52,12 +52,12 @@ trait AuthDirectives {
       }
     }
 
-  def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[RequestContext] =
+  def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[ApiUser] =
     headerValueByName("SONICD-AUTH").flatMap { token ⇒
       onSuccess {
         trace(log, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
         authService.ask(AuthenticationActor.ValidateToken(token, traceId))(t)
-          .mapTo[Try[RequestContext]]
+          .mapTo[Try[ApiUser]]
           .andThen {
             case Success(res) ⇒
               trace(log, traceId, ValidateToken, Variation.Success, "validated token {}", token)

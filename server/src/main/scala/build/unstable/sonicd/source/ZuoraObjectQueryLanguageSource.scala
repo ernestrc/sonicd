@@ -11,7 +11,6 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
-import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ZuoraService._
@@ -25,13 +24,13 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
 
-class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String,
-                                     query: String, context: ActorContext, apiUser: Option[RequestContext])
-  extends DataSource(config, queryId, query, context, apiUser) {
+class ZuoraObjectQueryLanguageSource(query: build.unstable.sonicd.model.Query, actorContext: ActorContext, context: RequestContext)
+  extends DataSource(query, actorContext, context) {
 
-  val MIN_RECORDS = 100
+  val MIN_FETCH_SIZE = 100
 
-  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))(context)
+  implicit val materializer: ActorMaterializer =
+    ActorMaterializer(ActorMaterializerSettings(actorContext.system))(actorContext)
 
   def newConnectionPool(host: String): ConnectionPool = {
     Sonicd.http.newHostConnectionPoolHttps[String](host = host,
@@ -47,24 +46,25 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String,
     val host: String = getConfig[String]("host")
     val batchSize: Int =
       getOption[Int]("batch-size").map { i ⇒
-        if (i > SonicdConfig.ZUORA_MAX_NUMBER_RECORDS || i <= MIN_RECORDS)
-          throw new Exception(s"'batch-size' must be between ${SonicdConfig.ZUORA_MAX_NUMBER_RECORDS} and $MIN_RECORDS")
+        if (i > SonicdConfig.ZUORA_MAX_FETCH_SIZE || i <= MIN_FETCH_SIZE)
+          throw new Exception(s"'batch-size' must be between ${SonicdConfig.ZUORA_MAX_FETCH_SIZE} and $MIN_FETCH_SIZE")
         i
-      }.getOrElse(SonicdConfig.ZUORA_MAX_NUMBER_RECORDS)
+      }.getOrElse(SonicdConfig.ZUORA_MAX_FETCH_SIZE)
 
     val auth = ZuoraAuth(user, password, host)
     val zuoraServiceActorName = ZuoraService.getZuoraServiceActorName(auth)
 
-    val zuoraService = context.child(zuoraServiceActorName).getOrElse {
+    val zuoraService = actorContext.child(zuoraServiceActorName).getOrElse {
       val pool: ConnectionPool = newConnectionPool(auth.host)
-      context.actorOf(Props(classOf[ZuoraService], pool, materializer), zuoraServiceActorName)
+      actorContext.actorOf(Props(classOf[ZuoraService], pool, materializer), zuoraServiceActorName)
     }
 
-    Props(classOf[ZOQLPublisher], query, queryId, zuoraService, auth, batchSize)
+    Props(classOf[ZOQLPublisher], query.query, query.id.get.toString, zuoraService, auth, batchSize, context)
   }
 }
 
-class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: ZuoraAuth, batchSize: Int)
+class ZOQLPublisher(query: String, queryId: String, service: ActorRef,
+                    auth: ZuoraAuth, batchSize: Int, ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
   import ZuoraObjectQueryLanguageSource._

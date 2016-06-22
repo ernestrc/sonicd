@@ -8,6 +8,7 @@ import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, Test
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
+import build.unstable.sonicd.source.SyntheticPublisher
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
 import build.unstable.sonicd.system.actor.TcpHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}

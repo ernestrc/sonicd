@@ -241,7 +241,7 @@ class Query(val id: Option[Long],
   }
 
   def copy(query_id: Option[Long] = None, trace_id: Option[String] = None) =
-    new Query(query_id, trace_id, authToken, query, _config)
+    new Query(query_id orElse id, trace_id orElse traceId, authToken, query, _config)
 }
 
 object Query {

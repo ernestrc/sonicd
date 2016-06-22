@@ -38,14 +38,13 @@ object Receipt {
   }
 
   def error(e: Throwable, message: String, requestId: Option[String] = None): Receipt = {
-    val cause = Try(e.getCause.toString).toOption
     val stackTrace = getStackTrace(e)
     val errors = stackTrace :: Nil
     Receipt(
       success = false,
       requestId = requestId,
       message = Some(message),
-      errors = cause.map(_ :: errors).getOrElse(errors)
+      errors = errors
     )
   }
 

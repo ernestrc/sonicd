@@ -5,9 +5,9 @@ import java.sql.{Connection, DriverManager, Statement}
 import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.auth.RequestContext
+import build.unstable.sonicd.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{DoneWithQueryExecution, JsonProtocol, OutputChunk, TypeMetadata}
+import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
 import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
@@ -38,11 +38,21 @@ class JdbcSourceSpec(_system: ActorSystem)
     val stmt = testConnection.createStatement()
     stmt.execute(q)
     validation(stmt)
+    if (!testConnection.getAutoCommit) testConnection.commit()
     stmt.close()
   }
 
-  def newPublisher(query: String): ActorRef = {
-    val src = new JdbcSource(H2Config, "test", query, controller.underlyingActor.context, None)
+  def testConnectionOpen() {
+    runQuery("select count(*) from information_schema.sessions;") { stmt ⇒
+      val rs = stmt.getResultSet
+      rs.next()
+      rs.getInt(1) shouldBe 1 //test connections
+    }
+  }
+
+  def newPublisher(q: String, context: RequestContext = testCtx): ActorRef = {
+    val query = new Query(Some(1L), Some("traceId"), None, q, H2Config)
+    val src = new JdbcSource(query, controller.underlyingActor.context, context)
     val ref = controller.underlyingActor.context.actorOf(src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
@@ -73,6 +83,23 @@ class JdbcSourceSpec(_system: ActorSystem)
         rs.getString(1).toUpperCase shouldBe "USERS"
       }
       runQuery("drop table users;")()
+      testConnectionOpen()
+    }
+
+    "commit changes only if user is authenticated and has write access" in {
+      val pub = newPublisher("create table nowrite(id VARCHAR);",
+        RequestContext("a", Some(ApiUser("", 1, ApiKey.Mode.Read, None))))
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub)
+      runQuery("show tables") { stmt ⇒
+        val rs = stmt.getResultSet
+        rs.next()
+        rs.getString(1).toUpperCase shouldBe "USERS"
+        assert(!rs.next())
+      }
+      testConnectionOpen()
     }
 
     "run multiple statements" in {
@@ -147,11 +174,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
 
-      runQuery("select count(*) from information_schema.sessions;") { stmt ⇒
-        val rs = stmt.getResultSet
-        rs.next()
-        rs.getInt(1) shouldBe 1 //test connection
-      }
+      testConnectionOpen()
     }
 
     "close connection after running multiple statements" in {
@@ -166,11 +189,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
 
-      runQuery("select count(*) from information_schema.sessions;") { stmt ⇒
-        val rs = stmt.getResultSet
-        rs.next()
-        rs.getInt(1) shouldBe 1 //test connection
-      }
+      testConnectionOpen()
     }
 
     "send typed values downstream" in {
@@ -200,6 +219,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("4@lol.com"), JsNull))))
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
+      testConnectionOpen()
     }
 
     "encode/decode arrays correctly" in {
@@ -248,6 +268,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsNumber(4.123456789), JsNumber(4.123456789), JsNull))))
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
+      testConnectionOpen()
     }
 
     "should send type metadata" in {
@@ -260,16 +281,17 @@ class JdbcSourceSpec(_system: ActorSystem)
       expectMsg(OutputChunk(JsArray(Vector(JsString("1234"), JsNumber(1234)))))
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
+      testConnectionOpen()
     }
   }
 }
 
 //override dispatchers
-class JdbcSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[RequestContext])
-  extends build.unstable.sonicd.source.JdbcSource(config, queryId, query, context, apiUser) {
+class JdbcSource(query: Query, actorContext: ActorContext, context: RequestContext)
+  extends build.unstable.sonicd.source.JdbcSource(query, actorContext, context) {
 
   override val executorProps: (Connection, Statement) ⇒ Props = { (conn, stmt) ⇒
-    Props(classOf[JdbcExecutor], queryId, query, conn, stmt, initializationStmts)
+    Props(classOf[JdbcExecutor], query.id.get, query.query, conn, stmt, initializationStmts, context)
       .withDispatcher(CallingThreadDispatcher.Id)
   }
   override val jdbcConnectionsProps: Props =

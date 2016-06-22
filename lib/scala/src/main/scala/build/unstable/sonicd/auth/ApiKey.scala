@@ -43,7 +43,9 @@ case class ApiKey(key: String,
 
 object ApiKey {
 
-  sealed trait Mode
+  sealed trait Mode {
+    def canWrite: Boolean
+  }
 
   object Mode {
 
@@ -54,10 +56,14 @@ object ApiKey {
     }
 
     case object Read extends Mode {
+      override def canWrite: Boolean = false
+
       override def toString: String = "r"
     }
 
     case object ReadWrite extends Mode {
+      override def canWrite: Boolean = true
+
       override def toString: String = "rw"
     }
 

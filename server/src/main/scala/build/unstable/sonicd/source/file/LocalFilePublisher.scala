@@ -31,11 +31,12 @@ trait LocalFilePublisher {
 
   def parseUTF8Data(raw: String): Map[String, JsValue]
 
-  val queryId: String
+  val queryId: Long
   val rawQuery: String
   val tail: Boolean
   val fileFilterMaybe: Option[String]
   val watchersPair: Vector[(File, ActorRef)]
+  val ctx: RequestContext
 
 
   /* OVERRIDES */

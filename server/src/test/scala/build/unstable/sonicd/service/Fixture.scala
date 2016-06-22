@@ -3,7 +3,8 @@ package build.unstable.sonicd.service
 import akka.actor.{Actor, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
-import build.unstable.sonicd.model.{SonicMessage, SonicdSource}
+import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonicd.model.{RequestContext, SonicMessage, SonicdSource}
 import build.unstable.sonicd.source.SyntheticPublisher
 import spray.json._
 
@@ -15,7 +16,7 @@ object Fixture {
 
   // in memory db
   val testDB = "testdb"
-  val H2Url = s"jdbc:h2:mem:$testDB;DB_CLOSE_DELAY=-1;"
+  val H2Url = s"jdbc:h2:mem:$testDB"
   val H2Driver = "org.h2.Driver"
   val H2Config =
     s"""
@@ -26,7 +27,11 @@ object Fixture {
        | }
     """.stripMargin.parseJson.asJsObject
 
-  val syntheticPubProps = Props(classOf[SyntheticPublisher], 1000, Some(1), 10, "1", false)
+  val testUser = ApiUser("serrallonga", 10, ApiKey.Mode.ReadWrite, None)
+
+  val testCtx = RequestContext("1", Some(testUser))
+
+  val syntheticPubProps = Props(classOf[SyntheticPublisher], 1L, 1000, Some(1), 10, "1", false, testCtx)
     .withDispatcher(CallingThreadDispatcher.Id)
 
   val zombiePubProps = Props[Zombie].withDispatcher(CallingThreadDispatcher.Id)

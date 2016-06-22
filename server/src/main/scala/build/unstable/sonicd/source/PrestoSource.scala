@@ -8,7 +8,6 @@ import akka.pattern._
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
-import build.unstable.sonicd.auth.RequestContext
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.{BuildInfo, Sonicd, SonicdConfig}
@@ -18,8 +17,8 @@ import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
 import scala.util.{Failure, Success}
 
-class PrestoSource(config: JsObject, queryId: String, query: String, context: ActorContext, apiUser: Option[RequestContext])
-  extends DataSource(config, queryId, query, context, apiUser) {
+class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
+  extends DataSource(query, actorContext, context) {
 
   def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
     Props(classOf[PrestoSupervisor], masterUrl, masterPort)
@@ -31,13 +30,13 @@ class PrestoSource(config: JsObject, queryId: String, query: String, context: Ac
 
   lazy val handlerProps: Props = {
     //if no presto supervisor has been initialized yet for this presto cluster, initialize one
-    val prestoSupervisor = context.child(supervisorName).getOrElse {
-      context.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
+    val prestoSupervisor = actorContext.child(supervisorName).getOrElse {
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
     }
 
-    Props(classOf[PrestoPublisher], queryId, query, prestoSupervisor,
+    Props(classOf[PrestoPublisher], query.id.get.toString, query.query, prestoSupervisor,
       masterUrl, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN)
+      SonicdConfig.PRESTO_RETRYIN, context)
   }
 }
 
@@ -262,7 +261,8 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
 
 class PrestoPublisher(queryId: String, query: String,
                       supervisor: ActorRef, masterUrl: String,
-                      maxRetries: Int, retryIn: FiniteDuration)
+                      maxRetries: Int, retryIn: FiniteDuration,
+                      ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
   import Presto._
@@ -283,17 +283,8 @@ class PrestoPublisher(queryId: String, query: String,
     log.info(s"starting presto publisher of '$queryId' pointing at '$masterUrl'")
   }
 
-  def terminating(done: DoneWithQueryExecution): Receive = {
-    tryPushDownstream()
-    if (buffer.isEmpty && isActive && totalDemand > 0) {
-      onNext(done)
-      onCompleteThenStop()
-    }
 
-    {
-      case r: Request ⇒ terminating(done)
-    }
-  }
+  /* HELPERS */
 
   def tryPushDownstream() {
     while (isActive && totalDemand > 0 && buffer.nonEmpty) {
@@ -325,11 +316,29 @@ class PrestoPublisher(queryId: String, query: String,
     })
   }
 
+
+  /* STATE */
+
   var bufferedMeta: Boolean = false
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
   var lastQueryResults: Option[QueryResults] = None
   var retryScheduled: Option[Cancellable] = None
   var retried = 0
+
+
+  /* BEHAVIOUR */
+
+  def terminating(done: DoneWithQueryExecution): Receive = {
+    tryPushDownstream()
+    if (buffer.isEmpty && isActive && totalDemand > 0) {
+      onNext(done)
+      onCompleteThenStop()
+    }
+
+    {
+      case r: Request ⇒ terminating(done)
+    }
+  }
 
   def connected: Receive = commonReceive orElse {
 
