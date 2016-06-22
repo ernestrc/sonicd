@@ -84,7 +84,7 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
 
     case Request(n) if target.nonEmpty && streamed >= target.get ⇒
       log.info(s"reached target of ${target.get - preTarget}")
-      onNext(DoneWithQueryExecution(success = true))
+      onNext(DoneWithQueryExecution.success)
       onCompleteThenStop()
 
     case Request(n) ⇒ stream(n)

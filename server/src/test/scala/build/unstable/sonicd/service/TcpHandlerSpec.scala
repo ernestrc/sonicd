@@ -110,7 +110,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   def sendDoneNoAck(tcpHandler: ActorRef, ack: Int): Tcp.Write = {
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     val a = TcpHandler.Ack(ack)
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), a)
     tcpHandler ! done
@@ -309,7 +309,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     tcpHandler2 ! Tcp.PeerClosed
 
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     controller.underlyingActor.isMaterialized shouldBe true
     tcpHandler2 ! done
 
@@ -369,7 +369,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   "in closing state, it should buffer all messages received and send them for writing when possible before terminating" in {
     val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
 
     val ack1 = TcpHandler.Ack(1)
     val w1 = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack1)
@@ -431,8 +431,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       case w: Tcp.Write ⇒ SonicMessage.fromBytes(w.data.splitAt(4)._2) match {
         case d: DoneWithQueryExecution ⇒
           d.success shouldBe false
-          d.errors.length shouldBe 1
-          d.errors.head.getMessage.contains("Protocol") shouldBe true //an[ProtocolException] doesn't match
+          assert(d.error.nonEmpty)
+          d.error.get.getMessage.contains("Protocol") shouldBe true //an[ProtocolException] doesn't match
           tcpHandler ! w.ack
       }
     }
@@ -452,7 +452,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     //send done before ack2
     val ack3 = TcpHandler.Ack(3)
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack3)
     tcpHandler ! done
     expectNoMsg()

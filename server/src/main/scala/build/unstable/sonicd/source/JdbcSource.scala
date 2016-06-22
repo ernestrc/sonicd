@@ -129,7 +129,7 @@ class JdbcPublisher(queryId: Long,
       context.become(streaming(executor))
 
     case r: DoneWithQueryExecution ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Failure(r.errors.head), "could not get jdbc handle")
+      trace(log, ctx.traceId, GetJdbcHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
       onNext(r)
       onCompleteThenStop()
   }
@@ -267,9 +267,6 @@ class JdbcExecutor(queryId: Long,
             data.append(JsNull)
           } else data.append(value)
           pos += 1
-        }
-        if (data.isEmpty) {
-          throw new Exception("could not extract any column from row. this is most likely an error in sonicd's JdbcSource")
         }
         context.parent ! OutputChunk(JsArray(data.toVector))
         i -= 1

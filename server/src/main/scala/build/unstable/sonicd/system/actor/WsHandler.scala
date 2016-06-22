@@ -158,7 +158,7 @@ with ActorSubscriber with SonicdLogging {
       pub.subscribe(subs)
 
     case msg: DoneWithQueryExecution ⇒
-      trace(log, traceId, MaterializeSource, Variation.Failure(msg.errors.head), "error materializing source")
+      trace(log, traceId, MaterializeSource, Variation.Failure(msg.error.get), "error materializing source")
       context.become(closing(msg))
 
   }

@@ -51,7 +51,7 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def expectDone(wsHandler: ActorRef): Unit = {
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     wsHandler ! done
     expectMsg(done)
   }

@@ -78,7 +78,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         lastSender ! user
         val done = expectMsgType[DoneWithQueryExecution]
 
-        done.errors.head.isInstanceOf[AuthenticationActor.AuthenticationException]
+        done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
         assert(c.underlyingActor.handlers.isEmpty)
@@ -93,7 +93,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
         val done = expectMsgType[DoneWithQueryExecution]
 
-        done.errors.head.isInstanceOf[AuthenticationActor.AuthenticationException]
+        done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
         assert(c.underlyingActor.handlers.isEmpty)
@@ -116,7 +116,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       lastSender ! user
       val done = expectMsgType[DoneWithQueryExecution]
 
-      done.errors.head.isInstanceOf[AuthenticationActor.AuthenticationException]
+      done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
       c.underlyingActor.handled shouldBe 1
       assert(c.underlyingActor.handlers.isEmpty)

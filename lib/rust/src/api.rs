@@ -69,18 +69,11 @@ pub fn stream<O, P, M>(query: Query,
                     "P" => progress(msg),
                     "T" => metadata(msg),
                     "D" => {
-                        let variation = msg.v.unwrap();
-                        if variation == "success".to_owned() {
-                            res = Ok(());
+                        if let Some(error) = msg.v.map(|s| Error::StreamError(s)) {
+                            res = Err(error)
                         } else {
-                            let errors = SonicMessage::payload_into_errors(msg.p);
-                            let r: Option<Error> = if !errors.is_empty() {
-                                Some(Error::StreamError(errors.first().unwrap().clone()))
-                            } else {
-                                None
-                            };
-                            res = Err(r.unwrap_or_else(|| Error::ProtocolError("done was not successful but array of errors was empty".to_owned())));
-                        }
+                            res = Ok(());
+                        };
                         let fbytes = tcp::frame(SonicMessage::ack().into_json());
                         // send ack
                         stream.write(&fbytes.as_slice()).unwrap();

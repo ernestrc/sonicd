@@ -1,17 +1,14 @@
 package build.unstable.sonicd.api
 
-import akka.actor.{ActorRef, Props}
-import akka.http.scaladsl.model.MediaTypes._
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
-import akka.util.CompactByteString
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.api.auth.AuthEndpoint
-import build.unstable.sonicd.api.endpoint.{QueryEndpoint, MonitoringEndpoint}
-import build.unstable.sonicd.model.{SonicdLogging, JsonProtocol, Receipt}
+import build.unstable.sonicd.api.endpoint.{MonitoringEndpoint, QueryEndpoint}
+import build.unstable.sonicd.model.SonicdLogging
 import build.unstable.sonicd.system.{Service, System}
 
 trait Api {
@@ -28,29 +25,17 @@ trait Api {
 trait AkkaApi extends Api {
   this: System with Service with SonicdLogging ⇒
 
-  def completeWithMessage(msg: String, rejection: Rejection) = {
-    complete(HttpResponse(BadRequest,
-      entity = HttpEntity.Strict(ContentType(`application/json`),
-        CompactByteString(JsonProtocol.receiptJsonFormat.write(
-          Receipt.error(new Exception(s"${rejection.toString}"), msg)).toString))))
+  def completeWithMessage(msg: String) = {
+    complete(HttpResponse(BadRequest, entity = msg + ": "))
   }
 
   implicit val rejectionHandler: RejectionHandler.Builder = RejectionHandler.newBuilder().handle {
     case rej@MalformedRequestContentRejection(msg, _) ⇒
       warning(log, "malformed request: {}", rej)
-      completeWithMessage("there was a problem when unmarshalling payload: " + msg, rej)
+      completeWithMessage("there was a problem when unmarshalling payload: " + msg)
     case rej: Rejection ⇒
       warning(log, "rejected: {}", rej)
-      completeWithMessage("rejected", rej)
-  }
-
-  implicit val receiptExceptionHandler = ExceptionHandler {
-    case e: Exception ⇒
-      log.error("unexpected error", e)
-      complete(HttpResponse(InternalServerError,
-        entity = HttpEntity.Strict(ContentType(`application/json`),
-          CompactByteString(JsonProtocol.receiptJsonFormat.write(
-            Receipt.error(e, "Oops! There was an unexpected Error")).toString()))))
+      completeWithMessage("rejected")
   }
 
   val queryEndpoint = new QueryEndpoint(controllerService, authenticationService,
@@ -62,13 +47,12 @@ trait AkkaApi extends Api {
 
   val httpHandler = logRequest("sonic") {
     Route.seal(pathPrefix(SonicdConfig.API_VERSION) {
-      handleExceptions(receiptExceptionHandler) {
-        queryEndpoint.route ~
-          monitoringEndpoint.route ~
-          authEndpoint.route
-      }
-    })(RoutingSettings.default,
-      rejectionHandler = rejectionHandler.result(),
-      exceptionHandler = receiptExceptionHandler)
+      queryEndpoint.route ~
+        monitoringEndpoint.route ~
+        authEndpoint.route
+    }
+    )(RoutingSettings.default,
+      rejectionHandler = rejectionHandler.result())
   }
+
 }

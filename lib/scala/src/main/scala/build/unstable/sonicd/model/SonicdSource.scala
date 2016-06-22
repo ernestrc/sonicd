@@ -46,8 +46,8 @@ object SonicdSource extends SonicdLogging {
           last match {
             case Some(l) ⇒
               if (l.success) completeStage()
-              else if (l.errors.nonEmpty) {
-                failStage(l.errors.head)
+              else if (l.error.nonEmpty) {
+                failStage(l.error.get)
               } else failStage(new Exception("protocol error: done event is not success but errors is empty"))
             case None ⇒
               failStage(new IncompleteStreamException)

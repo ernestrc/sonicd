@@ -293,7 +293,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
       case ev: DoneWithQueryExecution ⇒
         context.become(closing(ev))
-        trace(log, traceId, MaterializeSource, Variation.Failure(ev.errors.head),
+        trace(log, traceId, MaterializeSource, Variation.Failure(ev.error.get),
           "controller failed to materialize source")
 
       case s: Subscription ⇒
@@ -305,7 +305,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         context.become(materialized)
 
       case handlerProps: Props ⇒
-        log.debug("received props {}", handlerProps)
+        debug(log, "received props of {}", handlerProps.actorClass())
         handler = context.actorOf(handlerProps)
         val pub = ActorPublisher[SonicMessage](handler)
         pub.subscribe(subs)

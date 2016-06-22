@@ -66,26 +66,20 @@ case class QueryProgress(progress: Option[Double], output: Option[String]) exten
   override val eventType = SonicMessage.progress
 }
 
-case class DoneWithQueryExecution(success: Boolean, errors: Vector[Throwable] = Vector.empty) extends SonicMessage {
+case class DoneWithQueryExecution(error: Option[Throwable] = None) extends SonicMessage {
+
+  val success = error.isEmpty
 
   override val eventType = SonicMessage.done
-  override val variation: Option[String] = if (success) Some("success") else Some("error")
-
-  override val payload: Option[JsValue] = {
-    Some(JsArray(errors.map { e ⇒
-      val cause = e.getCause
-      val rr = Receipt.getStackTrace(e)
-      JsString(if (cause != null) rr + "\ncause: " + Receipt.getStackTrace(e.getCause) else rr)
-    }))
-  }
+  override val variation: Option[String] = error.map(e ⇒ getStackTrace(e))
+  override val payload: Option[JsValue] = None
 
 }
 
 object DoneWithQueryExecution {
-  val success: DoneWithQueryExecution = DoneWithQueryExecution(success = true, Vector.empty)
+  val success: DoneWithQueryExecution = DoneWithQueryExecution(None)
 
-  def error(e: Throwable): DoneWithQueryExecution =
-    DoneWithQueryExecution(success = false, Vector(e))
+  def error(e: Throwable): DoneWithQueryExecution = DoneWithQueryExecution(Some(e))
 }
 
 //events sent by the client to the server
@@ -177,8 +171,7 @@ object SonicMessage {
         val traceId = p.get("trace_id").flatMap(_.convertTo[Option[String]])
         val token = p.get("auth").flatMap(_.convertTo[Option[String]])
         new Query(None, traceId, token, vari.get, p("config"))
-      case Some(`done`) ⇒ DoneWithQueryExecution(vari.get == "success",
-        pay.map(_.convertTo[Vector[String]].map(e ⇒ new Exception(e))).getOrElse(Vector.empty))
+      case Some(`done`) ⇒ DoneWithQueryExecution(vari.map(fromStackTrace))
       case Some(e) ⇒ throw new Exception(s"unexpected event type '$e'")
       case None ⇒ throw new Exception("no 'e' event_type")
     }
@@ -194,7 +187,6 @@ object SonicMessage {
 }
 
 class Query(val id: Option[Long],
-            //added client
             val traceId: Option[String],
             val authToken: Option[String],
             val query: String,
@@ -232,7 +224,7 @@ class Query(val id: Option[Long],
   private[sonicd] def clazzName: String = config.fields.getOrElse("class",
     throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
-  override def toString: String = s"Query($id,$query,$traceId)"
+  override def toString: String = s"Query(id=$id,trace_id=$traceId)"
 
   private[sonicd] def getSourceClass: Class[_] = {
     val clazzLoader = this.getClass.getClassLoader

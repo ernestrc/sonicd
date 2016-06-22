@@ -38,11 +38,6 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   /* HELPERS */
 
-  def receiptToBinaryMessage(rec: Receipt): Message =
-    BinaryMessage.Strict(ByteString(
-      JsonProtocol.receiptJsonFormat.write(rec).compactPrint.getBytes(Charset.defaultCharset())
-    ))
-
   def prepareMaterialization(handler: ActorRef, q: Query,
                              user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {

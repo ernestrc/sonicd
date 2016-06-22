@@ -64,7 +64,7 @@ class JdbcSourceSpec(_system: ActorSystem)
   }
 
   def expectDone(pub: ActorRef) = {
-    expectMsg(DoneWithQueryExecution(success = true, Vector.empty))
+    expectMsg(DoneWithQueryExecution.success)
     expectMsg("complete") //sent by ImplicitSubscriber
     expectTerminated(pub)
   }
@@ -155,7 +155,7 @@ class JdbcSourceSpec(_system: ActorSystem)
 
       pub ! ActorPublisherMessage.Request(1)
       expectMsgPF() {
-        case d: DoneWithQueryExecution ⇒ assert(d.errors.headOption.nonEmpty)
+        case d: DoneWithQueryExecution ⇒ assert(d.error.nonEmpty)
       }
       expectMsg("complete")
       expectTerminated(pub)

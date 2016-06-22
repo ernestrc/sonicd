@@ -103,7 +103,7 @@ with JsonProtocol with SonicdLogging {
 
       val future: Future[String] = SonicdSource.authenticate("serrallonga", "INVALID", tcpAddr)
 
-      val e = intercept[Exception]{
+      val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
       assert(e.getMessage.contains("INVALID"))
@@ -113,7 +113,7 @@ with JsonProtocol with SonicdLogging {
       val syntheticQuery = Query("10", JsString("secure_server_config"), None)
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
 
-      val e = intercept[Exception]{
+      val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
       assert(e.getMessage.contains("unauthenticated"))
@@ -134,7 +134,7 @@ with JsonProtocol with SonicdLogging {
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
 
-      val e = intercept[Exception]{
+      val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
 
@@ -157,7 +157,7 @@ with JsonProtocol with SonicdLogging {
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
 
-      intercept[Exception]{
+      intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
     }
@@ -170,12 +170,12 @@ with JsonProtocol with SonicdLogging {
       val stream: Future[DoneWithQueryExecution] =
         SonicdSource.stream(tcpAddr, query).to(Sink.ignore).run()
 
-      val sThrown = intercept[Exception] {
+      val sThrown = intercept[Throwable] {
           Await.result(stream, 20.seconds)
         }
       assert(sThrown.getMessage.contains("not found"))
 
-      val thrown = intercept[Exception] {
+      val thrown = intercept[Throwable] {
           Await.result(future, 20.seconds)
         }
       assert(thrown.getMessage.contains("not found"))
@@ -191,12 +191,12 @@ with JsonProtocol with SonicdLogging {
         SonicdSource.stream(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
           .to(Sink.ignore).run()
 
-      val thrown = intercept[java.net.ConnectException] {
+      val thrown = intercept[java.net.ConnectThrowable] {
         Await.result(future, 20.seconds)
       }
       assert(thrown.getMessage.contains("Could not establish connection to"))
 
-      val sThrown = intercept[java.net.ConnectException] {
+      val sThrown = intercept[java.net.ConnectThrowable] {
         Await.result(stream, 20.seconds)
       }
       assert(sThrown.getMessage.contains("Could not establish connection to"))

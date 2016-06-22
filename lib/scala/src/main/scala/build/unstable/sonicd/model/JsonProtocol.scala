@@ -24,8 +24,6 @@ trait JsonProtocol extends SprayJsonSupport with DefaultJsonProtocol {
     }
   }
 
-  implicit val receiptJsonFormat: RootJsonFormat[Receipt] = jsonFormat4(Receipt.apply)
-
   implicit val inetAddressJsonFormat: RootJsonFormat[InetAddress] = new RootJsonFormat[InetAddress] {
     override def read(json: JsValue): InetAddress = InetAddress.getByName(json.convertTo[String])
 

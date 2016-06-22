@@ -63,8 +63,8 @@ impl fmt::Display for Error {
             &Error::ParseAddr(ref err) => write!(f, "{}", err),
             &Error::ProtocolError(ref err) => write!(f, "{}", err),
             &Error::HttpError(ref err) => write!(f, "{}", err),
-            &Error::StreamError(ref rec) => write!(f, "{}", rec), 
-            &Error::OtherError(ref rec) => write!(f, "{}", rec), 
+            &Error::StreamError(ref s) => write!(f, "{}", s), 
+            &Error::OtherError(ref s) => write!(f, "{}", s), 
         }
     }
 }
@@ -161,19 +161,5 @@ impl SonicMessage {
 
     pub fn from_bytes(buf: Vec<u8>) -> Result<SonicMessage> {
         Self::from_slice(buf.as_slice())
-    }
-
-    pub fn payload_into_errors(payload: Option<Value>) -> Vec<String> {
-        payload.map(|payload| {
-            match payload {
-                Value::Array(data) => {
-                    data.iter()
-                        .map(|s| String::from_str(s.as_string().unwrap()).unwrap())
-                        .collect::<Vec<String>>()
-                }
-                e => panic!("expecting JSON array got: {:?}", e),
-            }
-        })
-        .unwrap_or_else(|| Vec::new())
     }
 }

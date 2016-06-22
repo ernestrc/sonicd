@@ -129,7 +129,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef,
         streamed += effectiveBatchSize; streamed == streamLimit.get
       }) {
         log.info(s"successfully fetched $totalSize zuora objects")
-        self ! DoneWithQueryExecution(success = true)
+        self ! DoneWithQueryExecution.success
       } else {
         val percPerBatch = 100.0 * effectiveBatchSize / totalSize
         buffer.enqueue(QueryProgress(Some(percPerBatch), Some(s"querying for $effectiveBatchSize more objects")))
@@ -184,14 +184,14 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef,
         if (trim.startsWith("show")) {
           log.debug("showing table names")
           buffer.enqueue(ZuoraService.ShowTables.output: _*)
-          buffer.enqueue(DoneWithQueryExecution(success = true))
+          buffer.enqueue(DoneWithQueryExecution.success)
           nothing
         } else if (trim.startsWith("desc") || trim.startsWith("describe")) {
           log.debug("describing table {}", trim)
           query.split(" ").lastOption.map { parsed ⇒
             ZuoraService.tables.find(t ⇒ t.name == parsed || t.nameLower == parsed)
               .map { table ⇒
-                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution(success = true)
+                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution.success
                 buffer.enqueue(msgs: _*)
                 nothing
               }.getOrElse {

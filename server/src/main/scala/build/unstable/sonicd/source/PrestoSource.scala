@@ -362,7 +362,7 @@ class PrestoPublisher(queryId: String, query: String,
 
         case "FINISHED" ⇒
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
-          context.become(terminating(done = DoneWithQueryExecution(success = true)))
+          context.become(terminating(done = DoneWithQueryExecution.success))
 
         case "FAILED" ⇒
           val e = new Exception(r.error.get.message)
