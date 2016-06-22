@@ -86,19 +86,25 @@ class JdbcSourceSpec(_system: ActorSystem)
       testConnectionOpen()
     }
 
+    //http://www.h2database.com/html/advanced.html
+    //Please note that most data definition language (DDL) statements,
+    //such as "create table", commit the current transaction. See the Grammar for details.
     "commit changes only if user is authenticated and has write access" in {
-      val pub = newPublisher("create table nowrite(id VARCHAR);",
+      runQuery("CREATE TABLE test_commit(id VARCHAR)")()
+      runQuery("INSERT INTO test_commit (id) VALUES ('1234')")()
+      //try to delete all data
+      val pub = newPublisher("delete from test_commit;",
         RequestContext("a", Some(ApiUser("", 1, ApiKey.Mode.Read, None))))
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
-      runQuery("show tables") { stmt ⇒
+      runQuery("select count(*) from test_commit") { stmt ⇒
         val rs = stmt.getResultSet
         rs.next()
-        rs.getString(1).toUpperCase shouldBe "USERS"
-        assert(!rs.next())
+        rs.getInt(1) shouldBe 1
       }
+      runQuery("drop table test_commit;")()
       testConnectionOpen()
     }
 
