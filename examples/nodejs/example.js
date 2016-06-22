@@ -89,12 +89,10 @@ var API_KEY = '1234';
 var USER = 'serrallonga';
 
 //first we need to authenticate
-client.authenticate(USER, API_KEY, function(err, token) {
+client.authenticate(USER, API_KEY, function(err) {
   if (err) {
     throw err;
   }
-
-  query2.authToken = token;
 
   client.run(query2, function(err, res) {
     if (err) {
