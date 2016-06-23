@@ -15,5 +15,6 @@ mod ws;
 mod io;
 
 pub use api::{run, version, stream};
+pub use tcp::{read_message, frame};
 pub use model::{Query, SonicMessage, Error, ClientConfig, Result};
 pub use ws::WsHandler;
