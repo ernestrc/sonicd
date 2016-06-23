@@ -12,7 +12,7 @@ mod api;
 mod tcp;
 mod model;
 mod ws;
-mod io;
+#[macro_use] mod io;
 
 pub use api::{run, version, stream};
 pub use tcp::{read_message, frame};

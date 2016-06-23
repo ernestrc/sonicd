@@ -5,6 +5,8 @@ extern crate threadpool;
 extern crate ws;
 extern crate num_cpus;
 #[macro_use]
+extern crate lazy_static;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate libsonicd;
@@ -44,27 +46,13 @@ macro_rules! perror {
     }}
 }
 
-macro_rules! eagain {
-    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
-        let mut res = None;
-        loop {
-            match $syscall($arg1, $arg2) {
-                Err(nix::Error::Sys(a@nix::Errno::EAGAIN)) => {
-                    debug!("{}: {}", $name, a);
-                    continue;
-                },
-                Ok(m) => {
-                    res = Some(m);
-                    break;
-                }
-                Err(e) => {
-                    perror!(format!("{}", $name))(e);
-                    break;
-                }
-            }
-        }
-        res.unwrap()
-    }}
+lazy_static! {
+	static ref NO_INTEREST: EpollEvent = {
+		EpollEvent {
+			events: EpollEventKind::empty(),
+			data: 0,
+		}
+	};
 }
 
 #[inline]
@@ -106,14 +94,6 @@ fn main() {
     // epoll_wait with no timeout
     let loop_ms = -1 as isize;
 
-    let ninterest: EpollEvent = {
-        EpollEvent {
-            events: EpollEventKind::empty(),
-            data: 0,
-        }
-    };
-
-
     for _ in 1..cpus {
 
         let epfd = epoll_create().unwrap_or_else(perror!("epoll_create"));
@@ -136,7 +116,7 @@ fn main() {
                         shutdown(fd, Shutdown::Both).unwrap();
                         debug!("successfully closed fd {}", fd);
 
-                        epoll_ctl(epfd, EpollOp::EpollCtlDel, fd, &ninterest)
+                        epoll_ctl(epfd, EpollOp::EpollCtlDel, fd, &NO_INTEREST)
                             .unwrap_or_else(perror!("epoll_ctl"));
                         debug!("unregistered interests for {}", fd);
                         continue;
@@ -149,11 +129,11 @@ fn main() {
                     if epoll.contains(EPOLLIN) {
                         debug!("socket of {} is readable", fd);
 
-                        // FIXME 
+                        // FIXME
                         // main loop should be connection handling
                         // once new connection is accepted, a new handler should be created with
                         // a channel that will be used to communicate with epoll instance
-                        
+
                         // TODO setup handler and store
                         // let msg = libsonicd::read_message(&fd);
                         // tx.send(msg).unwrap();
@@ -177,42 +157,36 @@ fn main() {
     let info = ginterest(srvfd);
     epoll_ctl(cepfd, EpollOp::EpollCtlAdd, srvfd, &info).unwrap_or_else(perror!("epoll_ctl"));
 
-    thread::spawn(move || {
 
-        loop {
-            let mut evts: Vec<EpollEvent> = Vec::with_capacity(max_conn);
-            let dst = unsafe { slice::from_raw_parts_mut(evts.as_mut_ptr(), evts.capacity()) };
-            // Wait for epoll events for at most timeout_ms milliseconds
-            let cnt = epoll_wait(cepfd, dst, loop_ms).unwrap_or_else(perror!("epoll_wait"));
-            unsafe { evts.set_len(cnt) }
+    loop {
+        let mut evts: Vec<EpollEvent> = Vec::with_capacity(max_conn);
+        let dst = unsafe { slice::from_raw_parts_mut(evts.as_mut_ptr(), evts.capacity()) };
+        // Wait for epoll events for at most timeout_ms milliseconds
+        let cnt = epoll_wait(cepfd, dst, loop_ms).unwrap_or_else(perror!("epoll_wait"));
+        unsafe { evts.set_len(cnt) }
 
-            for _ in evts {
+        for _ in evts {
 
-                let clifd = eagain!(accept4, "accept4", srvfd, sockf);
-                debug!("accept4: accpeted new tcp client {}", &clifd);
+            let clifd = eagain!(accept4, "accept4", srvfd, sockf);
+            debug!("accept4: accpeted new tcp client {}", &clifd);
 
-                let info = ginterest(clifd);
+            let info = ginterest(clifd);
 
-                // round robin
-                let next = (accepted % io_cpus as u64) as usize;
+            // round robin
+            let next = (accepted % io_cpus as u64) as usize;
 
-                let epfd: RawFd = *epfds.get(next).unwrap();
+            let epfd: RawFd = *epfds.get(next).unwrap();
 
-                debug!("assigned client to next {} epoll instance {}", &next, &epfd);
+            debug!("assigned client to next {} epoll instance {}", &next, &epfd);
 
-                epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info)
-                    .unwrap_or_else(perror!("epoll_ctl"));
+            epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info)
+                .unwrap_or_else(perror!("epoll_ctl"));
 
-                debug!("epoll_ctl: registered interests for {}", clifd);
+            debug!("epoll_ctl: registered interests for {}", clifd);
 
-                accepted += 1;
-            }
+            accepted += 1;
         }
-    });
-    // loop {
-    //    let msg = rx.recv().unwrap().unwrap();
-    //    debug!("recv message {:?}", msg);
-    // }
+    }
 }
 // ::ws::listen("127.0.0.1:9111", |out| WsHandler::new(out, count.clone())) .unwrap();
 // use threadpool::ThreadPool;

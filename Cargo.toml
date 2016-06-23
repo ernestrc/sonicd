@@ -36,6 +36,7 @@ pbr = "*"
 threadpool = "*"
 num_cpus = "0.2"
 ws = "*"
+lazy_static = "0.1.*"
 
 #[profile.release]
 #debug = true

@@ -1,6 +1,36 @@
 use nix::unistd;
 use nix::errno::Errno::*;
 use model::{Error, Result};
+use nix::sys::socket::*;
+use nix::sys::epoll::*;
+use std::os::unix::io::{RawFd, AsRawFd};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::{thread, fmt, net, marker, slice};
+use std::os::raw::c_int;
+
+#[macro_export]
+macro_rules! eagain {
+	($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+		let mut res = None;
+		loop {
+			match $syscall($arg1, $arg2) {
+				Err(nix::Error::Sys(a@nix::Errno::EAGAIN)) => {
+					debug!("{}: {}", $name, a);
+					continue;
+				},
+				Ok(m) => {
+					res = Some(m);
+					break;
+				}
+				Err(e) => {
+					perror!(format!("{}", $name))(e);
+					break;
+				}
+			}
+		}
+		res
+	}}
+}
 
 pub fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
     match unistd::read(fd, buf) {
@@ -25,11 +55,11 @@ pub fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
                 Ok(b)
             }
         }
-        Err(::nix::Error::Sys(EAGAIN)) | Err(::nix::Error::Sys(EINTR)) => {
+        Err(::nix::Error::Sys(EAGAIN)) |
+        Err(::nix::Error::Sys(EINTR)) => {
             debug!("unistd::read: EAGAIN | EINTR, resubmitting read");
             read(len, fd, buf)
         }
         Err(e) => Err(Error::Io(e)),
     }
 }
-
