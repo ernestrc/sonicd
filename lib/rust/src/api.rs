@@ -4,6 +4,8 @@ use tcp;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::io::Write;
+use std::collections::BTreeMap;
+use serde_json::Value;
 
 static API_VERSION: &'static str = "v1";
 
@@ -25,13 +27,13 @@ pub fn run(query: Query, host: &str, tcp_port: &u16) -> Result<Vec<SonicMessage>
             buf.push(msg);
         };
 
-        try!(stream(query, host, tcp_port, fn_buf, |_| {}, |_| {}));
+        try!(stream(query.into_msg(), host, tcp_port, fn_buf, |_| {}, |_| {}));
     }
 
     Ok(buf)
 }
 
-pub fn stream<O, P, M>(query: Query,
+pub fn stream<O, P, M>(command: SonicMessage,
                        addr: &str,
                        port: &u16,
                        mut output: O,
@@ -53,8 +55,12 @@ pub fn stream<O, P, M>(query: Query,
     // set timeout 10s
     stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))).unwrap();
 
-    // frame query
-    let fbytes = tcp::frame(query.into_json());
+    debug!("framing command {:?}", &command);
+
+    // frame command
+    let fbytes = tcp::frame(command.into_json());
+
+    debug!("framed command into {} bytes", fbytes.len());
 
     // send query
     stream.write(&fbytes.as_slice()).unwrap();
@@ -121,3 +127,37 @@ pub fn version(host: &str, http_port: &u16) -> Result<String> {
 
     Ok(s)
 }
+
+pub fn authenticate(user: String, key: String, host: &str, tcp_port: &u16) -> Result<String> {
+
+    let mut payload = BTreeMap::new();
+
+    payload.insert("user".to_owned(), Value::String(user));
+
+    let command = SonicMessage {
+        e: "H".to_owned(),
+        v: Some(key),
+        p: Some(Value::Object(payload))
+
+    };
+
+    let mut buf: Vec<SonicMessage> = Vec::new();
+
+    {
+        let fn_buf = |msg| {
+            buf.push(msg);
+        };
+
+        try!(stream(command, host, tcp_port, fn_buf, |_| {}, |_| {}));
+    }
+
+    let token = match buf.iter().find(|m| m.e == "O".to_owned()) {
+        Some(m) => m.clone().p.unwrap().as_array().unwrap().get(0).unwrap().as_string().unwrap().to_owned(),
+        None => {
+            return Err(Error::ProtocolError("no messages return by authenticate command".to_owned()));
+        }
+    };
+
+    Ok(token)
+}
+

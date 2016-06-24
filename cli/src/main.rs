@@ -35,6 +35,7 @@ docopt!(Args derive Debug, "
 Usage:
   sonic <source> [-d <var>...] [options] -e <query> 
   sonic <source> [-d <var>...] [options] -f <file> 
+  sonic login
   sonic -h | --help
   sonic --version
 
@@ -56,18 +57,20 @@ fn _main(args: Args) -> Result<()> {
 
     let config: ClientConfig = if args.flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &args.flag_c);
-        try!(read_cfg(PathBuf::from(args.flag_c.clone())))
+        try!(read_config(&PathBuf::from(args.flag_c.clone())))
     } else {
         debug!("sourcing default config in path '$HOME/.sonicrc'");
-        try!(source_sonicrc())
+        try!(get_default_config())
     };
 
     let vars = try!(split_key_value(&args.arg_var));
 
     let query = if args.flag_file {
-        try!(read_file_contents(PathBuf::from(&args.arg_file)))
+        try!(read_file_contents(&PathBuf::from(&args.arg_file)))
     } else if args.flag_execute {
         args.arg_query.clone()
+    } else if args.cmd_login {
+        return login(&config.sonicd, &config.tcp_port);
     } else {
         let server_v = try!(version(&config.sonicd, &config.http_port));
 
@@ -80,7 +83,7 @@ fn _main(args: Args) -> Result<()> {
 
     let injected = try!(inject_vars(&query, &vars));
 
-    let query = try!(build(&args.arg_source, config.sources.clone(), &injected));
+    let query = try!(build_query(&args.arg_source, config.sources.clone(), &injected, config.auth));
 
     let mut pb = ProgressBar::new(100);
     pb.format("╢░░_╟");
@@ -129,7 +132,7 @@ fn _main(args: Args) -> Result<()> {
         }
     };
 
-    try!(stream(query, &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta));
+    try!(stream(query.into_msg(), &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta));
 
     Ok(())
 }
