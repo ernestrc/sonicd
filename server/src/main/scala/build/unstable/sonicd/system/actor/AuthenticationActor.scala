@@ -28,6 +28,9 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
         trace(log, traceId, JWTVerifyToken, Variation.Success, "token is valid {}", token)
         verifiedClaims
       } catch {
+        case e: com.auth0.jwt.JWTExpiredException ⇒
+          trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token {} expired", token)
+          throw new TokenExpired(e)
         case NonFatal(e) ⇒
           trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
           throw new TokenVerificationFailed(e)
@@ -80,5 +83,8 @@ object AuthenticationActor {
   class AuthenticationException(msg: String) extends Exception(msg)
 
   class TokenVerificationFailed(inner: Throwable) extends Exception("token verification failed", inner)
+  
+  class TokenExpired(cause: com.auth0.jwt.JWTExpiredException)
+    extends Exception("token expired. generated a new one and try again", cause)
 
 }

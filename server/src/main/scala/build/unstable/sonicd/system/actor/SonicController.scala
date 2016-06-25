@@ -102,7 +102,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       debug(log, "client from {} posted new query {}", clientAddress, query)
       val handler = sender()
 
-      query.authToken match {
+      query.auth match {
         case Some(token) ⇒
 
           trace(log, query.traceId.get, ValidateToken,
@@ -136,7 +136,7 @@ object SonicController {
   class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
       s"to access this source from ${clientAddress.getOrElse("unknown address")}")
-      .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}"))
+      .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}. Please login first"))
 
   case object GetHandlers
 

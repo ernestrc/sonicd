@@ -18,7 +18,7 @@ import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory
 import com.typesafe.sslconfig.ssl.{ConfigSSLContextBuilder, SSLConfigFactory}
 import org.scalatest._
-import spray.json.JsString
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -53,6 +53,15 @@ with JsonProtocol with SonicdLogging {
   tcpIoService.tell(Tcp.Bind(tcpService, tcpAddr, options = Nil, pullMode = true), tcpService)
 
   Class.forName(H2Driver)
+  val H2Url = s"jdbc:h2:mem:IntegrationSpec"
+  val H2Config =
+    s"""
+       | {
+       |  "driver" : "$H2Driver",
+       |  "url" : "$H2Url",
+       |  "class" : "JdbcSource"
+       | }
+    """.stripMargin.parseJson.asJsObject
   val testConnection = DriverManager.getConnection(H2Url, "SONICD", "")
 
   /* is tested with the node bindings

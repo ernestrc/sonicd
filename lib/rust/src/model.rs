@@ -1,14 +1,13 @@
 use std::fmt;
 use std::collections::BTreeMap;
 use serde_json::Value;
-use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Query {
     pub id: Option<String>,
     pub query: String,
     pub trace_id: Option<String>,
-    pub auth_token: Option<String>,
+    pub auth: Option<String>,
     pub config: Value,
 }
 
@@ -25,6 +24,7 @@ pub struct ClientConfig {
     pub http_port: u16,
     pub tcp_port: u16,
     pub sources: BTreeMap<String, Value>,
+    pub auth: Option<String>
 }
 
 impl ClientConfig {
@@ -34,6 +34,7 @@ impl ClientConfig {
             http_port: 9111,
             tcp_port: 10001,
             sources: BTreeMap::new(),
+            auth: None
         }
     }
 }
@@ -87,7 +88,7 @@ impl Query {
                     id: None,
                     trace_id: trace_id,
                     query: query.to_owned(),
-                    auth_token: auth_token,
+                    auth: auth_token,
                     config: config,
                 })
             }
@@ -103,7 +104,7 @@ impl Query {
 
         payload.insert("config".to_owned(), self.config.clone());
         payload.insert("auth".to_owned(), 
-                       self.auth_token.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
+                       self.auth.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
         payload.insert("trace_id".to_owned(), 
                        self.trace_id.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
 
