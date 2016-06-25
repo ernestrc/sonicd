@@ -11,7 +11,14 @@ use serde_json::Value;
 use regex::Regex;
 use std::collections::BTreeMap;
 
-static EDITOR: &'static str = "vim";
+static DEFAULT_EDITOR: &'static str = "vim";
+
+pub fn get_env_var(var: &'static str) -> Result<String> {
+
+    ::std::env::var(var).map_err(|e| {
+        Error::OtherError(format!("could not get env var {}: {}", var, e.to_string()))
+    })
+}
 
 fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
     debug!("overwriting or creating new configuration file with {:?}",
@@ -29,7 +36,7 @@ fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
             debug!("write success to config file {:?}", path);
             Ok(())
         }
-        Err(e) => Err(Error::OtherError(e.to_string())),
+        Err(e) => Err(Error::OtherError(format!("write_config: {}", e.to_string()))),
     }
 }
 
@@ -39,12 +46,21 @@ fn get_config_path() -> PathBuf {
     sonicrc
 }
 
-fn run_cmd_file(mut cmd: Command, path: &PathBuf) -> String {
-    cmd.arg(path.to_str().unwrap()).status().unwrap();
-    let mut f = OpenOptions::new().open(path).unwrap();
+fn edit_file(path: &PathBuf) -> Result<String> {
+    let editor: String = get_env_var("EDITOR")
+        .unwrap_or_else(|_| DEFAULT_EDITOR.to_owned());
+    let mut cmd = Command::new(&editor);
+
+    try!(cmd.arg(path.to_str().unwrap())
+         .status()
+         .map_err(|e| Error::OtherError(format!("edit_file: {}", e.to_string()))));
+
+    let mut f = try!(OpenOptions::new().read(true).open(path)
+                     .map_err(|e| Error::OtherError(format!("open: {}", e))));
     let mut body = String::new();
     f.read_to_string(&mut body).unwrap();
-    body
+
+    Ok(body)
 }
 
 pub fn read_file_contents(path: &PathBuf) -> Result<String> {
@@ -87,9 +103,11 @@ pub fn get_default_config() -> Result<ClientConfig> {
             let mut input = String::new();
             match io::stdin().read_line(&mut input) {
                 Ok(_) => {
-                    write_config(&ClientConfig::empty(), &path).unwrap();
+                    try!(write_config(&ClientConfig::empty(), &path));
+                    let contents = try!(edit_file(&path));
                     let c: ClientConfig =
-                        ::serde_json::from_str(&run_cmd_file(Command::new(EDITOR), &path)).unwrap();
+                        ::serde_json::from_str(&contents).unwrap();
+                    println!("successfully saved configuration in $HOME/.sonicrc");
                     Ok(c)
                 }
                 Err(error) => Err(Error::OtherError(error.to_string())),
@@ -221,11 +239,9 @@ pub fn build_query(src_alias: &str, mut srcfg: BTreeMap<String, Value>, query: &
 
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
-    let user = try!(::std::env::var("USER").map_err(|e| {
-        Error::OtherError(format!("could not get current user: {}", e.to_string()))
-    }));
+    let user: String = try!(get_env_var("USER"));
 
-    try!(io::stdout().write(b"Api Key: ")
+    try!(io::stdout().write(b"Enter key: ")
          .map_err(|e| Error::OtherError(e.to_string())));
 
     io::stdout().flush().unwrap();
@@ -233,17 +249,17 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
     let mut key = String::new();
 
     match io::stdin().read_line(&mut key) {
-                Ok(_) => {
-                    let token = try!(authenticate(user, key.trim().to_owned(), host, tcp_port));
-                    let path = get_config_path();
-                    let config = try!(read_config(&path));
+        Ok(_) => {
+            let token = try!(authenticate(user, key.trim().to_owned(), host, tcp_port));
+            let path = get_config_path();
+            let config = try!(read_config(&path));
 
-                    let new_config = ClientConfig { auth: Some(token), ..config };
-                    try!(write_config(&new_config, &path));
+            let new_config = ClientConfig { auth: Some(token), ..config };
+            try!(write_config(&new_config, &path));
 
-                    println!("OK");
-                    Ok(())
-                },
-                Err(e) => Err(Error::OtherError(e.to_string())),
+            println!("OK");
+            Ok(())
+        },
+        Err(e) => Err(Error::OtherError(e.to_string())),
     }
 }
