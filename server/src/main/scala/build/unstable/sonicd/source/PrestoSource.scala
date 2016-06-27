@@ -187,7 +187,7 @@ class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLog
           mapSuccess(queryId)(response)
         case (Success(response), _) ⇒
           log.debug("http request for query '{}' failed", queryId)
-          val parsed = response.entity.toStrict(10.seconds)
+          val parsed = response.entity.toStrict(SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT)
           parsed.recoverWith {
             case e: Exception ⇒
               val error = new PrestoError(s"request failed with status ${response.status}")

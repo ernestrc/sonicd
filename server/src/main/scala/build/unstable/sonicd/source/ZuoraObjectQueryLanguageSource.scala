@@ -434,7 +434,7 @@ object ZuoraService {
 
   object QueryResult {
     def fromHttpEntity(entity: HttpEntity)(implicit mat: ActorMaterializer, ctx: ExecutionContext): Future[QueryResult] = {
-      entity.toStrict(10.seconds).map { e ⇒
+      entity.toStrict(SonicdConfig.ZUORA_HTTP_ENTITY_TIMEOUT).map { e ⇒
         val xml = e.data.decodeString("UTF-8")
         val elem = XhtmlParser.apply(scala.io.Source.fromString(xml))
         val size = (elem \\ "size").head.text.toInt
