@@ -98,7 +98,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 
-        assert(res.failed.get.isInstanceOf[AuthenticationActor.TokenVerificationFailed])
+        assert(res.failed.get.isInstanceOf[AuthenticationActor.TokenExpired])
       }
 
       {
@@ -116,7 +116,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 
-        assert(res.failed.get.isInstanceOf[AuthenticationActor.TokenVerificationFailed])
+        assert(res.failed.get.isInstanceOf[AuthenticationActor.TokenExpired])
       }
 
     }

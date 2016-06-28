@@ -188,7 +188,7 @@ object SonicMessage {
 
 class Query(val id: Option[Long],
             val traceId: Option[String],
-            val authToken: Option[String],
+            val auth: Option[String],
             val query: String,
             val _config: JsValue)
   extends SonicCommand {
@@ -201,7 +201,7 @@ class Query(val id: Option[Long],
     val fields = scala.collection.mutable.Map(
       "config" → _config
     )
-    authToken.foreach(j ⇒ fields.update("auth", JsString(j)))
+    auth.foreach(j ⇒ fields.update("auth", JsString(j)))
     traceId.foreach(t ⇒ fields.update("trace_id", JsString(t)))
     Some(JsObject(fields.toMap))
   }
@@ -233,7 +233,7 @@ class Query(val id: Option[Long],
   }
 
   def copy(query_id: Option[Long] = None, trace_id: Option[String] = None) =
-    new Query(query_id orElse id, trace_id orElse traceId, authToken, query, _config)
+    new Query(query_id orElse id, trace_id orElse traceId, auth, query, _config)
 }
 
 object Query {
@@ -252,5 +252,5 @@ object Query {
     new Query(None, None, authToken, query, config)
 
   def unapply(query: Query): Option[(Option[Long], Option[String], String)] =
-    Some((query.id, query.authToken, query.query))
+    Some((query.id, query.auth, query.query))
 }

@@ -14,7 +14,7 @@ Sonicd is a data streaming gateway that abstracts over data source connectors an
 - Kafka (WIP)
 
 # CLI
- Install multirust with `curl -sf https://raw.githubusercontent.com/brson/multirust/master/blastoff.sh | sh` or check [https://github.com/brson/multirust](https://github.com/brson/multirust) - the CLI uses several compiler plugins that are only enabled in the nightly version of rust, so we'll need a specific nightly version. Execute `multirust override nightly-2016-05-09` in the root folder and then compile the sources with `cargo build --release`. You will find the binary inside the `target/release` folder.
+ Install rustup with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/) - the CLI uses several compiler plugins that are only enabled in the nightly version of rust, so we'll need a specific nightly version. Execute `rustup override set nightly-2016-06-23` in the root folder and then compile the sources with `cargo build --release`. You will find the binary inside the `target/release` folder.
 
 # Examples
 Check [examples](examples) folder. For an example in Rust check the [cli](cli).

@@ -55,6 +55,7 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   assert(ZUORA_MAX_FETCH_SIZE <= 2000)
 
   lazy val ZUORA_QUERY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.query-timeout").getSeconds, TimeUnit.SECONDS)
+  lazy val ZUORA_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
   lazy val ZUORA_ENDPOINT = config.getString("sonicd.zuora.endpoint")
   lazy val ZUORA_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.zuora")
 
@@ -67,6 +68,7 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
   lazy val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.presto")
   lazy val PRESTO_RETRYIN: FiniteDuration = FiniteDuration(config.getDuration("sonicd.presto.retry-in").getSeconds, TimeUnit.SECONDS)
+  lazy val PRESTO_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.presto.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
   lazy val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
   lazy val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
   lazy val PRESTO_APIV = "v1"

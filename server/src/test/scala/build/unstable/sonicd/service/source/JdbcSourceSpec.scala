@@ -28,6 +28,16 @@ class JdbcSourceSpec(_system: ActorSystem)
 
   def this() = this(ActorSystem("JdbcSourceSpec"))
 
+  val H2Url = s"jdbc:h2:mem:JdbcSourceSpec"
+  val H2Config =
+    s"""
+       | {
+       |  "driver" : "$H2Driver",
+       |  "url" : "$H2Url",
+       |  "class" : "JdbcSource"
+       | }
+    """.stripMargin.parseJson.asJsObject
+
   val controller: TestActorRef[TestController] =
     TestActorRef(Props(classOf[TestController], self).withDispatcher(CallingThreadDispatcher.Id))
 
