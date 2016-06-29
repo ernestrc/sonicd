@@ -14,7 +14,7 @@ mod util;
 
 use std::path::PathBuf;
 use pbr::ProgressBar;
-use sonicd::{SonicMessage, Result, version, stream};
+use sonicd::{SonicMessage, Query, Result, version, stream};
 use util::*;
 use std::process;
 use std::io::{Write, self};
@@ -22,18 +22,18 @@ use serde_json::Value;
 
 docopt!(Args derive Debug, "
 .
-                           d8b          
-                           Y8P          
+                           d8b
+                           Y8P
 
-.d8888b   .d88b.  88888b.  888  .d8888b 
-88K      d88\"\"88b 888 \"88b 888 d88P\"    
-\"Y8888b. 888  888 888  888 888 888      
-     X88 Y88..88P 888  888 888 Y88b.    
- 88888P'  \"Y88P\"  888  888 888  \"Y8888P 
+.d8888b   .d88b.  88888b.  888  .d8888b
+88K      d88\"\"88b 888 \"88b 888 d88P\"
+\"Y8888b. 888  888 888  888 888 888
+     X88 Y88..88P 888  888 888 Y88b.
+ 88888P'  \"Y88P\"  888  888 888  \"Y8888P
 
 Usage:
-  sonic <source> [-d <var>...] [options] -e <query> 
-  sonic <source> [-d <var>...] [options] -f <file> 
+  sonic <source> [-d <var>...] [options] -e <query>
+  sonic <source> [-d <var>...] [options] -f <file>
   sonic login
   sonic -h | --help
   sonic --version
@@ -52,37 +52,7 @@ Options:
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONIC_COMMIT");
 
-fn _main(args: Args) -> Result<()> {
-
-    let config: ClientConfig = if args.flag_c != "" {
-        debug!("sourcing passed config in path '{:?}'", &args.flag_c);
-        try!(read_config(&PathBuf::from(args.flag_c.clone())))
-    } else {
-        debug!("sourcing default config in path '$HOME/.sonicrc'");
-        try!(get_default_config())
-    };
-
-    let vars = try!(split_key_value(&args.arg_var));
-
-    let query = if args.flag_file {
-        try!(read_file_contents(&PathBuf::from(&args.arg_file)))
-    } else if args.flag_execute {
-        args.arg_query.clone()
-    } else if args.cmd_login {
-        return login(&config.sonicd, &config.tcp_port);
-    } else {
-        let server_v = try!(version(&config.sonicd, &config.http_port));
-
-        println!("sonic cli version {} ({}); server version {}",
-        VERSION,
-        COMMIT.unwrap_or_else(|| "dev"),
-        server_v);
-        return Ok(());
-    };
-
-    let injected = try!(inject_vars(&query, &vars));
-
-    let query = try!(build_query(&args.arg_source, config.sources.clone(), &injected, config.auth));
+fn run(host: &str, port: &u16, query: Query, rows_only: bool, silent: bool) -> Result<()> {
 
     let mut pb = ProgressBar::new(100);
     pb.format("╢░░_╟");
@@ -99,7 +69,7 @@ fn _main(args: Args) -> Result<()> {
     };
 
     let fn_meta = |msg: SonicMessage| {
-        if !args.flag_rows_only {
+        if !rows_only {
             match msg.p {
                 Some(Value::Array(d)) => {
                     debug!("recv type metadata: {:?}", d);
@@ -113,7 +83,7 @@ fn _main(args: Args) -> Result<()> {
     };
 
     let fn_prog = |msg: SonicMessage| {
-        if !args.flag_silent {
+        if !silent {
             let fields = msg.p.unwrap();
             fields.find("progress").and_then(|p| {
                 p.as_f64().map(|pi| {
@@ -131,9 +101,60 @@ fn _main(args: Args) -> Result<()> {
         }
     };
 
-    try!(stream(query.into_msg(), &config.sonicd, &config.tcp_port, fn_out, fn_prog, fn_meta));
+    try!(stream(query.into_msg(), host, port, fn_out, fn_prog, fn_meta));
 
     Ok(())
+
+}
+
+fn _main(args: Args) -> Result<()> {
+
+    let Args { arg_file, arg_query, flag_silent, flag_rows_only,
+    arg_var, flag_file, flag_c, arg_source,
+    cmd_login, flag_execute, flag_version, .. } = args;
+
+    let ClientConfig { sonicd, http_port, tcp_port, sources, auth } = if flag_c != "" {
+        debug!("sourcing passed config in path '{:?}'", &flag_c);
+        try!(read_config(&PathBuf::from(flag_c)))
+    } else {
+        debug!("sourcing default config in path '$HOME/.sonicrc'");
+        try!(get_default_config())
+    };
+
+    if flag_file {
+
+        let query_str = try!(read_file_contents(&PathBuf::from(&arg_file)));
+        let split = try!(split_key_value(&arg_var));
+        let injected = try!(inject_vars(&query_str, &split));
+        let query = try!(build(arg_source, sources, auth, injected));
+
+        run(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
+
+    } else if flag_execute {
+
+        let query = try!(build(arg_source, sources, auth, arg_query));
+
+        run(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
+
+    } else if cmd_login {
+
+        login(&sonicd, &tcp_port)
+
+    } else if flag_version{
+
+        let server_v = try!(version(&sonicd, &http_port));
+        println!("sonic cli version {} ({}); server version {}",
+        VERSION,
+        COMMIT.unwrap_or_else(|| "dev"),
+        server_v);
+
+        Ok(())
+
+    } else {
+
+        panic!("unexpected args");
+
+    }
 }
 
 fn main() {
@@ -142,7 +163,7 @@ fn main() {
 
     env_logger::init().unwrap();
 
-    debug!("Parsed args {:?}", args);
+    debug!("parsed args {:?}", args);
 
     match _main(args) {
         Ok(_) => {},
