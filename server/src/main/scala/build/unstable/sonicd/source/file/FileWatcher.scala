@@ -24,10 +24,15 @@ class FileWatcher(dir: Path) extends Actor with SonicdLogging {
   }
 
   val subscribers = mutable.Map.empty[ActorRef, Option[PathMatcher]]
-  val worker: ActorRef = context.actorOf(Props(classOf[FileWatcherWorker], dir))
+  val worker: ActorRef = context.actorOf(Props(classOf[FileWatcherWorker], dir)
+    .withDispatcher(FileWatcher.dispatcher))
   worker ! DoWatch
 
   override def receive: Actor.Receive = {
+
+    case Terminated(ref) ⇒ subscribers.get(ref).foreach { _ ⇒
+      subscribers.remove(ref)
+    }
 
     //not registered OVERFLOW so all events context are Path
     case ev: WatchEvent[Path]@unchecked ⇒
@@ -36,24 +41,31 @@ class FileWatcher(dir: Path) extends Actor with SonicdLogging {
       subscribers.foreach {
         case (sub, Some(filter)) if event.matches(filter) ⇒ sub ! event
         case (sub, None) ⇒ sub ! event
-        case _ ⇒ debug(log, "ev ignored: {}", ev)
+        case _ ⇒
       }
 
       sender() ! FileWatcherWorker.DoWatch
 
-    case Watch(Some(fileFilter)) ⇒
+    case Watch(Some(fileFilter), id) ⇒
+      val subscriber = sender()
       val filter = s"glob:${dir.toString + "/" + fileFilter}"
-      debug(log, "received watch directive with filter {}", filter)
+      info(log, "file watcher {} subscribed query '{}' to files that match {}", self.path, id, filter)
       val matcher = FileSystems.getDefault.getPathMatcher(filter)
-      subscribers.update(sender(), Some(matcher))
-    case Watch(None) ⇒
-      subscribers.update(sender(), None)
+      context watch subscriber
+      subscribers.update(subscriber, Some(matcher))
+
+    case Watch(None, id) ⇒
+      val subscriber = sender()
+      info(log, "file watcher {} subscribed query '{}' to all files of {}", self.path, id, dir)
+      subscribers.update(subscriber, None)
 
     case msg ⇒ warning(log, "extraneous message received {}", msg)
   }
 }
 
 object FileWatcher extends SonicdLogging {
+
+  val dispatcher = "akka.actor.file-watcher-dispatcher"
 
   case class PathWatchEvent(dir: Path, event: WatchEvent[Path]) {
     //relative path
@@ -68,7 +80,7 @@ object FileWatcher extends SonicdLogging {
     }
   }
 
-  case class Watch(fileFilterMaybe: Option[String])
+  case class Watch(fileFilterMaybe: Option[String], queryId: Long)
 
   case class Glob(folders: Set[Path], fileFilterMaybe: Option[String]) {
     def isEmpty: Boolean = folders.isEmpty
@@ -140,9 +152,7 @@ class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
 
   val key = dir.register(
     watcher,
-    StandardWatchEventKinds.ENTRY_CREATE,
-    StandardWatchEventKinds.ENTRY_MODIFY,
-    StandardWatchEventKinds.ENTRY_DELETE
+    StandardWatchEventKinds.ENTRY_MODIFY
   )
 
   def watch(): List[WatchEvent[_]] = {

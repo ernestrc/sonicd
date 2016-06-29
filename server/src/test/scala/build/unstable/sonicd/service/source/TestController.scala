@@ -1,9 +1,9 @@
 package build.unstable.sonicd.service.source
 
 import akka.actor.{OneForOneStrategy, SupervisorStrategy, ActorRef, Actor}
-import build.unstable.sonicd.model.DoneWithQueryExecution
+import build.unstable.sonicd.model.{SonicdLogging, DoneWithQueryExecution}
 
-class TestController(implicitSender: ActorRef) extends Actor {
+class TestController(implicitSender: ActorRef) extends Actor with SonicdLogging {
 
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true){
@@ -11,7 +11,7 @@ class TestController(implicitSender: ActorRef) extends Actor {
   }
 
   override def receive: Receive = {
-    case _ ⇒
+    case anyElse ⇒ warning(log, "extraneous message recv {}", anyElse)
   }
 }
 

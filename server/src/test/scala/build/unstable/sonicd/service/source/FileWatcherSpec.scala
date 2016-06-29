@@ -2,21 +2,13 @@ package build.unstable.sonicd.service.source
 
 import java.io.File
 
+import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.file.FileWatcher
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpec}
 
 class FileWatcherSpec extends WordSpec with Matchers
 with BeforeAndAfterAll with BeforeAndAfterEach {
-
-
-  val tmp = new File("/tmp/sonicd_specs")
-  val tmp2 = new File("/tmp/sonicd_specs/recursive")
-  val tmp3 = new File("/tmp/sonicd_specs/recursive/rec2")
-  val tmp32 = new File("/tmp/sonicd_specs/recursive/rec2/rec2")
-  val tmp4 = new File("/tmp/sonicd_specs/recursive2")
-  val file = new File("/tmp/sonicd_specs/recursive/tmp.txt")
-  val file2 = new File("/tmp/sonicd_specs/recursive/rec2/tmp.txt")
-  val file3 = new File("/tmp/sonicd_specs/logback.xml")
+  import Fixture._
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

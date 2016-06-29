@@ -1,14 +1,18 @@
 package build.unstable.sonicd.source.file
 
-import java.io.{File, RandomAccessFile}
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.channels.SeekableByteChannel
 import java.nio.file._
 
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
+import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
+import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel
 import spray.json._
 
 import scala.annotation.tailrec
@@ -31,12 +35,17 @@ trait LocalFilePublisher {
 
   def parseUTF8Data(raw: String): Map[String, JsValue]
 
-  val queryId: Long
-  val rawQuery: String
-  val tail: Boolean
-  val fileFilterMaybe: Option[String]
-  val watchersPair: Vector[(File, ActorRef)]
-  val ctx: RequestContext
+  def queryId: Long
+
+  def rawQuery: String
+
+  def tail: Boolean
+
+  def fileFilterMaybe: Option[String]
+
+  def watchersPair: Vector[(File, ActorRef)]
+
+  def ctx: RequestContext
 
 
   /* OVERRIDES */
@@ -70,17 +79,20 @@ trait LocalFilePublisher {
     onCompleteThenStop()
   }
 
-  def newFile(file: File, fileName: String): RandomAccessFile = {
-    val reader = new RandomAccessFile(file, "r")
+  def newFile(file: File, fileName: String): BufferedFileByteChannel = {
+
+    val channel = BufferedFileByteChannel(
+      Files.newByteChannel(file.toPath, StandardOpenOption.READ),
+      file.getAbsoluteFile.getName)
 
     if (tail) {
-      val skip = file.length()
-      reader.seek(skip)
-      debug(log, "tail mode enabled. skipping {} bytes for {}", skip, fileName)
+      val bytes = file.length()
+      debug(log, "tail mode enabled. skipping {} bytes for {}", bytes, fileName)
+      channel.channel.position(bytes)
     }
 
-    files.update(fileName, reader)
-    reader
+    files.update(fileName, file → channel)
+    channel
   }
 
   def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (o: Map[String, JsValue]) ⇒ {
@@ -123,8 +135,8 @@ trait LocalFilePublisher {
     }
   }
 
-  def filter(data: Map[String, JsValue], query: FileQuery): Option[Map[String, JsValue]] = {
-    if (query.valueFilter(data)) {
+  def filter(data: Map[String, JsValue], query: FileQuery, target: String): Option[Map[String, JsValue]] = {
+    if (query.valueFilter(data) && target != "application.conf" && target != "reference.conf") {
       if (query.select.isEmpty) Some(data)
       else {
         val fields = data.filter(kv ⇒ query.select.get.contains(kv._1))
@@ -133,21 +145,26 @@ trait LocalFilePublisher {
     } else None
   }
 
+  /**
+   * streams until demand is 0 or there is no more data to be read
+   *
+   * @return whether there is no more data to read
+   */
   @tailrec
-  final def stream(reader: RandomAccessFile, query: FileQuery): Unit = {
+  final def stream(query: FileQuery,
+                   channel: BufferedFileByteChannel): Boolean = {
+
     lazy val read = {
       if (buffer.isEmpty) {
-        Option(reader.readLine())
-      }
-      else Option(buffer.remove(0))
+        channel.readLine()
+      } else Option(buffer.remove(0))
     }
 
     lazy val raw = read.get
     lazy val data = Try(parseUTF8Data(raw))
 
-    if (totalDemand > 0 && read.isDefined && data.isSuccess) {
-
-      val filteredMaybe = filter(data.get, query)
+    if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
+      val filteredMaybe = filter(data.get, query, channel.fileName)
 
       if (meta.isEmpty && filteredMaybe.isDefined) {
 
@@ -167,12 +184,14 @@ trait LocalFilePublisher {
         case None ⇒
       }
 
-      stream(reader, query)
+      stream(query, channel)
 
-    } else if (totalDemand > 0 && read.isDefined && data.isFailure) {
-
-      stream(reader, query)
-
+      //problem parsing the data
+    } else if (totalDemand > 0 && read.nonEmpty) {
+      warning(log, "error parsing UTF-8 data {}: {}", raw, data.failed.get.getMessage)
+      stream(query, channel)
+    } else {
+      totalDemand == 0
     }
   }
 
@@ -180,7 +199,7 @@ trait LocalFilePublisher {
   /* STATE */
 
   val (folders, watchers) = watchersPair.unzip
-  val files = mutable.Map.empty[String, RandomAccessFile]
+  val files = mutable.Map.empty[String, (File, BufferedFileByteChannel)]
   val buffer = ListBuffer.empty[String]
   var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
@@ -188,34 +207,36 @@ trait LocalFilePublisher {
 
   /* BEHAVIOUR */
 
-  final def streaming(query: FileQuery): Receive = {
+  final def common: Receive = {
+    case Cancel ⇒
+      debug(log, "client canceled")
+      onCompleteThenStop()
+  }
+
+  final def streaming(query: FileQuery): Receive = common orElse {
 
     case req: Request ⇒
-      files.foreach(kv ⇒ stream(kv._2, query))
+      val dataLeft = files.nonEmpty && files.forall(kv ⇒ stream(query, kv._2._2))
+      if (!tail && !dataLeft) terminate(DoneWithQueryExecution.success)
 
     case done: DoneWithQueryExecution ⇒
       if (totalDemand > 0) terminate(done)
-      else context.system.scheduler.scheduleOnce(1.second, self, done)
+      else context.system.scheduler.scheduleOnce(100.millis, self, done)
 
-    case ev@PathWatchEvent(dir, event) ⇒
-      val kind = event.kind()
+    case ev@PathWatchEvent(_, event) ⇒
 
-      kind match {
-        case StandardWatchEventKinds.ENTRY_CREATE ⇒ newFile(ev.file, ev.fileName)
-        case StandardWatchEventKinds.ENTRY_MODIFY ⇒
-          files.get(ev.fileName) match {
-            case Some(file) ⇒
-              stream(file, query)
-            case None ⇒
-              val file = newFile(ev.file, ev.fileName)
-              stream(file, query)
-          }
-        case StandardWatchEventKinds.ENTRY_DELETE ⇒
-          files.remove(ev.fileName)
+      val channel = files.get(ev.fileName) match {
+        case Some((_, p)) ⇒ p
+        case None ⇒
+          debug(log, "file {} was modified and but it was not being consumed yet", ev.fileName)
+          newFile(ev.file, ev.fileName)
       }
+      stream(query, channel)
+
+    case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
   }
 
-  final def receive: Receive = {
+  final def receive: Receive = common orElse {
     case req: Request ⇒
       debug(log, "running query {}", rawQuery)
 
@@ -229,14 +250,16 @@ trait LocalFilePublisher {
               FileSystems.getDefault.getPathMatcher(s"glob:${folder.toString + "/" + fileFilter}")
             )
             if (file.isFile && (matcher.isEmpty || matcher.get.matches(file.toPath))) {
+              info(log, "matched file {}", file.toPath)
               val fileName = file.getName
               val reader = newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
-              files.update(fileName, reader)
+              files.update(fileName, file → reader)
             }
           }
         }
 
-        watchers.foreach(_ ! FileWatcher.Watch(fileFilterMaybe))
+        //watch only if we're tailing logs
+        if (tail) watchers.foreach(_ ! FileWatcher.Watch(fileFilterMaybe, queryId))
         self ! req
         context.become(streaming(parsed))
 
@@ -245,14 +268,48 @@ trait LocalFilePublisher {
           error(log, e, "error setting up watch")
           terminate(DoneWithQueryExecution.error(e))
       }
-
-    case Cancel ⇒
-      debug(log, "client canceled")
-      onCompleteThenStop()
+    case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
   }
 }
 
 object LocalFilePublisher {
+
+  //1 Kb
+  val CHUNK = 1000
+
+  case class BufferedFileByteChannel(channel: SeekableByteChannel, fileName: String) {
+    val buf: ByteBuffer = ByteBuffer.allocateDirect(CHUNK)
+    var stringBuf = scala.collection.mutable.Buffer.empty[Char]
+
+    def readChar(): Option[Char] = {
+      if (stringBuf.isEmpty) {
+        channel.read(buf)
+        buf.flip()
+        stringBuf ++= ByteString(buf).utf8String
+        buf.compact()
+      }
+
+      if (stringBuf.isEmpty) None
+      else Some(stringBuf.remove(0))
+    }
+
+    /**
+     * Returns None if reached EOF
+     */
+    def readLine(): Option[String] = {
+      val builder = mutable.StringBuilder.newBuilder
+      var char: Option[Char] = None
+      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
+        builder append char.get
+      }
+
+      val string = builder.toString()
+
+      //none signals end of file
+      if (string.isEmpty && channel.position() >= channel.size()) None
+      else Some(string)
+    }
+  }
 
   def getWatchers(glob: Glob, context: ActorContext): Vector[(File, ActorRef)] = {
     glob.folders.map(f ⇒ f.toFile → LocalFilePublisher.getWatcher(f, context)).to[Vector]
@@ -260,7 +317,8 @@ object LocalFilePublisher {
 
   def getWatcher(path: Path, context: ActorContext): ActorRef = {
     context.child(path.toString).getOrElse {
-      context.actorOf(Props(classOf[FileWatcher], path))
+      context.actorOf(Props(classOf[FileWatcher], path)
+        .withDispatcher(FileWatcher.dispatcher))
     }
   }
 }

@@ -1,12 +1,13 @@
 package build.unstable.sonicd.service
 
+import java.io.File
+
 import akka.actor.{Actor, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
 import build.unstable.sonicd.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.{RequestContext, SonicMessage, SonicdSource}
 import build.unstable.sonicd.source.SyntheticPublisher
-import spray.json._
 
 object Fixture {
 
@@ -25,6 +26,15 @@ object Fixture {
     .withDispatcher(CallingThreadDispatcher.Id)
 
   val zombiePubProps = Props[Zombie].withDispatcher(CallingThreadDispatcher.Id)
+
+  val tmp = new File("/tmp/sonicd_specs")
+  val tmp2 = new File("/tmp/sonicd_specs/recursive")
+  val tmp3 = new File("/tmp/sonicd_specs/recursive/rec2")
+  val tmp32 = new File("/tmp/sonicd_specs/recursive/rec2/rec2")
+  val tmp4 = new File("/tmp/sonicd_specs/recursive2")
+  val file = new File("/tmp/sonicd_specs/recursive/tmp.txt")
+  val file2 = new File("/tmp/sonicd_specs/recursive/rec2/tmp.txt")
+  val file3 = new File("/tmp/sonicd_specs/logback.xml")
 }
 
 class Zombie extends ActorPublisher[SonicMessage] {

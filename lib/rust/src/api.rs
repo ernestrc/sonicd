@@ -160,4 +160,3 @@ pub fn authenticate(user: String, key: String, host: &str, tcp_port: &u16) -> Re
 
     Ok(token)
 }
-

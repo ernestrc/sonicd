@@ -16,7 +16,7 @@ import spray.json._
 class JdbcSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
   with Matchers with BeforeAndAfterAll with ImplicitSender
-  with ImplicitSubscriber {
+  with ImplicitSubscriber with HandlerUtils {
 
   import Fixture._
 
@@ -67,16 +67,6 @@ class JdbcSourceSpec(_system: ActorSystem)
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
-  }
-
-  def expectTypeMetadata() = {
-    expectMsgAnyClassOf(classOf[TypeMetadata])
-  }
-
-  def expectDone(pub: ActorRef) = {
-    expectMsg(DoneWithQueryExecution.success)
-    expectMsg("complete") //sent by ImplicitSubscriber
-    expectTerminated(pub)
   }
 
   "JdbcSource" should {
@@ -313,5 +303,3 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
   override val jdbcConnectionsProps: Props =
     Props(classOf[JdbcConnectionsHandler]).withDispatcher(CallingThreadDispatcher.Id)
 }
-
-
