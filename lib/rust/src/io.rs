@@ -1,12 +1,6 @@
 use nix::unistd;
 use nix::errno::Errno::*;
 use model::{Error, Result};
-use nix::sys::socket::*;
-use nix::sys::epoll::*;
-use std::os::unix::io::{RawFd, AsRawFd};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::{thread, fmt, net, marker, slice};
-use std::os::raw::c_int;
 
 #[macro_export]
 macro_rules! eagain {

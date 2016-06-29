@@ -9,9 +9,8 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 #[macro_use]
-extern crate libsonicd;
+extern crate sonicd;
 
-use libsonicd::*;
 use std::sync::mpsc::channel;
 use std::option::Option;
 use nix::sys::epoll::*;
@@ -47,12 +46,12 @@ macro_rules! perror {
 }
 
 lazy_static! {
-	static ref NO_INTEREST: EpollEvent = {
-		EpollEvent {
-			events: EpollEventKind::empty(),
-			data: 0,
-		}
-	};
+    static ref NO_INTEREST: EpollEvent = {
+        EpollEvent {
+            events: EpollEventKind::empty(),
+            data: 0,
+        }
+    };
 }
 
 #[inline]
@@ -167,24 +166,25 @@ fn main() {
 
         for _ in evts {
 
-            let clifd = eagain!(accept4, "accept4", srvfd, sockf);
-            debug!("accept4: accpeted new tcp client {}", &clifd);
+            if let Some(clifd) = eagain!(accept4, "accept4", srvfd, sockf) {
+                debug!("accept4: accpeted new tcp client {}", &clifd);
 
-            let info = ginterest(clifd);
+                let info = ginterest(clifd);
 
-            // round robin
-            let next = (accepted % io_cpus as u64) as usize;
+                // round robin
+                let next = (accepted % io_cpus as u64) as usize;
 
-            let epfd: RawFd = *epfds.get(next).unwrap();
+                let epfd: RawFd = *epfds.get(next).unwrap();
 
-            debug!("assigned client to next {} epoll instance {}", &next, &epfd);
+                debug!("assigned client to next {} epoll instance {}", &next, &epfd);
 
-            epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info)
-                .unwrap_or_else(perror!("epoll_ctl"));
+                epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info)
+                    .unwrap_or_else(perror!("epoll_ctl"));
 
-            debug!("epoll_ctl: registered interests for {}", clifd);
+                debug!("epoll_ctl: registered interests for {}", clifd);
 
-            accepted += 1;
+                accepted += 1;
+            }
         }
     }
 }

@@ -4,17 +4,19 @@ extern crate serde;
 extern crate serde_json;
 extern crate curl;
 extern crate nix;
-extern crate ws as libws;
 extern crate byteorder;
 #[macro_use] extern crate log;
 
+#[cfg(feature="websocket")]
+extern crate ws as libws;
+
 mod api;
-mod tcp;
 mod model;
-mod ws;
 #[macro_use] mod io;
 
+pub mod tcp;
+#[cfg(feature="websocket")]
+pub mod ws;
+
 pub use api::{run, version, stream, authenticate};
-pub use tcp::{read_message, frame};
-pub use model::{Query, SonicMessage, Error, ClientConfig, Result};
-pub use ws::WsHandler;
+pub use model::{Query, SonicMessage, Error, Result};

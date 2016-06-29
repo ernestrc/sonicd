@@ -48,8 +48,6 @@ pub fn stream<O, P, M>(command: SonicMessage,
 
     debug!("resolved host and port to addr {}", addr);
 
-    let mut res: Result<()> = Err(Error::StreamError("protocol error. socket closed before done".to_owned()));
-
     let mut stream = try!(TcpStream::connect(&addr).map_err(|e| Error::Connect(e)));
 
     // set timeout 10s
@@ -66,6 +64,8 @@ pub fn stream<O, P, M>(command: SonicMessage,
     stream.write(&fbytes.as_slice()).unwrap();
 
     let fd = stream.as_raw_fd();
+
+    let res: Result<()>; 
 
     loop {
         match tcp::read_message(&fd) {

@@ -18,27 +18,6 @@ pub struct SonicMessage {
     pub p: Option<Value>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ClientConfig {
-    pub sonicd: String,
-    pub http_port: u16,
-    pub tcp_port: u16,
-    pub sources: BTreeMap<String, Value>,
-    pub auth: Option<String>
-}
-
-impl ClientConfig {
-    pub fn empty() -> ClientConfig {
-        ClientConfig {
-            sonicd: "0.0.0.0".to_string(),
-            http_port: 9111,
-            tcp_port: 10001,
-            sources: BTreeMap::new(),
-            auth: None
-        }
-    }
-}
-
 /// This type represents all possible errors that can occur 
 /// when interacting with a sonicd server
 #[derive(Debug)]

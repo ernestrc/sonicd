@@ -1,21 +1,20 @@
 #![feature(custom_derive, plugin, custom_attribute, box_syntax)]
-#![plugin(docopt_macros)]
+#![plugin(docopt_macros, serde_macros)]
 extern crate serde_json;
 extern crate serde;
 extern crate pbr;
 extern crate regex;
-extern crate curl;
 extern crate docopt;
 extern crate rustc_serialize;
 extern crate env_logger;
 #[macro_use] extern crate log;
-#[macro_use] extern crate libsonicd;
+#[macro_use] extern crate sonicd;
 
 mod util;
 
 use std::path::PathBuf;
 use pbr::ProgressBar;
-use libsonicd::*;
+use sonicd::{SonicMessage, Result, version, stream};
 use util::*;
 use std::process;
 use std::io::{Write, self};

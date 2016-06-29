@@ -1,19 +1,41 @@
 [package]
 name = "sonicd"
-version = "0.4.4"
+version = "0.5.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 
 [lib]
-name = "libsonicd"
+name = "sonicd"
 path = "lib/rust/src/lib.rs"
 
-[[bin]]
-name = "sonic"
-path = "cli/src/main.rs"
 
-[[bin]]
-name = "sonicc"
-path = "cache/src/main.rs"
+[features]
+# FIXME https://github.com/rust-lang/cargo/pull/2325
+# individual Cargo.toml are used for now
+# cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
+# cli = ["regex", "docopt", "docopt_macros", "rustc-serialize", "env_logger", "pbr"]
+websocket = ["ws"]
+
+# [[bin]]
+# name = "sonic"
+# path = "cli/src/main.rs"
+# features = ["cli"]
+
+# [[bin]]
+# name = "sonicc"
+# path = "cache/src/main.rs"
+# features = ["cache"]
+
+# cli
+# regex ={ version = "*", optional = true }
+# docopt ={ version = "*", optional = true }
+# docopt_macros ={ version = "*", optional = true }
+# rustc-serialize ={ version = "*", optional = true }
+# pbr = { version = "*", optional = true }
+
+# cache
+# threadpool = { version = "*", optional = true }
+# num_cpus = { version = "0.2", optional = true }
+# lazy_static = { version =  "0.1.*", optional = true }
 
 [dependencies]
 serde = "*"
@@ -24,19 +46,4 @@ curl = "*"
 nix = "*"
 log = "*"
 
-# cli
-regex = "*"
-docopt = "*"
-docopt_macros = "*"
-rustc-serialize = "*"
-env_logger = "*"
-pbr = "*"
-
-# cache
-threadpool = "*"
-num_cpus = "0.2"
-ws = "*"
-lazy_static = "0.1.*"
-
-#[profile.release]
-#debug = true
+ws = { version =  "*", optional = true }

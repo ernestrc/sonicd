@@ -1,4 +1,4 @@
-use libsonicd::{Query, ClientConfig, Result, Error, authenticate};
+use sonicd::{Query, Result, Error, authenticate};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -10,6 +10,27 @@ use std::path::PathBuf;
 use serde_json::Value;
 use regex::Regex;
 use std::collections::BTreeMap;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ClientConfig {
+    pub sonicd: String,
+    pub http_port: u16,
+    pub tcp_port: u16,
+    pub sources: BTreeMap<String, Value>,
+    pub auth: Option<String>
+}
+
+impl ClientConfig {
+    pub fn empty() -> ClientConfig {
+        ClientConfig {
+            sonicd: "0.0.0.0".to_string(),
+            http_port: 9111,
+            tcp_port: 10001,
+            sources: BTreeMap::new(),
+            auth: None
+        }
+    }
+}
 
 static DEFAULT_EDITOR: &'static str = "vim";
 
