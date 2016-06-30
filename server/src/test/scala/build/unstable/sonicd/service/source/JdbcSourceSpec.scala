@@ -297,7 +297,7 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
   extends build.unstable.sonicd.source.JdbcSource(query, actorContext, context) {
 
   override val executorProps: (Connection, Statement) ⇒ Props = { (conn, stmt) ⇒
-    Props(classOf[JdbcExecutor], query.id.get, query.query, conn, stmt, initializationStmts, context)
+    Props(classOf[JdbcExecutor], query.query, conn, stmt, initializationStmts, context)
       .withDispatcher(CallingThreadDispatcher.Id)
   }
   override val jdbcConnectionsProps: Props =

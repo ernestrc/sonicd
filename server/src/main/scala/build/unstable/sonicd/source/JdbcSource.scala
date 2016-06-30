@@ -32,11 +32,11 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
   val dbUrl: String = getConfig[String]("url")
   val driver: String = getConfig[String]("driver")
   val executorProps = (conn: Connection, stmt: Statement) ⇒
-    Props(classOf[JdbcExecutor], query.id.get, query.query, conn, stmt, initializationStmts, context)
+    Props(classOf[JdbcExecutor], query.query, conn, stmt, initializationStmts, context)
       .withDispatcher("akka.actor.jdbc-dispatcher")
 
   lazy val handlerProps: Props = Props(classOf[JdbcPublisher],
-    query.id.get, query.query, dbUrl, user, password, driver,
+    query.query, dbUrl, user, password, driver,
     executorProps, jdbcConnectionsActor, initializationStmts, context)
     .withDispatcher("akka.actor.jdbc-dispatcher")
 
@@ -47,8 +47,7 @@ object JdbcPublisher {
   val IS_SQL_SELECT = "^(\\s*?)(?i)select\\s*?.*?\\s*?(?i)from(.*)*?".r
 }
 
-class JdbcPublisher(queryId: Long,
-                    query: String,
+class JdbcPublisher(query: String,
                     dbUrl: String,
                     user: String,
                     password: String,
@@ -66,13 +65,13 @@ class JdbcPublisher(queryId: Long,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    info(log, "stopping jdbc publisher of '{}'", queryId)
+    info(log, "stopping jdbc publisher of '{}'", ctx.traceId)
     if (handle != null & !isDone) {
       try {
         handle.stmt.cancel()
-        debug(log, "successfully canceled query '{}'", queryId)
+        debug(log, "successfully canceled query '{}'", ctx.traceId)
       } catch {
-        case e: Exception ⇒ warning(log, "could not cancel query '{}': {}", queryId, e.getMessage)
+        case e: Exception ⇒ warning(log, "could not cancel query '{}': {}", ctx.traceId, e.getMessage)
       }
     }
     connections ! handle
@@ -80,7 +79,7 @@ class JdbcPublisher(queryId: Long,
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    info(log, "starting jdbc publisher of '{}' on '{}'", queryId, dbUrl)
+    info(log, "starting jdbc publisher of '{}' on '{}'", ctx.traceId, dbUrl)
   }
 
 
@@ -153,8 +152,7 @@ class JdbcPublisher(queryId: Long,
 }
 
 //decoupled from publisher so that we can cancel the query
-class JdbcExecutor(queryId: Long,
-                   query: String,
+class JdbcExecutor(query: String,
                    conn: Connection,
                    stmt: Statement,
                    initializationStmts: List[String],
@@ -162,11 +160,11 @@ class JdbcExecutor(queryId: Long,
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug("starting jdbc executor of '{}'", queryId)
+    debug(log, "starting jdbc executor of '{}'", ctx.traceId)
   }
 
   override def postStop(): Unit = {
-    log.info(s"stopping jdbc executor of '$queryId'")
+    debug(log, "stopping jdbc executor of {}", ctx.traceId)
     //close resources
     try {
       rs.close()
