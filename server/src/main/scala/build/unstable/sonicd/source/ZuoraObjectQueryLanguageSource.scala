@@ -125,9 +125,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef,
     case res: QueryResult ⇒
       val totalSize = res.size
 
-      if (res.done || streamLimit.isDefined && {
-        streamed += effectiveBatchSize; streamed == streamLimit.get
-      }) {
+      if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
         log.info(s"successfully fetched $totalSize zuora objects")
         self ! DoneWithQueryExecution.success
       } else {

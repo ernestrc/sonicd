@@ -104,7 +104,9 @@ object FileWatcher extends SonicdLogging {
         lazy val newGlob = Glob(res.folders + fp.toPath, res.fileFilterMaybe)
 
         if (fp.isDirectory && recursive) {
-          doParse(fps.tail ++ fp.listFiles().filter(_.isDirectory).toVector, recursive, newGlob, dirFilter)
+          val list = fp.listFiles()
+          if (list != null) doParse(fps.tail ++ list.filter(_.isDirectory).toVector, recursive, newGlob, dirFilter)
+          else doParse(fps.tail, recursive, newGlob, dirFilter)
         } else if (fp.isDirectory) {
           newGlob
         } else {
@@ -148,9 +150,9 @@ class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
     }
   }
 
-  val watcher: WatchService = FileSystems.getDefault.newWatchService()
+  lazy val watcher: WatchService = FileSystems.getDefault.newWatchService()
 
-  val key = dir.register(
+  lazy val key = dir.register(
     watcher,
     StandardWatchEventKinds.ENTRY_MODIFY
   )

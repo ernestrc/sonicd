@@ -79,7 +79,7 @@ trait LocalFilePublisher {
     onCompleteThenStop()
   }
 
-  def newFile(file: File, fileName: String): BufferedFileByteChannel = {
+  def newFile(file: File, fileName: String): Option[BufferedFileByteChannel] = try {
 
     val channel = BufferedFileByteChannel(
       Files.newByteChannel(file.toPath, StandardOpenOption.READ),
@@ -92,7 +92,11 @@ trait LocalFilePublisher {
     }
 
     files.update(fileName, file → channel)
-    channel
+    Some(channel)
+  } catch {
+    case e: AccessDeniedException ⇒
+      warning(log, "access denied on {}", fileName)
+      None
   }
 
   def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (o: Map[String, JsValue]) ⇒ {
@@ -224,13 +228,14 @@ trait LocalFilePublisher {
 
     case ev@PathWatchEvent(_, event) ⇒
 
-      val channel = files.get(ev.fileName) match {
-        case Some((_, p)) ⇒ p
-        case None ⇒
-          debug(log, "file {} was modified and but it was not being consumed yet", ev.fileName)
-          newFile(ev.file, ev.fileName)
+      files.get(ev.fileName).map {
+        case (_, p) ⇒ p
+      }.orElse {
+        debug(log, "file {} was modified and but it was not being consumed yet", ev.fileName)
+        newFile(ev.file, ev.fileName)
+      }.foreach { chan ⇒
+        stream(query, chan)
       }
-      stream(query, channel)
 
     case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
   }
@@ -243,7 +248,8 @@ trait LocalFilePublisher {
         val parsed = parseQuery(rawQuery)
 
         folders.foreach { folder ⇒
-          folder.listFiles.foreach { file ⇒
+          val list = folder.listFiles()
+          if (list != null) list.foreach { file ⇒
 
             lazy val matcher = fileFilterMaybe.map(fileFilter ⇒
               FileSystems.getDefault.getPathMatcher(s"glob:${folder.toString + "/" + fileFilter}")
@@ -251,8 +257,10 @@ trait LocalFilePublisher {
             if (file.isFile && (matcher.isEmpty || matcher.get.matches(file.toPath))) {
               info(log, "matched file {}", file.toPath)
               val fileName = file.getName
-              val reader = newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
-              files.update(fileName, file → reader)
+              newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
+                .foreach { reader ⇒
+                  files.update(fileName, file → reader)
+                }
             }
           }
         }
