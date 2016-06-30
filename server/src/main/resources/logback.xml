@@ -23,7 +23,7 @@
         <encoder>
             <charset>UTF-8</charset>
             <pattern>
-                {"component":"sonicd","trace_id":"%mdc{trace_id}","timestamp":"%d","thread":"%thread","level":"%level","logger":"%logger{35}","call_type":"%mdc{call_type}","variation":"%mdc{variation}","message":"%replace(%msg){'\"', '\\"'}","exception":"%replace(%rEx){'\n', '\\n'}"}%nopex%n
+                {"component":"sonicd","trace_id":"%mdc{trace_id}","timestamp":"%d","thread":"%thread","level":"%level","logger":"%logger{35}","call_type":"%mdc{call_type}","variation":"%mdc{variation}","message":"%replace(%msg){'\"|\n', ''}","exception":"%replace(%rEx){'\"|\n', '\\n'}"}%nopex%n
             </pattern>
         </encoder>
     </appender>

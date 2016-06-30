@@ -188,7 +188,6 @@ trait LocalFilePublisher {
 
       //problem parsing the data
     } else if (totalDemand > 0 && read.nonEmpty) {
-      warning(log, "error parsing UTF-8 data {}: {}", raw, data.failed.get.getMessage)
       stream(query, channel)
     } else {
       totalDemand == 0

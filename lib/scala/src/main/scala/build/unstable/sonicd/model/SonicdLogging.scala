@@ -9,14 +9,18 @@ trait SonicdLogging extends TypedLogging {
 
   sealed trait CallType
 
-  //client
+
+  /* client */
+
   case object BuildGraph extends CallType
   
   case object CreateTcpConnection extends CallType
 
   case object EstablishCommunication extends CallType
 
-  //server
+
+  /* server */
+
   case object HandleVersion extends CallType
   
   case object HandleGetHandlers extends CallType
@@ -35,12 +39,23 @@ trait SonicdLogging extends TypedLogging {
   
   case object JWTVerifyToken extends CallType
 
-  //jdbc source
+
+  /* sources */
+
+  case object ExecuteStatement extends CallType
+
   case object GetJdbcHandle extends CallType
 
   case object RunInitializationStatements extends CallType
 
-  case object ExecuteStatement extends CallType
+  case class RetryStatement(n: Int) extends CallType
+
+  case class HttpReq(method: String) extends CallType
+
+
+  case object DownloadHttpBody extends CallType
+
+  case object ParseHttpBody extends CallType
 
   final lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
 
