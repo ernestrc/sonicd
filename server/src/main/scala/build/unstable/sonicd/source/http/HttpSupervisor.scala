@@ -21,7 +21,7 @@ object HttpSupervisor {
 
   class HttpException(msg: String, code: String) extends Exception(s"$code: $msg")
 
-  case class PostHttpQuery(traceId: String, query: String)
+  case class HttpRequestCommand(traceId: String, request: HttpRequest)
 
   trait Identifiable {
     def id: String
@@ -49,14 +49,12 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
 
   def httpEntityTimeout: FiniteDuration
 
-  def queryUrl: String
-
   def jsonFormat: RootJsonFormat[T]
 
 
   /* HELPERS */
 
-  case class HttpQueryResult(t: Identifiable)
+  case class HttpCommandSuccess(t: Identifiable)
 
   def to[S: JsonFormat](traceId: String)(response: HttpResponse): Future[S] = {
     trace(log, traceId, DownloadHttpBody, Variation.Attempt,
@@ -77,8 +75,8 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
 
   def doRequest[S: JsonFormat](traceId: String, request: HttpRequest)
                               (mapSuccess: (String) ⇒ (HttpResponse) ⇒ Future[S]): Future[S] = {
-    trace(log, traceId, HttpReq(request.method.value), Variation.Attempt, "sending {} http request to {}{}",
-      request.method.value, masterUrl, queryUrl)
+    trace(log, traceId, HttpReq(request.method.value), Variation.Attempt,
+      "sending {} http request to {}{}", request.method.value, masterUrl, request._2)
     Source.single(request.copy(headers = extraHeaders) → traceId)
       .via(connectionPool)
       .runWith(Sink.head)
@@ -101,16 +99,16 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
             error(log, er, "unsuccessful response from server")
             Future.failed(er)
           }
-        case (Failure(e), _) ⇒ Future.failed(e)
+        case (Failure(e), _) ⇒
+          trace(log, traceId, HttpReq(request.method.value),
+            Variation.Failure(e), "http request failed ")
+          Future.failed(e)
       }
   }
 
-  def runStatement(traceId: String, statement: String): Future[Identifiable] = {
-    val uri: Uri = queryUrl
-    val entity: RequestEntity = statement
-    val httpRequest: HttpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
+  def runStatement(traceId: String, request: HttpRequest): Future[Identifiable] = {
 
-    doRequest(traceId, httpRequest)(to[T]).map(_.setTraceId(traceId))
+    doRequest(traceId, request)(to[T]).map(_.setTraceId(traceId))
   }
 
   def cancelQuery(traceId: String, request: HttpRequest): Future[Boolean] =
@@ -150,18 +148,18 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
         }.getOrElse(warning(log, "could not cancel query '{}': paritalCancelUri is empty", ref))
       }.getOrElse(log.debug("could not remove query of publisher: {}: not queryresults found", ref))
 
-    case HttpQueryResult(r) ⇒
+    case HttpCommandSuccess(r) ⇒
       val pub = sender()
       queries.update(pub, r)
       log.debug("extracted query results for query '{}'", r.id)
       pub ! r
 
-    case PostHttpQuery(traceId, s) ⇒
+    case HttpRequestCommand(traceId, s) ⇒
       debug(log, "{} supervising query '{}'", self.path, s)
       val pub = sender()
       context.watch(pub)
       runStatement(traceId, s)
-        .map(s ⇒ HttpQueryResult(s.setTraceId(traceId))).pipeTo(self)(pub)
+        .map(s ⇒ HttpCommandSuccess(s.setTraceId(traceId))).pipeTo(self)(pub)
 
     case f: Status.Failure ⇒ sender() ! f
 

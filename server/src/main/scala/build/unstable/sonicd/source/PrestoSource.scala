@@ -9,7 +9,7 @@ import akka.stream.actor.ActorPublisher
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.http.HttpSupervisor
-import build.unstable.sonicd.source.http.HttpSupervisor.PostHttpQuery
+import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
 import build.unstable.sonicd.{BuildInfo, SonicdConfig}
 import build.unstable.tylog.Variation
 import spray.json._
@@ -19,7 +19,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
 
 object Presto {
-  def getSupervisorName(masterUrl: String): String = s"suppresto_$masterUrl"
+  def getSupervisorName(masterUrl: String): String = s"presto_$masterUrl"
 
   object Headers {
     private def mkHeader(name: String, value: String): HttpHeader =
@@ -162,8 +162,6 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 
   lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
 
-  lazy val queryUrl: String = s"/${SonicdConfig.PRESTO_APIV}/statement"
-
   implicit lazy val jsonFormat: RootJsonFormat[Presto.QueryResults] = Presto.queryResultsJsonFormat
 
   lazy val httpEntityTimeout: FiniteDuration = SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT
@@ -180,7 +178,7 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
       case Presto.GetQueryResults(queryId, nextUri) ⇒
         val req = HttpRequest(HttpMethods.GET, nextUri)
         doRequest(queryId, req)(to[Presto.QueryResults])
-          .map(r ⇒ HttpQueryResult(r.copy(queryId))).pipeTo(self)(sender())
+          .map(r ⇒ HttpCommandSuccess(r.copy(queryId))).pipeTo(self)(sender())
     }
     recv orElse super.receive
   }
@@ -243,6 +241,14 @@ class PrestoPublisher(traceId: String, query: String,
     })
   }
 
+  val uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
+
+  val queryRequest = {
+    val entity: RequestEntity = query
+    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
+    HttpRequestCommand(traceId, httpRequest)
+  }
+
 
   /* STATE */
 
@@ -251,6 +257,7 @@ class PrestoPublisher(traceId: String, query: String,
   var lastQueryResults: Option[QueryResults] = None
   var retryScheduled: Option[Cancellable] = None
   var retried = 0
+  var callType: CallType = ExecuteStatement
 
 
   /* BEHAVIOUR */
@@ -266,8 +273,6 @@ class PrestoPublisher(traceId: String, query: String,
       case r: Request ⇒ terminating(done)
     }
   }
-
-  var callType: CallType = ExecuteStatement
 
   def connected: Receive = commonReceive orElse {
 
@@ -305,7 +310,7 @@ class PrestoPublisher(traceId: String, query: String,
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
                 .scheduleOnce(retryIn, supervisor,
-                  runStatement(callType, PostHttpQuery(traceId, query))))
+                  runStatement(callType, queryRequest)))
             case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
@@ -322,7 +327,7 @@ class PrestoPublisher(traceId: String, query: String,
       context.become(terminating(DoneWithQueryExecution.error(e)))
   }
 
-  def runStatement(callType: CallType, post: PostHttpQuery) = Future {
+  def runStatement(callType: CallType, post: HttpRequestCommand) = Future {
     trace(log, traceId, callType, Variation.Attempt,
       "send query to supervisor in path {}", supervisor.path)
     supervisor ! post
@@ -342,7 +347,7 @@ class PrestoPublisher(traceId: String, query: String,
 
     //first time client requests
     case Request(n) ⇒
-      runStatement(callType, PostHttpQuery(traceId, query))
+      runStatement(callType, queryRequest)
       context.become(connected)
   }
 }
