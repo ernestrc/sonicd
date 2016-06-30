@@ -23,15 +23,15 @@ object HttpSupervisor {
 
   case class HttpRequestCommand(traceId: String, request: HttpRequest)
 
-  trait Identifiable {
+  trait Traceable {
     def id: String
 
-    def setTraceId(newId: String): Identifiable
+    def setTraceId(newId: String): Traceable
   }
 
 }
 
-abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLogging {
+abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
 
   import context.dispatcher
 
@@ -51,10 +51,13 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
 
   def jsonFormat: RootJsonFormat[T]
 
+  //debug flag to output raw payloads
+  def debug: Boolean
+
 
   /* HELPERS */
 
-  case class HttpCommandSuccess(t: Identifiable)
+  case class HttpCommandSuccess(t: Traceable)
 
   def to[S: JsonFormat](traceId: String)(response: HttpResponse): Future[S] = {
     trace(log, traceId, DownloadHttpBody, Variation.Attempt,
@@ -63,7 +66,8 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
       .map(_.data.decodeString("UTF-8"))
       .andThen {
         case Success(body) ⇒
-          trace(log, traceId, DownloadHttpBody, Variation.Success, "decoded utf8 body: {}", body)
+          val msg = if (debug) s"decoded utf8 body: $body" else ""
+          trace(log, traceId, DownloadHttpBody, Variation.Success, msg)
           trace(log, traceId, ParseHttpBody, Variation.Attempt, "")
         case Failure(e) ⇒ trace(log, traceId, DownloadHttpBody, Variation.Failure(e), "failed to download entity")
       }.map(_.parseJson.convertTo[S]).andThen {
@@ -106,7 +110,7 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
       }
   }
 
-  def runStatement(traceId: String, request: HttpRequest): Future[Identifiable] = {
+  def runStatement(traceId: String, request: HttpRequest): Future[Traceable] = {
 
     doRequest(traceId, request)(to[T]).map(_.setTraceId(traceId))
   }
@@ -129,7 +133,7 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
 
   /* STATE */
 
-  val queries = scala.collection.mutable.Map.empty[ActorRef, Identifiable]
+  val queries = scala.collection.mutable.Map.empty[ActorRef, Traceable]
 
 
   /* BEHAVIOUR */
@@ -142,10 +146,10 @@ abstract class HttpSupervisor[T <: Identifiable] extends Actor with SonicdLoggin
         cancelRequestFromResult(res.asInstanceOf[T]).map { cancelUri ⇒
           cancelQuery(traceId, cancelUri).andThen {
             case Success(wasCanceled) if wasCanceled ⇒ log.debug("successfully canceled query '{}'", traceId)
-            case s: Success[_] ⇒ log.error("could not cancel query '{}': DELETE response was not 200 OK", traceId)
+            case s: Success[_] ⇒ log.error("could not cancel query '{}': response was not 200 OK", traceId)
             case Failure(e) ⇒ error(log, e, "error canceling query '{}'", traceId)
           }
-        }.getOrElse(warning(log, "could not cancel query '{}': paritalCancelUri is empty", ref))
+        }
       }.getOrElse(log.debug("could not remove query of publisher: {}: not queryresults found", ref))
 
     case HttpCommandSuccess(r) ⇒

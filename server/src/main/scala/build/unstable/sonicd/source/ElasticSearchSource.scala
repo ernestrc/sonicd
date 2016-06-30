@@ -1,94 +1,150 @@
 package build.unstable.sonicd.source
 
-import akka.actor.Actor.Receive
-import akka.actor.{Actor, ActorLogging, Props, ActorContext}
-import build.unstable.sonicd.model.{SonicdLogging, DataSource, RequestContext, Query}
+import akka.actor._
+import akka.http.scaladsl.model._
+import akka.http.scaladsl.settings.ConnectionPoolSettings
+import akka.stream.actor.ActorPublisher
+import akka.util.ByteString
+import build.unstable.sonicd.SonicdConfig
+import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonicd.model._
+import build.unstable.sonicd.source.ElasticSearch.ESQuery
 import build.unstable.sonicd.source.http.HttpSupervisor
+import build.unstable.sonicd.source.http.HttpSupervisor.{Traceable, HttpRequestCommand}
+import build.unstable.tylog.Variation
+import spray.json._
+
+import scala.concurrent.duration.{Duration, FiniteDuration, _}
+import scala.collection.mutable
 
 object ElasticSearch {
-  def getSupervisorName(masterUrl: String): String = s"elasticsearch_$masterUrl"
+  def getSupervisorName(nodeUrl: String, port: Int): String = s"elasticsearch_${nodeUrl}_$port"
 
-  case class Query
+  case class ESQuery(extractedFrom: Option[Long], extractedSize: Option[Long], payload: JsObject)
+
+  case object ESQueryJsonFormat {
+    //returns index (default _all), _type (default null), and parsed es query
+    def read(json: JsValue): (String, Option[String], ESQuery) = {
+      val obj = json.asJsObject
+      val fields = obj.fields
+      val index = fields.get("_index").map(_.convertTo[String]).getOrElse("_all")
+      val typeHint = fields.get("_type").map(_.convertTo[String])
+
+      (index, typeHint,
+        ESQuery(fields.get("from").map(_.convertTo[Long]),
+          fields.get("size").map(_.convertTo[Long]), obj))
+    }
+
+    def write(obj: ESQuery, from: Long, size: Long): JsValue = {
+      val fields = mutable.Map.empty ++ obj.payload.fields
+
+      //if not configured it will reject query
+      fields.remove("_type")
+      fields.remove("_index")
+      fields.update("from", JsNumber(from))
+      fields.update("size", JsNumber(size))
+
+      JsObject(fields.toMap)
+    }
+  }
+
+  case class Shards(total: Int, successful: Int, failed: Int)
+
+  case class Hit(_index: String, _type: String, _id: String, _score: Float, _source: JsObject)
+
+  case class Hits(total: Long, max_score: Float, hits: Vector[Hit])
+
+  case class QueryResults(traceId: Option[String], took: Long, timed_out: Boolean,
+                          _shards: Shards, hits: Hits)
+    extends HttpSupervisor.Traceable {
+    def id = traceId.get
+
+    def setTraceId(newId: String): Traceable = this.copy(traceId = Some(newId))
+  }
+
+  implicit val shardsFormat: RootJsonFormat[Shards] = jsonFormat3(Shards.apply)
+  implicit val hitFormat: RootJsonFormat[Hit] = jsonFormat5(Hit.apply)
+  implicit val hitsFormat: RootJsonFormat[Hits] = jsonFormat3(Hits.apply)
+  implicit val queryResultsFormat: RootJsonFormat[QueryResults] = jsonFormat5(QueryResults.apply)
 }
 
 class ElasticSearchSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
-  def elasticsearchSupervisorProps(masterUrl: String, masterPort: Int): Props =
-    Props(classOf[ElasticSearchSupervisor], masterUrl, masterPort)
+  def elasticsearchSupervisorProps(nodeUrl: String, masterPort: Int): Props =
+    Props(classOf[ElasticSearchSupervisor], nodeUrl, masterPort)
 
   val nodeUrl: String = getConfig[String]("url")
   val nodePort: Int = getConfig[Int]("port")
 
-  val supervisorName = ElasticSearch.getSupervisorName(nodeUrl)
+  val (index, typeHint, esQuery) = ElasticSearch.ESQueryJsonFormat.read(query.query.parseJson)
+
+  val supervisorName = ElasticSearch.getSupervisorName(nodeUrl, nodePort)
 
   lazy val handlerProps: Props = {
-    //if no elasticsearch supervisor has been initialized yet for this elasticsearch cluster, initialize one
-    val elasticsearchSupervisor = actorContext.child(supervisorName).getOrElse {
+    //if no ES supervisor has been initialized yet for this ES cluster, initialize one
+    val supervisor = actorContext.child(supervisorName).getOrElse {
       actorContext.actorOf(elasticsearchSupervisorProps(nodeUrl, nodePort), supervisorName)
     }
 
-    Props(classOf[ElasticSearchPublisher], query.traceId.get, query.query,
-      elasticsearchSupervisor,
-      masterUrl, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN, context)
+    Props(classOf[ElasticSearchPublisher], query.traceId.get, esQuery,
+      index, typeHint, SonicdConfig.ES_QUERY_SIZE, supervisor, SonicdConfig.ES_WATERMARK, context)
   }
 }
 
-class ElasticSearchSupervisor(val masterUrl: String, val port: Int) extends HttpSupervisor[ElasticSearch.Query] {
+class ElasticSearchSupervisor(val masterUrl: String, val port: Int) extends HttpSupervisor[ElasticSearch.QueryResults] {
 
-  import context.dispatcher
+  lazy val jsonFormat: RootJsonFormat[ElasticSearch.QueryResults] = ElasticSearch.queryResultsFormat
 
-  lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
+  lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.ES_CONNECTION_POOL_SETTINGS)
 
-  implicit lazy val jsonFormat: RootJsonFormat[ElasticSearch.QueryResults] = ElasticSearch.queryResultsJsonFormat
+  lazy val httpEntityTimeout: FiniteDuration = SonicdConfig.ES_HTTP_ENTITY_TIMEOUT
 
-  lazy val httpEntityTimeout: FiniteDuration = SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT
+  lazy val extraHeaders = scala.collection.immutable.Seq.empty[HttpHeader]
 
-  lazy val extraHeaders: Seq[HttpHeader] = scala.collection.immutable.Seq(ElasticSearch.Headers.USER("sonicd"), ElasticSearch.Headers.SOURCE)
+  lazy val debug: Boolean = false
 
-  override def cancelRequestFromResult(t: ElasticSearch.QueryResults): Option[HttpRequest] =
-    t.partialCancelUri.map { uri ⇒
-      HttpRequest(HttpMethods.DELETE, uri)
-    }
-
-  override def receive: Actor.Receive = {
-    val recv: Receive = {
-      case ElasticSearch.GetQueryResults(queryId, nextUri) ⇒
-        val req = HttpRequest(HttpMethods.GET, nextUri)
-        doRequest(queryId, req)(to[ElasticSearch.QueryResults])
-          .map(r ⇒ HttpCommandSuccess(r.copy(queryId))).pipeTo(self)(sender())
-    }
-    recv orElse super.receive
-  }
+  override def cancelRequestFromResult(t: ElasticSearch.QueryResults): Option[HttpRequest] = None
 }
 
-class ElasticSearchPublisher(traceId: String, query: String,
-                      supervisor: ActorRef, masterUrl: String,
-                      maxRetries: Int, retryIn: FiniteDuration,
-                      ctx: RequestContext)
+class ElasticSearchPublisher(traceId: String,
+                             query: ESQuery,
+                             index: String,
+                             typeHint: Option[String],
+                             querySize: Long,
+                             supervisor: ActorRef,
+                             watermark: Long,
+                             ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
-  import ElasticSearch._
   import akka.stream.actor.ActorPublisherMessage._
-  import context.dispatcher
 
   //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 1.minute
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    info(log, "stopping elasticsearch publisher of '{}' pointing at '{}'", traceId, masterUrl)
-    retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
+    info(log, "stopping ES publisher {}", traceId)
+    context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting elasticsearch publisher of '{}' pointing at '{}'", traceId, masterUrl)
+    debug(log, "starting ES publisher {}", traceId)
+    context watch supervisor
   }
 
 
   /* HELPERS */
+
+  val uri = typeHint.map(t ⇒ s"/$index/$t/_search").getOrElse(s"/$index/_search")
+
+  def nextRequest: HttpRequestCommand = {
+    val entity: RequestEntity = HttpEntity.Strict.apply(ContentTypes.`application/json`,
+      ByteString(ElasticSearch.ESQueryJsonFormat.write(query, nextFrom, nextSize).compactPrint, ByteString.UTF_8))
+    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
+    HttpRequestCommand(traceId, httpRequest)
+  }
 
   def tryPushDownstream() {
     while (isActive && totalDemand > 0 && buffer.nonEmpty) {
@@ -97,35 +153,19 @@ class ElasticSearchPublisher(traceId: String, query: String,
   }
 
   def tryPullUpstream() {
-    if (lastQueryResults.isDefined && lastQueryResults.get.nextUri.isDefined && (buffer.isEmpty || shouldQueryAhead)) {
-      supervisor ! GetQueryResults(lastQueryResults.get.id, lastQueryResults.get.nextUri.get)
-      lastQueryResults = None
+    if (limit > 0 && streamed + querySize > limit) nextSize = limit - streamed
+    if (buffer.isEmpty || shouldQueryAhead) {
+      supervisor ! nextRequest
+      resultsPending = true
     }
   }
 
-  def shouldQueryAhead: Boolean = buffer.length < 2466 * 2
+  def shouldQueryAhead: Boolean = !resultsPending && buffer.length < watermark
 
-  def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
-    TypeMetadata(v.map {
-      case ColMeta(name, "boolean") ⇒ (name, JsBoolean(false))
-      case ColMeta(name, "bigint") ⇒ (name, JsNumber(0L))
-      case ColMeta(name, "double") ⇒ (name, JsNumber(0d))
-      case ColMeta(name, "varchar" | "time" | "date" | "timestamp") ⇒ (name, JsString(""))
-      case ColMeta(name, "varbinary") ⇒ (name, JsArray(JsNumber(0)))
-      case ColMeta(name, "array") ⇒ (name, JsArray.empty)
-      case ColMeta(name, "json" | "map") ⇒ (name, JsObject(Map.empty[String, JsValue]))
-      case ColMeta(name, anyElse) ⇒
-        warning(log, "could not map type {}", anyElse)
-        (name, JsString(""))
-    })
-  }
-
-  val uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
-
-  val queryRequest = {
-    val entity: RequestEntity = query
-    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
-    HttpRequestCommand(traceId, httpRequest)
+  def getTypeMetadata(hits: ElasticSearch.Hits): Option[TypeMetadata] = {
+    hits.hits.headOption.map { hit ⇒
+      TypeMetadata(hit._source.fields.toVector)
+    }
   }
 
 
@@ -133,10 +173,11 @@ class ElasticSearchPublisher(traceId: String, query: String,
 
   var bufferedMeta: Boolean = false
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
-  var lastQueryResults: Option[QueryResults] = None
-  var retryScheduled: Option[Cancellable] = None
-  var retried = 0
-  var callType: CallType = ExecuteStatement
+  val limit = query.extractedSize.getOrElse(-1L)
+  var nextSize = if (limit > 0) limit else querySize
+  var nextFrom = query.extractedFrom.getOrElse(0L)
+  var streamed = 0L
+  var resultsPending = false
 
 
   /* BEHAVIOUR */
@@ -153,63 +194,43 @@ class ElasticSearchPublisher(traceId: String, query: String,
     }
   }
 
-  def connected: Receive = commonReceive orElse {
+  def materialized: Receive = commonReceive orElse {
 
     case Request(n) ⇒
       tryPushDownstream()
       tryPullUpstream()
 
-    case r: QueryResults ⇒
-      log.debug("recv query results of query '{}'", r.id)
-      lastQueryResults = Some(r)
+    case r: ElasticSearch.QueryResults ⇒
+      resultsPending = false
+      val nhits = r.hits.hits.size
+      streamed += nhits
+
       //extract type metadata
-      if (!bufferedMeta && r.columns.isDefined) {
-        buffer.enqueue(getTypeMetadata(r.columns.get))
-        bufferedMeta = true
+      if (!bufferedMeta) {
+        getTypeMetadata(r.hits).foreach { meta ⇒
+          buffer.enqueue(meta)
+          bufferedMeta = true
+        }
       }
 
-      r.stats.state match {
-        case "RUNNING" | "QUEUED" | "PLANNING" | "STARTING" ⇒
-          r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
-          tryPullUpstream()
+      r.hits.hits.foreach(h ⇒ buffer.enqueue(OutputChunk(h._source.fields.values.to[Vector])))
 
-        case "FINISHED" ⇒
-          r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
-          trace(log, traceId, callType, Variation.Success, r.stats.state)
-          context.become(terminating(done = DoneWithQueryExecution.success))
+      if (nhits < querySize) {
+        trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", streamed)
+        context.become(terminating(done = DoneWithQueryExecution.success))
 
-        case "FAILED" ⇒
-          val error = r.error.get
-          val e = new Exception(error.message)
-          trace(log, traceId, callType, Variation.Failure(e),
-            "query status is FAILED: {}", r.error.get)
-          error.errorCode match {
-            case 65540 /* PAGE_TRANSPORT_TIMEOUT */ if retried < maxRetries ⇒
-              retried += 1
-              callType = RetryStatement(retried)
-              retryScheduled = Some(context.system.scheduler
-                .scheduleOnce(retryIn, supervisor,
-                  runStatement(callType, queryRequest)))
-            case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
-          }
+      } else {
+        nextFrom += querySize
+        //if user set size then make sure that we don's query more than limit
+        tryPullUpstream()
 
-        case state ⇒
-          val msg = s"unexpected query state from elasticsearch $state"
-          val e = new Exception(msg)
-          trace(log, traceId, callType, Variation.Failure(e), msg)
-          context.become(terminating(DoneWithQueryExecution.error(e)))
       }
+
       tryPushDownstream()
 
     case Status.Failure(e) ⇒
-      trace(log, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
+      trace(log, traceId, ExecuteStatement, Variation.Failure(e), "something went wrong with the http request")
       context.become(terminating(DoneWithQueryExecution.error(e)))
-  }
-
-  def runStatement(callType: CallType, post: HttpRequestCommand) = Future {
-    trace(log, traceId, callType, Variation.Attempt,
-      "send query to supervisor in path {}", supervisor.path)
-    supervisor ! post
   }
 
   def commonReceive: Receive = {
@@ -226,7 +247,9 @@ class ElasticSearchPublisher(traceId: String, query: String,
 
     //first time client requests
     case Request(n) ⇒
-      runStatement(callType, queryRequest)
-      context.become(connected)
+      trace(log, traceId, ExecuteStatement, Variation.Attempt,
+        "send query to supervisor in path {}", supervisor.path)
+      tryPullUpstream()
+      context.become(materialized)
   }
 }

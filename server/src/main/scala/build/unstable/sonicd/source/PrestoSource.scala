@@ -97,8 +97,8 @@ object Presto {
                           stats: StatementStats,
                           error: Option[ErrorMessage],
                           updateType: Option[String],
-                          updateCount: Option[Long]) extends HttpSupervisor.Identifiable {
-    override def setTraceId(newId: String): HttpSupervisor.Identifiable =
+                          updateCount: Option[Long]) extends HttpSupervisor.Traceable {
+    override def setTraceId(newId: String): HttpSupervisor.Traceable =
       this.copy(id = newId)
   }
 
@@ -160,6 +160,8 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 
   import context.dispatcher
 
+  lazy val debug: Boolean = false
+
   lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
 
   implicit lazy val jsonFormat: RootJsonFormat[Presto.QueryResults] = Presto.queryResultsJsonFormat
@@ -201,11 +203,13 @@ class PrestoPublisher(traceId: String, query: String,
   override def postStop(): Unit = {
     info(log, "stopping presto publisher of '{}' pointing at '{}'", traceId, masterUrl)
     retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
+    context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
     debug(log, "starting presto publisher of '{}' pointing at '{}'", traceId, masterUrl)
+    context watch supervisor
   }
 
 
@@ -243,7 +247,7 @@ class PrestoPublisher(traceId: String, query: String,
 
   val uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
 
-  val queryRequest = {
+  val queryCommand = {
     val entity: RequestEntity = query
     val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
     HttpRequestCommand(traceId, httpRequest)
@@ -274,7 +278,7 @@ class PrestoPublisher(traceId: String, query: String,
     }
   }
 
-  def connected: Receive = commonReceive orElse {
+  def materialized: Receive = commonReceive orElse {
 
     case Request(n) ⇒
       tryPushDownstream()
@@ -310,7 +314,7 @@ class PrestoPublisher(traceId: String, query: String,
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
                 .scheduleOnce(retryIn, supervisor,
-                  runStatement(callType, queryRequest)))
+                  runStatement(callType, queryCommand)))
             case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
@@ -347,7 +351,7 @@ class PrestoPublisher(traceId: String, query: String,
 
     //first time client requests
     case Request(n) ⇒
-      runStatement(callType, queryRequest)
-      context.become(connected)
+      runStatement(callType, queryCommand)
+      context.become(materialized)
   }
 }

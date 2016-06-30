@@ -72,5 +72,12 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   lazy val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
   lazy val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
   lazy val PRESTO_APIV = "v1"
+
+  lazy val ES_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.es")
+  lazy val ES_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.es.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
+  lazy val ES_WATERMARK = config.getLong("sonicd.es.watermark")
+  lazy val ES_QUERY_SIZE = config.getLong("sonicd.es.query-size")
+
+  assert(ES_WATERMARK < ES_QUERY_SIZE, "ES watermark must be smaller than query fetch size")
 }
 
