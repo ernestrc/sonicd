@@ -81,11 +81,15 @@ class ElasticSearchSource(query: Query, actorContext: ActorContext, context: Req
 
   val supervisorName = ElasticSearch.getSupervisorName(nodeUrl, nodePort)
 
-  lazy val handlerProps: Props = {
-    //if no ES supervisor has been initialized yet for this ES cluster, initialize one
-    val supervisor = actorContext.child(supervisorName).getOrElse {
+  def getSupervisor(name: String): ActorRef = {
+    actorContext.child(name).getOrElse {
       actorContext.actorOf(elasticsearchSupervisorProps(nodeUrl, nodePort), supervisorName)
     }
+  }
+
+  lazy val handlerProps: Props = {
+    //if no ES supervisor has been initialized yet for this ES cluster, initialize one
+    val supervisor = getSupervisor(supervisorName)
 
     Props(classOf[ElasticSearchPublisher], query.traceId.get, esQuery,
       index, typeHint, SonicdConfig.ES_QUERY_SIZE, supervisor, SonicdConfig.ES_WATERMARK, context)
@@ -119,7 +123,6 @@ class ElasticSearchPublisher(traceId: String,
 
   import akka.stream.actor.ActorPublisherMessage._
 
-  //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 1.minute
 
   @throws[Exception](classOf[Exception])
@@ -137,8 +140,6 @@ class ElasticSearchPublisher(traceId: String,
 
   /* HELPERS */
 
-  val uri = typeHint.map(t ⇒ s"/$index/$t/_search").getOrElse(s"/$index/_search")
-
   def nextRequest: HttpRequestCommand = {
     val entity: RequestEntity = HttpEntity.Strict.apply(ContentTypes.`application/json`,
       ByteString(ElasticSearch.ESQueryJsonFormat.write(query, nextFrom, nextSize).compactPrint, ByteString.UTF_8))
@@ -153,14 +154,14 @@ class ElasticSearchPublisher(traceId: String,
   }
 
   def tryPullUpstream() {
-    if (limit > 0 && streamed + querySize > limit) nextSize = limit - streamed
-    if (buffer.isEmpty || shouldQueryAhead) {
-      supervisor ! nextRequest
+    if (target > 0 && fetched + nextSize > target) nextSize = target - fetched
+    if (!resultsPending && (buffer.isEmpty || shouldQueryAhead)) {
       resultsPending = true
+      supervisor ! nextRequest
     }
   }
 
-  def shouldQueryAhead: Boolean = !resultsPending && buffer.length < watermark
+  def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
 
   def getTypeMetadata(hits: ElasticSearch.Hits): Option[TypeMetadata] = {
     hits.hits.headOption.map { hit ⇒
@@ -168,15 +169,18 @@ class ElasticSearchPublisher(traceId: String,
     }
   }
 
+  val uri = typeHint.map(t ⇒ s"/$index/$t/_search").getOrElse(s"/$index/_search")
+  val limit = query.extractedSize.getOrElse(-1L)
+
 
   /* STATE */
 
+  var target = limit
   var bufferedMeta: Boolean = false
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
-  val limit = query.extractedSize.getOrElse(-1L)
-  var nextSize = if (limit > 0) limit else querySize
+  var nextSize = if (limit > 0) Math.min(limit, querySize) else querySize
   var nextFrom = query.extractedFrom.getOrElse(0L)
-  var streamed = 0L
+  var fetched = 0L
   var resultsPending = false
 
 
@@ -201,9 +205,11 @@ class ElasticSearchPublisher(traceId: String,
       tryPullUpstream()
 
     case r: ElasticSearch.QueryResults ⇒
-      resultsPending = false
       val nhits = r.hits.hits.size
-      streamed += nhits
+
+      resultsPending = false
+      fetched += nhits
+      if (target < 0L) target = r.hits.total
 
       //extract type metadata
       if (!bufferedMeta) {
@@ -215,17 +221,13 @@ class ElasticSearchPublisher(traceId: String,
 
       r.hits.hits.foreach(h ⇒ buffer.enqueue(OutputChunk(h._source.fields.values.to[Vector])))
 
-      if (nhits < querySize) {
-        trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", streamed)
-        context.become(terminating(done = DoneWithQueryExecution.success))
-
+      if (fetched == target) {
+        trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)
+        context.become(terminating(DoneWithQueryExecution.success))
       } else {
-        nextFrom += querySize
-        //if user set size then make sure that we don's query more than limit
+        nextFrom += nhits
         tryPullUpstream()
-
       }
-
       tryPushDownstream()
 
     case Status.Failure(e) ⇒
