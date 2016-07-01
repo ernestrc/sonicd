@@ -2,48 +2,57 @@
 name = "sonicd"
 version = "0.5.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
+description = "client library for Sonicd, a data streaming gateway"
+license-file = "LICENSE"
+documentation = "http://sonicd.unstable.build/doc"
+homepage = "http://sonicd.unstable.build"
+repository = "https://github.com/ernestrc/sonicd"
+include = [
+  "lib/rust/**/*.rs",
+  "cli/**/*.rs",
+  "Cargo.toml",
+  "Cargo.lock"
+]
+
+[features]
+# cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
+websocket = ["ws"]
 
 [lib]
 name = "sonicd"
 path = "lib/rust/src/lib.rs"
 
+[[bin]]
+name = "sonic"
+path = "cli/src/main.rs"
 
-[features]
-# FIXME https://github.com/rust-lang/cargo/pull/2325
-# individual Cargo.toml are used for now
-# cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
-# cli = ["regex", "docopt", "docopt_macros", "rustc-serialize", "env_logger", "pbr"]
-websocket = ["ws"]
+[dependencies]
+serde = "0.7.11"
+serde_json = "0.7.3"
+serde_macros = "0.7.11"
+byteorder = "0.5.3"
+curl = "0.3.0"
+nix = "0.6.0"
+log = "0.3.6"
 
-# [[bin]]
-# name = "sonic"
-# path = "cli/src/main.rs"
-# features = ["cli"]
+# cli
+regex = "0.1.71"
+docopt = "0.6.81"
+docopt_macros = "0.6.84"
+rustc-serialize = "0.3.19"
+pbr =  "0.2.1"
+env_logger = "0.3.3"
 
+ws = { version =  "0.5.0", optional = true }
+
+# FIXME cache for now separate toml until
+# https://github.com/rust-lang/cargo/pull/2325
+# otherwise on non-linux os project does not compile
+# threadpool = { version = "*", optional = true }
+# num_cpus = { version = "0.2", optional = true }
+# lazy_static = { version =  "0.1.*", optional = true }
+#
 # [[bin]]
 # name = "sonicc"
 # path = "cache/src/main.rs"
 # features = ["cache"]
-
-# cli
-# regex ={ version = "*", optional = true }
-# docopt ={ version = "*", optional = true }
-# docopt_macros ={ version = "*", optional = true }
-# rustc-serialize ={ version = "*", optional = true }
-# pbr = { version = "*", optional = true }
-
-# cache
-# threadpool = { version = "*", optional = true }
-# num_cpus = { version = "0.2", optional = true }
-# lazy_static = { version =  "0.1.*", optional = true }
-
-[dependencies]
-serde = "*"
-serde_json = "*"
-serde_macros = "*"
-byteorder = "*"
-curl = "*"
-nix = "*"
-log = "*"
-
-ws = { version =  "*", optional = true }
