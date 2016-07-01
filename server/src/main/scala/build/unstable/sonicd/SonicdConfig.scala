@@ -32,7 +32,7 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   assert(TOKEN_DURATION.isFinite() && TOKEN_DURATION > 1.minute,
     "token duration must be finite and greater than 1 minute")
 
-  lazy val API_KEYS: List[ApiKey] =
+   val API_KEYS: List[ApiKey] =
     config.getList("sonicd.api-keys")
       .render(ConfigRenderOptions.concise())
       .parseJson match {
@@ -42,41 +42,30 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
   assert(API_KEYS.distinct.size == API_KEYS.size)
 
-  lazy val SPARK_MASTER = Try(config.getString("sonicd.spark.master"))
-  lazy val SPARK_HOME = Try(config.getString("sonicd.spark.home"))
-  lazy val SPARK_DRIVER_CLASSPATH = Try(config.getString("sonicd.spark.driver.extraClassPath"))
-  lazy val SPARK_DRIVER_LIBRARYPATH = Try(config.getString("sonicd.spark.driver.extraLibraryPath"))
-  lazy val SPARK_EXECUTOR_CLASSPATH = Try(config.getString("sonicd.spark.executor.extraClassPath"))
-  lazy val SPARK_EXECUTOR_LIBRARYPATH = Try(config.getString("sonicd.spark.executor.extraClassPath"))
-  lazy val SPARK_JARS = Try(config.getStringList("sonicd.spark.jars").toSeq)
-
-  lazy val ZUORA_MAX_FETCH_SIZE = Try(config.getInt("sonicd.zuora.query_limit")).getOrElse(2000)
+   val ZUORA_MAX_FETCH_SIZE = Try(config.getInt("sonicd.zuora.query_limit")).getOrElse(2000)
   //https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E_SOAP_API_Calls/query_call
   assert(ZUORA_MAX_FETCH_SIZE <= 2000)
 
-  lazy val ZUORA_QUERY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.query-timeout").getSeconds, TimeUnit.SECONDS)
-  lazy val ZUORA_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
-  lazy val ZUORA_ENDPOINT = config.getString("sonicd.zuora.endpoint")
-  lazy val ZUORA_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.zuora")
-
-  lazy val HADOOP_CONF = Try(config.getString("sonid.hadoop-config"))
-  lazy val YARN_CONF = Try(config.getString("sonid.yarn-config"))
+   val ZUORA_QUERY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.query-timeout").getSeconds, TimeUnit.SECONDS)
+   val ZUORA_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.zuora.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
+   val ZUORA_ENDPOINT = config.getString("sonicd.zuora.endpoint")
+   val ZUORA_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.zuora")
 
   implicit val ACTOR_TIMEOUT: Timeout = Timeout(config.getDuration("sonicd.actor-timeout", TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
   val ENDPOINT_TIMEOUT: Timeout = Timeout(config.getDuration("sonicd.endpoint-timeout", TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
-  lazy val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.presto")
-  lazy val PRESTO_RETRYIN: FiniteDuration = FiniteDuration(config.getDuration("sonicd.presto.retry-in").getSeconds, TimeUnit.SECONDS)
-  lazy val PRESTO_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.presto.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
-  lazy val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
-  lazy val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
-  lazy val PRESTO_APIV = "v1"
+   val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.presto")
+   val PRESTO_RETRYIN: FiniteDuration = FiniteDuration(config.getDuration("sonicd.presto.retry-in").getSeconds, TimeUnit.SECONDS)
+   val PRESTO_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.presto.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
+   val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
+   val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
+   val PRESTO_APIV = "v1"
 
-  lazy val ES_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.es")
-  lazy val ES_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.es.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
-  lazy val ES_WATERMARK = config.getLong("sonicd.es.watermark")
-  lazy val ES_QUERY_SIZE = config.getLong("sonicd.es.query-size")
+   val ES_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.es")
+   val ES_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.es.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
+   val ES_WATERMARK = config.getLong("sonicd.es.watermark")
+   val ES_QUERY_SIZE = config.getLong("sonicd.es.query-size")
 
   assert(ES_WATERMARK < ES_QUERY_SIZE, "ES watermark must be smaller than query fetch size")
 }
