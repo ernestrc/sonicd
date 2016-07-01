@@ -35,8 +35,6 @@ trait LocalFilePublisher {
 
   def parseUTF8Data(raw: String): Map[String, JsValue]
 
-  def queryId: Long
-
   def rawQuery: String
 
   def tail: Boolean
@@ -52,11 +50,11 @@ trait LocalFilePublisher {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting file stream publisher of '{}'", queryId)
+    debug(log, "starting file stream publisher of '{}'", ctx.traceId)
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping file stream publisher of '{}'", queryId)
+    debug(log, "stopping file stream publisher of '{}'", ctx.traceId)
   }
 
   @throws[Exception](classOf[Exception])
@@ -183,7 +181,8 @@ trait LocalFilePublisher {
       }
 
       filteredMaybe match {
-        case Some(filtered) if totalDemand > 0 ⇒ onNext(OutputChunk(JsArray(select(meta, filtered))))
+        case Some(filtered) if totalDemand > 0 ⇒
+          onNext(OutputChunk(JsArray(select(meta, filtered))))
         case Some(fields) ⇒ buffer.append(raw)
         case None ⇒
       }
@@ -227,14 +226,25 @@ trait LocalFilePublisher {
       else context.system.scheduler.scheduleOnce(100.millis, self, done)
 
     case ev@PathWatchEvent(_, event) ⇒
+      event.kind() match {
 
-      files.get(ev.fileName).map {
-        case (_, p) ⇒ p
-      }.orElse {
-        debug(log, "file {} was modified and but it was not being consumed yet", ev.fileName)
-        newFile(ev.file, ev.fileName)
-      }.foreach { chan ⇒
-        stream(query, chan)
+        case StandardWatchEventKinds.ENTRY_CREATE ⇒
+          newFile(ev.file, ev.fileName).foreach { f ⇒
+            files.update(ev.fileName, ev.file → f)
+          }
+
+        case StandardWatchEventKinds.ENTRY_DELETE ⇒
+          files.remove(ev.fileName)
+
+        case StandardWatchEventKinds.ENTRY_MODIFY ⇒
+          files.get(ev.fileName).map {
+            case (_, p) ⇒ p
+          }.orElse {
+            debug(log, "file {} was modified and but it was not being monitored yet", ev.fileName)
+            newFile(ev.file, ev.fileName)
+          }.foreach { chan ⇒
+            stream(query, chan)
+          }
       }
 
     case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
@@ -242,7 +252,7 @@ trait LocalFilePublisher {
 
   final def receive: Receive = common orElse {
     case req: Request ⇒
-      debug(log, "running query {}", rawQuery)
+      debug(log, "running file query {}", rawQuery)
 
       try {
         val parsed = parseQuery(rawQuery)
@@ -266,7 +276,7 @@ trait LocalFilePublisher {
         }
 
         //watch only if we're tailing logs
-        if (tail) watchers.foreach(_ ! FileWatcher.Watch(fileFilterMaybe, queryId))
+        if (tail) watchers.foreach(_ ! FileWatcher.Watch(fileFilterMaybe, ctx))
         self ! req
         context.become(streaming(parsed))
 
@@ -318,13 +328,14 @@ object LocalFilePublisher {
     }
   }
 
-  def getWatchers(glob: Glob, context: ActorContext): Vector[(File, ActorRef)] = {
-    glob.folders.map(f ⇒ f.toFile → LocalFilePublisher.getWatcher(f, context)).to[Vector]
+  def getWatchers(glob: Glob, context: ActorContext, workerProps: Path ⇒ Props): Vector[(File, ActorRef)] = {
+    glob.folders.map(f ⇒ f.toFile → LocalFilePublisher.getWatcher(f, context, workerProps(f))).to[Vector]
   }
 
-  def getWatcher(path: Path, context: ActorContext): ActorRef = {
+  def getWatcher(path: Path, context: ActorContext, workerProps: Props): ActorRef = {
     context.child(path.toString).getOrElse {
-      context.actorOf(Props(classOf[FileWatcher], path)
+      context.actorOf(Props(classOf[FileWatcher], path,
+        workerProps.withDispatcher(FileWatcher.dispatcher))
         .withDispatcher(FileWatcher.dispatcher))
     }
   }

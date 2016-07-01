@@ -80,6 +80,10 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val dirPath = tmp.toPath
   val filePath = file3.toPath
 
+  val MODIFY = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, filePath.getFileName)
+  val CREATE = getEvent(StandardWatchEventKinds.ENTRY_CREATE, filePath.getFileName)
+  val DELETE = getEvent(StandardWatchEventKinds.ENTRY_DELETE, filePath.getFileName)
+
   def newPublisher(q: String,
                    config: JsValue,
                    watchers: Vector[(File, ActorRef)] = Vector(tmp → self)): ActorRef = {
@@ -90,18 +94,6 @@ class LocalFileSourceSpec(_system: ActorSystem)
     watch(ref)
     ref
   }
-
-  def getEvent(k: Kind[Path], path: Path) = new WatchEvent[Path] {
-    override def count(): Int = 1
-
-    override def kind(): Kind[Path] = k
-
-    override def context(): Path = path
-  }
-
-  val MODIFY = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, filePath.getFileName)
-  val CREATE = getEvent(StandardWatchEventKinds.ENTRY_CREATE, filePath.getFileName)
-  val DELETE = getEvent(StandardWatchEventKinds.ENTRY_DELETE, filePath.getFileName)
 
   def doWrite(buf: String, channel: SeekableByteChannel = f) = {
     channel.write(ByteBuffer.wrap(buf.getBytes(Charset.defaultCharset())))

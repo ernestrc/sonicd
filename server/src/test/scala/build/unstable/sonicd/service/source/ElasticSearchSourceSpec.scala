@@ -1,17 +1,17 @@
 package build.unstable.sonicd.service.source
 
 import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
-import akka.http.scaladsl.model.{HttpEntity, HttpHeader, ContentTypes}
-import akka.stream.{ActorMaterializerSettings, ActorMaterializer}
-import akka.stream.actor.{ActorPublisherMessage, ActorPublisher}
+import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
+import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
-import build.unstable.sonicd.source.{ElasticSearchPublisher, ElasticSearch}
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
+import build.unstable.sonicd.source.{ElasticSearch, ElasticSearchPublisher}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
-import JsonProtocol._
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -28,7 +28,7 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
     TestKit.shutdownActorSystem(system)
   }
 
-  def this() = this(ActorSystem("JdbcSourceSpec"))
+  def this() = this(ActorSystem("ElasticSearchSourceSpec"))
 
   implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system))
 

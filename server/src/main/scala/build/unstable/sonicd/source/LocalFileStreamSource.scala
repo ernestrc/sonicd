@@ -1,12 +1,13 @@
 package build.unstable.sonicd.source
 
 import java.io.File
+import java.nio.file.Path
 
 import akka.actor.{Actor, ActorContext, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.file.{FileWatcher, LocalFilePublisher}
+import build.unstable.sonicd.source.file.{FileWatcherWorker, FileWatcher, LocalFilePublisher}
 import spray.json._
 
 /**
@@ -25,7 +26,8 @@ class LocalFileStreamSource(query: Query, actorContext: ActorContext, context: R
     val tail = getOption[Boolean]("tail").getOrElse(true)
 
     val glob = FileWatcher.parseGlob(path)
-    val watchers = LocalFilePublisher.getWatchers(glob, actorContext)
+    val workerProps = { dir: Path ⇒ Props(classOf[FileWatcherWorker], dir) }
+    val watchers = LocalFilePublisher.getWatchers(glob, actorContext, workerProps)
 
     Props(classOf[LocalFileStreamPublisher], query.id.get, query.query, tail, glob.fileFilterMaybe, watchers, context)
 

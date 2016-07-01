@@ -5,65 +5,65 @@ import java.nio.file._
 
 import akka.actor._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.file.FileWatcher.{PathWatchEvent, Watch}
+import build.unstable.sonicd.source.file.FileWatcher.{WatchResults, PathWatchEvent, Watch}
 import build.unstable.sonicd.source.file.FileWatcherWorker.DoWatch
 
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-class FileWatcher(dir: Path) extends Actor with SonicdLogging {
+class FileWatcher(dir: Path, workerProps: Props) extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting file watcher of folder {}", dir)
+    debug(log, "starting file watcher of directory {}", dir)
+    worker ! FileWatcherWorker.DoWatch
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping file watcher of '{}'", dir)
+    debug(log, "stopping file watcher of directory {}", dir)
   }
 
   val subscribers = mutable.Map.empty[ActorRef, Option[PathMatcher]]
-  val worker: ActorRef = context.actorOf(Props(classOf[FileWatcherWorker], dir)
-    .withDispatcher(FileWatcher.dispatcher))
-  worker ! DoWatch
+  val worker: ActorRef = context.actorOf(workerProps)
 
   override def receive: Actor.Receive = {
 
-    case Terminated(ref) ⇒ subscribers.get(ref).foreach { _ ⇒
-      subscribers.remove(ref)
-    }
-
-    //not registered OVERFLOW so all events context are Path
-    case ev: WatchEvent[Path]@unchecked ⇒
-      val event = PathWatchEvent(dir, ev)
-
-      subscribers.foreach {
-        case (sub, Some(filter)) if event.matches(filter) ⇒ sub ! event
-        case (sub, None) ⇒ sub ! event
-        case _ ⇒
+    case WatchResults(events) ⇒
+      events.foreach {
+        //OVERFLOW not registered so all events context are Path
+        case ev: WatchEvent[Path]@unchecked ⇒
+          val event = PathWatchEvent(dir, ev)
+          subscribers.foreach {
+            case (sub, Some(filter)) if event.matches(filter) ⇒ sub ! event
+            case (sub, None) ⇒ sub ! event
+            case _ ⇒
+          }
       }
+      worker ! FileWatcherWorker.DoWatch
 
-      sender() ! FileWatcherWorker.DoWatch
-
-    case Watch(Some(fileFilter), id) ⇒
+    case Watch(Some(fileFilter), ctx) ⇒
       val subscriber = sender()
       val filter = s"glob:${dir.toString + "/" + fileFilter}"
-      info(log, "file watcher {} subscribed query '{}' to files that match {}", self.path, id, filter)
+      debug(log, "file watcher {} subscribed query {} to files that match {}", self.path, ctx.traceId, filter)
       val matcher = FileSystems.getDefault.getPathMatcher(filter)
       context watch subscriber
       subscribers.update(subscriber, Some(matcher))
 
-    case Watch(None, id) ⇒
+    case Watch(None, ctx) ⇒
       val subscriber = sender()
-      info(log, "file watcher {} subscribed query '{}' to all files of {}", self.path, id, dir)
+      debug(log, "file watcher {} subscribed query {} to all files of {}", self.path, ctx.traceId, dir)
       subscribers.update(subscriber, None)
+
+    case Terminated(ref) ⇒ subscribers.remove(ref)
 
     case msg ⇒ warning(log, "extraneous message received {}", msg)
   }
 }
 
 object FileWatcher extends SonicdLogging {
+
+  case class WatchResults(events: List[WatchEvent[_]])
 
   val dispatcher = "akka.actor.file-watcher-dispatcher"
 
@@ -80,7 +80,7 @@ object FileWatcher extends SonicdLogging {
     }
   }
 
-  case class Watch(fileFilterMaybe: Option[String], queryId: Long)
+  case class Watch(fileFilterMaybe: Option[String], ctx: RequestContext)
 
   case class Glob(folders: Set[Path], fileFilterMaybe: Option[String]) {
     def isEmpty: Boolean = folders.isEmpty
@@ -150,11 +150,14 @@ class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
     }
   }
 
-  lazy val watcher: WatchService = FileSystems.getDefault.newWatchService()
+  val watcher: WatchService =
+    FileSystems.getDefault.newWatchService()
 
-  lazy val key = dir.register(
+  val key: WatchKey = dir.register(
     watcher,
-    StandardWatchEventKinds.ENTRY_MODIFY
+    StandardWatchEventKinds.ENTRY_MODIFY,
+    StandardWatchEventKinds.ENTRY_CREATE,
+    StandardWatchEventKinds.ENTRY_DELETE
   )
 
   def watch(): List[WatchEvent[_]] = {
@@ -169,7 +172,7 @@ class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
   override def receive: Actor.Receive = {
     case DoWatch ⇒
       val ev = watch()
-      if (ev.nonEmpty) ev.foreach(e ⇒ context.parent ! e)
+      if (ev.nonEmpty) context.parent ! FileWatcher.WatchResults(ev)
       else self ! DoWatch
     case msg ⇒ warning(log, "extraneous message received {}", msg)
   }

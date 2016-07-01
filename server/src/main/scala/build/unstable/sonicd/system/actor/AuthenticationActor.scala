@@ -85,6 +85,6 @@ object AuthenticationActor {
   class TokenVerificationFailed(inner: Throwable) extends Exception("token verification failed", inner)
   
   class TokenExpired(cause: com.auth0.jwt.JWTExpiredException)
-    extends Exception("token expired. generated a new one and try again", cause)
+    extends Exception("token expired. generate a new one and try again", cause)
 
 }

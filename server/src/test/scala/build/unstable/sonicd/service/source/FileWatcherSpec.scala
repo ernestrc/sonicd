@@ -1,176 +1,114 @@
 package build.unstable.sonicd.service.source
 
 import java.io.File
+import java.nio.file.StandardWatchEventKinds
 
-import build.unstable.sonicd.service.Fixture
-import build.unstable.sonicd.source.file.FileWatcher
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpec}
+import akka.actor.{Terminated, PoisonPill, ActorSystem, Props}
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonicd.service.{Fixture, ImplicitRedirectActor, ImplicitSubscriber}
+import build.unstable.sonicd.source.file.FileWatcher.{PathWatchEvent, Watch}
+import build.unstable.sonicd.source.file.{FileWatcherWorker, FileWatcher}
+import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-class FileWatcherSpec extends WordSpec with Matchers
-with BeforeAndAfterAll with BeforeAndAfterEach {
+class FileWatcherSpec(_system: ActorSystem)
+  extends TestKit(_system) with WordSpecLike
+  with Matchers with BeforeAndAfterAll with ImplicitSender
+  with ImplicitSubscriber with HandlerUtils {
+
   import Fixture._
 
-  override protected def beforeAll(): Unit = {
-    super.beforeAll()
-    tmp.mkdir()
-    tmp2.mkdir()
-    tmp3.mkdir()
-    tmp32.mkdir()
-    tmp4.mkdir()
-    file.createNewFile()
-    file2.createNewFile()
-    file3.createNewFile()
+  override protected def afterAll(): Unit = {
+    TestKit.shutdownActorSystem(system)
+    testDir.delete()
   }
 
-  override protected def afterAll(): Unit = {
-    tmp.delete()
-    tmp2.delete()
-    tmp3.delete()
-    tmp32.delete()
-    tmp4.delete()
-    file.delete()
-    file2.delete()
-    file3.delete()
-    super.afterAll()
+  override protected def beforeAll(): Unit = {
+    testDir.createNewFile()
   }
+
+  def this() = this(ActorSystem("FileWatcherSpec"))
+
+  val controller: TestActorRef[TestController] =
+    TestActorRef(Props(classOf[TestController], self).
+      withDispatcher(CallingThreadDispatcher.Id))
+
+  val testDir = new File("/tmp/sonicd_watcher_spec")
+  val testFile = new File("/tmp/sonicd_watcher_spec/test.json")
+
+  val MODIFY = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, testFile.toPath.getFileName)
+  val pathEventModify = PathWatchEvent(testDir.toPath, MODIFY)
+  val CREATE = getEvent(StandardWatchEventKinds.ENTRY_CREATE, testFile.toPath.getFileName)
+  val pathEventCreate = PathWatchEvent(testDir.toPath, CREATE)
+  val DELETE = getEvent(StandardWatchEventKinds.ENTRY_DELETE, testFile.toPath.getFileName)
+  val pathEventDelete = PathWatchEvent(testDir.toPath, DELETE)
+
+  def newWatcher = {
+    system.actorOf(Props(classOf[FileWatcher],
+      testDir.toPath, Props(classOf[ImplicitRedirectActor], self).withDispatcher(CallingThreadDispatcher.Id)
+    ).withDispatcher(CallingThreadDispatcher.Id))
+  }
+
+  def newProxy = system.actorOf(Props(classOf[ImplicitRedirectActor], self).withDispatcher(CallingThreadDispatcher.Id))
+
 
   "FileWatcher" should {
-    "parse glob" in {
-      val glob1 = FileWatcher.parseGlob(s"$tmp")
+    "subscribe subscribers to new events and send events from workers" in {
+      val watcher = newWatcher
+      val proxy1 = newProxy
+      val proxy2 = newProxy
+      expectMsg(FileWatcherWorker.DoWatch)
 
-      glob1.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp").toPath
-      )
+      //3 subscribers
+      watcher ! Watch(None, Fixture.testCtx)
+      watcher.tell(Watch(None, Fixture.testCtx), proxy1)
+      watcher.tell(Watch(None, Fixture.testCtx), proxy2)
 
-      /* FIXME not supported
-      val glob11 = FileWatcher.parseGlob(s"$tmp/rec*")
+      watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
+      expectMsg(pathEventModify)
+      expectMsg(pathEventModify)
+      expectMsg(pathEventModify)
+      expectMsg(FileWatcherWorker.DoWatch)
 
-      glob11.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp").toPath,
-        new File(s"$tmp/recursive").toPath,
-        new File(s"$tmp/recursive2").toPath
-      )
+      proxy1 ! PoisonPill
+      Thread.sleep(300) //calling thread dispatcher is awesome but not enough
 
-      assert(glob11.fileFilterMaybe.nonEmpty)
-      glob11.fileFilterMaybe.get shouldBe "*.xml"
-      */
+      watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
+      expectMsg(pathEventModify)
+      expectMsg(pathEventModify)
+      expectMsg(FileWatcherWorker.DoWatch)
 
+      proxy2 ! PoisonPill
+      Thread.sleep(300)
 
-      val glob2 = FileWatcher.parseGlob(s"$tmp/*.xml")
-
-      glob2.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp").toPath
-      )
-
-
-      val glob21 = FileWatcher.parseGlob(s"$tmp/logback.xml")
-
-      glob21.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp").toPath
-      )
-
-      assert(glob21.fileFilterMaybe.nonEmpty)
-      glob21.fileFilterMaybe.get shouldBe "logback.xml"
-
-
-      val glob22 = FileWatcher.parseGlob(s"$tmp/**/logback.xml")
-
-      glob22.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive").toPath,
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath,
-        new File(s"$tmp/recursive2").toPath,
-        new File(s"$tmp").toPath
-      )
-
-      assert(glob22.fileFilterMaybe.nonEmpty)
-      glob22.fileFilterMaybe.get shouldBe "logback.xml"
-
-
-      val glob3 = FileWatcher.parseGlob(s"$tmp/**")
-
-      glob3.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive").toPath,
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath,
-        new File(s"$tmp/recursive2").toPath,
-        new File(s"$tmp").toPath
-      )
-
-
-      val glob4 = FileWatcher.parseGlob(s"$tmp/**/*.xml")
-
-      glob4.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive").toPath,
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath,
-        new File(s"$tmp/recursive2").toPath,
-        new File(s"$tmp").toPath
-      )
-
-      assert(glob4.fileFilterMaybe.nonEmpty)
-      glob4.fileFilterMaybe.get shouldBe "*.xml"
-
-
-      val glob5 = FileWatcher.parseGlob(s"$tmp/**/")
-
-      glob5.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive").toPath,
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath,
-        new File(s"$tmp/recursive2").toPath,
-        new File(s"$tmp").toPath
-      )
-
-
-      /* FIXME
-      val glob6 = FileWatcher.parseGlob(s"$tmp/**/rec2/tmp.txt")
-
-      glob6.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath
-      )
-
-      assert(glob6.fileFilterMaybe.nonEmpty)
-      glob6.fileFilterMaybe.get shouldBe "tmp.txt"
-      */
-
-
-      //val glob7 = FileWatcher.parseGlob(s"$tmp/**/rec2/*.txt")
-      /* FIXME
-
-      glob7.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive/rec2").toPath,
-        new File(s"$tmp/recursive/rec2/rec2").toPath
-      )
-
-      assert(glob7.fileFilterMaybe.nonEmpty)
-      glob7.fileFilterMaybe.get shouldBe "*.txt"
-      */
-
-
-      //val glob8 = FileWatcher.parseGlob(s"$tmp/**/rec2/rec2/*.txt")
-
-      /* FIXME
-      glob8.folders should contain theSameElementsAs Seq(
-        new File(s"$tmp/recursive/rec2/rec2").toPath,
-        new File(s"$tmp").toPath
-      )
-
-      assert(glob8.fileFilterMaybe.nonEmpty)
-      glob8.fileFilterMaybe.get shouldBe "*.txt"
-      */
-
+      watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
+      expectMsgAllOf(pathEventModify, FileWatcherWorker.DoWatch)
+      expectNoMsg()
+      watcher ! PoisonPill
     }
 
-    "throw exception when glob doesn't match any folders" in {
+    "filter events that subscribers" in {
+      {
+        val watcher = newWatcher
+        expectMsg(FileWatcherWorker.DoWatch)
 
-      intercept[AssertionError] {
-        FileWatcher.parseGlob(s"$tmp/recursive/oopsie")
+        watcher ! Watch(Some("test2.json"), Fixture.testCtx)
+
+        watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
+        expectMsg(FileWatcherWorker.DoWatch)
+        expectNoMsg()
+        watcher ! PoisonPill
       }
 
-      intercept[AssertionError] {
-        FileWatcher.parseGlob("")
+      {
+        val watcher = newWatcher
+        expectMsg(FileWatcherWorker.DoWatch)
+
+        watcher ! Watch(Some("test.json"), Fixture.testCtx)
+
+        watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
+        expectMsgAllOf(pathEventModify, FileWatcherWorker.DoWatch)
+        expectNoMsg()
+        watcher ! PoisonPill
       }
     }
   }
