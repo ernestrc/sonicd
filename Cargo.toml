@@ -4,9 +4,9 @@ version = "0.5.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 description = "client library for Sonicd, a data streaming gateway"
 license-file = "LICENSE"
-documentation = "http://sonicd.unstable.build/doc"
+documentation = "http://sonicd.unstable.build/rustdoc"
 homepage = "http://sonicd.unstable.build"
-repository = "https://github.com/ernestrc/sonicd"
+repository = "https://github.com/xarxa6/sonicd"
 include = [
   "lib/rust/**/*.rs",
   "cli/**/*.rs",

@@ -27,7 +27,7 @@ test_exit() {
 
 trap 'clean' EXIT;
 
-$DIR/build.sh && echo "successfully ran unit tests and built xarxa6/sonicd:$GIT_COMMIT_HOSRT";
+$DIR/build.sh && echo "successfully ran unit tests and built xarxa6/sonicd:$GIT_COMMIT_SHORT";
 
 [[ $? -ne 0 ]] && exit 1
 
@@ -35,13 +35,13 @@ echo "Starting WS integration spec for $GIT_COMMIT_SHORT";
 
 create_certs;
 
-NGINX_CONTAINER=$( { docker run -v ${DIR}/nginx.conf:/etc/nginx/nginx.conf:ro -v ${DIR}/certs:/etc/ssl/localcerts:ro -d --net=host nginx; } 2>&1 );
+NGINX_CONTAINER=$(docker run -v ${DIR}/nginx.conf:/etc/nginx/nginx.conf:ro -v ${DIR}/certs:/etc/ssl/localcerts:ro -d --net=host nginx);
 test_exit $NGINX_CONTAINER
 echo "deployed nginx ssl proxy container: $NGINX_CONTAINER";
 
-SONICD_CONTAINER=$( { docker run -d -v ${DIR}:/etc/sonicd:ro -p 9111:9111 xarxa6/sonicd:${GIT_COMMIT_SHORT}; } 2>&1 );
+SONICD_CONTAINER=$(docker run -d -v ${DIR}:/etc/sonicd:ro -p 9111:9111 xarxa6/sonicd:${GIT_COMMIT_SHORT});
 test_exit $SONICD_CONTAINER
 echo "deployed sonicd container: $SONICD_CONTAINER. starting tests in 5s..";
 sleep 5;
 
-node ${DIR}/../examples/nodejs/example.js
+cd $DIR/../lib/nodejs/ && npm install && cd $DIR/../examples/nodejs && npm install && node example.js

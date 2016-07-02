@@ -4,7 +4,7 @@
 var Client = require('../../lib/nodejs/lib.js').Client;
 var assert = require('assert');
 
-var client = new Client('wss://0.0.0.0:243');
+var client = new Client('wss://0.0.0.0:443');
 
 
 var query = {
