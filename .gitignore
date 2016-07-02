@@ -13,4 +13,4 @@ server/src/main/resources/application.conf
 examples/nodejs/node_modules
 lib/nodejs/node_modules
 .cargo
-
+scripts/certs
