@@ -1,6 +1,6 @@
 use nix::unistd;
 use nix::errno::Errno::*;
-use model::{Error, Result};
+use error::{ErrorKind, Result};
 
 #[macro_export]
 macro_rules! eagain {
@@ -39,7 +39,9 @@ pub fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
                 // the cause of the error or read the remaining bytes
                 let rem = len - b;
                 let mut rembuf = vec!(0; rem);
+
                 debug!("unistd::read {} bytes: intended {}", b, len);
+
                 let r = read(rem, fd, rembuf.as_mut_slice());
                 buf.split_at_mut(b).1.copy_from_slice(rembuf.as_slice());
                 r
@@ -54,6 +56,6 @@ pub fn read(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
             debug!("unistd::read: EAGAIN | EINTR, resubmitting read");
             read(len, fd, buf)
         }
-        Err(e) => Err(Error::Io(e)),
+        Err(e) => Err(ErrorKind::NixIo(e).into()),
     }
 }

@@ -1,4 +1,5 @@
-use model::{Query, Error, Result, SonicMessage};
+use model::{Query, SonicMessage};
+use error::{ErrorKind, Result};
 use curl::easy::Easy;
 use tcp;
 use std::net::TcpStream;
@@ -39,7 +40,7 @@ pub fn stream<O, P, M>(command: SonicMessage,
                        mut output: O,
                        mut progress: P,
                        mut metadata: M)
-    -> Result<()>
+                       -> Result<()>
     where O: FnMut(SonicMessage) -> (),
           P: FnMut(SonicMessage) -> (),
           M: FnMut(SonicMessage) -> ()
@@ -48,7 +49,7 @@ pub fn stream<O, P, M>(command: SonicMessage,
 
     debug!("resolved host and port to addr {}", addr);
 
-    let mut stream = try!(TcpStream::connect(&addr).map_err(|e| Error::Connect(e)));
+    let mut stream = try!(TcpStream::connect(&addr));
 
     // set timeout 10s
     stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))).unwrap();
@@ -65,7 +66,7 @@ pub fn stream<O, P, M>(command: SonicMessage,
 
     let fd = stream.as_raw_fd();
 
-    let res: Result<()>; 
+    let res: Result<()>;
 
     loop {
         match tcp::read_message(&fd) {
@@ -75,8 +76,8 @@ pub fn stream<O, P, M>(command: SonicMessage,
                     "P" => progress(msg),
                     "T" => metadata(msg),
                     "D" => {
-                        if let Some(error) = msg.v.map(|s| Error::StreamError(s)) {
-                            res = Err(error)
+                        if let Some(error) = msg.v {
+                            res = Err(ErrorKind::QueryError(error).into())
                         } else {
                             res = Ok(());
                         };
@@ -105,9 +106,9 @@ pub fn version(host: &str, http_port: &u16) -> Result<String> {
     let mut handle = Easy::new();
     let mut buf = Vec::new();
 
-    try!(handle.url(&url).map_err(|e| Error::HttpError(e)));
+    try!(handle.url(&url));
 
-    try!(handle.perform().map_err(|e| Error::HttpError(e)));
+    try!(handle.perform());
 
 
     {
@@ -116,14 +117,13 @@ pub fn version(host: &str, http_port: &u16) -> Result<String> {
         try!(transfer.write_function(|data| {
             buf.extend_from_slice(data);
             Ok(data.len())
-        })
-             .map_err(|e| Error::HttpError(e)));
+        }));
 
         transfer.perform().unwrap();
     }
 
 
-    let s = try!(String::from_utf8(buf).map_err(|e| Error::SerDe(e.to_string())));
+    let s = try!(String::from_utf8(buf));
 
     Ok(s)
 }
@@ -137,8 +137,7 @@ pub fn authenticate(user: String, key: String, host: &str, tcp_port: &u16) -> Re
     let command = SonicMessage {
         e: "H".to_owned(),
         v: Some(key),
-        p: Some(Value::Object(payload))
-
+        p: Some(Value::Object(payload)),
     };
 
     let mut buf: Vec<SonicMessage> = Vec::new();
@@ -152,9 +151,13 @@ pub fn authenticate(user: String, key: String, host: &str, tcp_port: &u16) -> Re
     }
 
     let token = match buf.iter().find(|m| m.e == "O".to_owned()) {
-        Some(m) => m.clone().p.unwrap().as_array().unwrap().get(0).unwrap().as_string().unwrap().to_owned(),
+        Some(m) => {
+            m.clone().p.unwrap().as_array().unwrap().get(0).unwrap().as_string().unwrap().to_owned()
+        }
         None => {
-            return Err(Error::ProtocolError("no messages return by authenticate command".to_owned()));
+            return Err(ErrorKind::ProtocolError("no messages return by authenticate command"
+                    .to_owned())
+                .into());
         }
     };
 

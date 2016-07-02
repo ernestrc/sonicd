@@ -28,6 +28,7 @@ path = "cli/src/main.rs"
 
 [dependencies]
 serde = "0.7.11"
+error-chain = "0.1.12"
 serde_json = "0.7.3"
 serde_macros = "0.7.11"
 byteorder = "0.5.3"

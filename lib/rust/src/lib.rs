@@ -5,12 +5,14 @@ extern crate serde_json;
 extern crate curl;
 extern crate nix;
 extern crate byteorder;
+#[macro_use] extern crate error_chain;
 #[macro_use] extern crate log;
 
 #[cfg(feature="websocket")]
 extern crate ws as libws;
 
 mod api;
+mod error;
 mod model;
 #[macro_use] mod io;
 
@@ -19,4 +21,6 @@ pub mod tcp;
 pub mod ws;
 
 pub use api::{run, version, stream, authenticate};
-pub use model::{Query, SonicMessage, Error, Result};
+pub use model::{Query, SonicMessage};
+
+static VERSION: &'static str = env!("CARGO_PKG_VERSION");

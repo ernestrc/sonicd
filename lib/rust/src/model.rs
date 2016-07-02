@@ -1,6 +1,7 @@
 use std::fmt;
 use std::collections::BTreeMap;
 use serde_json::Value;
+use error::{Result, ErrorKind};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Query {
@@ -11,6 +12,7 @@ pub struct Query {
     pub config: Value,
 }
 
+// FIXME implement as trait and implement SonicMessageKind as Enum/Struct
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SonicMessage {
     pub e: String,
@@ -18,50 +20,24 @@ pub struct SonicMessage {
     pub p: Option<Value>,
 }
 
-/// This type represents all possible errors that can occur 
-/// when interacting with a sonicd server
-#[derive(Debug)]
-pub enum Error {
-    Io(::nix::Error),
-    Connect(::std::io::Error),
-    SerDe(String),
-    GetAddr(::std::io::Error),
-    ParseAddr(::std::net::AddrParseError),
-    ProtocolError(String),
-    HttpError(::curl::Error),
-    StreamError(String),
-    OtherError(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Error::Io(ref err) => write!(f, "{}", err),
-            &Error::Connect(ref err) => write!(f, "{}", err),
-            &Error::SerDe(ref err) => write!(f, "{}", err),
-            &Error::GetAddr(ref err) => write!(f, "{}", err),
-            &Error::ParseAddr(ref err) => write!(f, "{}", err),
-            &Error::ProtocolError(ref err) => write!(f, "{}", err),
-            &Error::HttpError(ref err) => write!(f, "{}", err),
-            &Error::StreamError(ref s) => write!(f, "{}", s), 
-            &Error::OtherError(ref s) => write!(f, "{}", s), 
-        }
-    }
-}
-
-/// Helper alias for `Result` objects that return `Error`.
-pub type Result<T> = ::std::result::Result<T, Error>;
-
 impl Query {
     pub fn from_msg(msg: SonicMessage) -> Result<Query> {
         match (msg.e.as_ref(), &msg.v, &msg.p) {
+
             ("Q", &Some(ref query), &Some(Value::Object(ref payload))) => {
 
-                let trace_id = payload.get("trace_id").and_then(|t| t.as_string().map(|t| t.to_owned()));
-                let auth_token = payload.get("auth").and_then(|a| a.as_string().map(|a| a.to_owned()));
+                let trace_id = payload.get("trace_id")
+                    .and_then(|t| t.as_string().map(|t| t.to_owned()));
+
+                let auth_token = payload.get("auth")
+                    .and_then(|a| a.as_string().map(|a| a.to_owned()));
+
                 let config = try!(payload.get("config")
-                                  .map(|c| c.to_owned())
-                                  .ok_or_else(|| Error::ProtocolError("missing 'config' in query message payload".to_owned())));
+                    .map(|c| c.to_owned())
+                    .ok_or_else(|| {
+                        ErrorKind::ProtocolError("missing 'config' in query message payload"
+                            .to_owned())
+                    }));
 
                 Ok(Query {
                     id: None,
@@ -71,9 +47,9 @@ impl Query {
                     config: config,
                 })
             }
+
             _ => {
-                Err(Error::SerDe(format!("message cannot be deserialized into a query: {:?}",
-                                         &msg)))
+                Err(ErrorKind::ProtocolError(format!("message is not a query: {:?}", &msg)).into())
             }
         }
     }
@@ -82,10 +58,13 @@ impl Query {
         let mut payload = BTreeMap::new();
 
         payload.insert("config".to_owned(), self.config.clone());
-        payload.insert("auth".to_owned(), 
+        payload.insert("auth".to_owned(),
                        self.auth.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
-        payload.insert("trace_id".to_owned(), 
-                       self.trace_id.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
+        payload.insert("trace_id".to_owned(),
+                       self.trace_id
+                           .clone()
+                           .map(|s| Value::String(s))
+                           .unwrap_or_else(|| Value::Null));
 
         SonicMessage {
             e: "Q".to_owned(),
@@ -100,7 +79,6 @@ impl Query {
 }
 
 impl SonicMessage {
-
     pub fn into_json(self) -> Value {
         ::serde_json::to_value::<SonicMessage>(&self)
     }
@@ -118,10 +96,8 @@ impl SonicMessage {
     }
 
     pub fn from_slice(slice: &[u8]) -> Result<SonicMessage> {
-        ::serde_json::from_slice::<SonicMessage>(slice).map_err(|e| {
-            let json_str = ::std::str::from_utf8(slice);
-            Error::SerDe(format!("error unmarshalling SonicMessage '{:?}': {}", json_str, e))
-        })
+        let msg = try!(::serde_json::from_slice::<SonicMessage>(slice));
+        Ok(msg)
     }
 
     // DoneWithQueryExecution error
@@ -129,8 +105,7 @@ impl SonicMessage {
         let (s, e) = if e.is_ok() {
             ("success".to_owned(), Value::Null)
         } else {
-            ("error".to_owned(),
-            Value::Array(vec![Value::String(format!("{}", e.err().unwrap()))]))
+            ("error".to_owned(), Value::Array(vec![Value::String(format!("{}", e.err().unwrap()))]))
         };
         SonicMessage {
             e: "D".to_owned(),
