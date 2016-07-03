@@ -1,4 +1,4 @@
-#![feature(custom_derive, plugin, custom_attribute, box_syntax)]
+#![feature(custom_derive, plugin, custom_attribute, box_syntax, lookup_host)]
 #![plugin(docopt_macros, serde_macros)]
 extern crate serde_json;
 extern crate serde;
@@ -7,6 +7,7 @@ extern crate regex;
 extern crate docopt;
 extern crate rustc_serialize;
 extern crate env_logger;
+#[macro_use] extern crate error_chain;
 #[macro_use] extern crate log;
 #[macro_use] extern crate sonicd;
 
@@ -14,11 +15,9 @@ mod util;
 
 use std::path::PathBuf;
 use pbr::ProgressBar;
-use sonicd::{SonicMessage, Query, Result, version, stream};
 use util::*;
 use std::process;
 use std::io::{Write, self};
-use serde_json::Value;
 
 docopt!(Args derive Debug, "
 .
@@ -52,56 +51,73 @@ Options:
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONIC_COMMIT");
 
-fn run(host: &str, port: &u16, query: Query, rows_only: bool, silent: bool) -> Result<()> {
 
-    let mut pb = ProgressBar::new(100);
+error_chain! {
+    types {
+        Error, ErrorKind, ChainErr, Result;
+    }
+
+    links {
+        sonicd::Error, sonicd::ErrorKind, SonicdError;
+    }
+
+    foreign_links {
+        ::std::io::Error, IoError, "io error";
+        ::serde_json::Error, Json, "JSON serde error";
+        ::std::net::AddrParseError, AddrParseError, "error parsing inet address";
+    }
+
+    errors {
+        InvalidFormat(co: String, msg: String) {
+            description("invalid format error")
+                display("invalid format {}: {}", co, msg)
+        }
+    }
+}
+
+fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
+
+    let addr = try!(get_addr(host, port));
+
+    let mut pb: ProgressBar = ProgressBar::new(100);
     pb.format("╢░░_╟");
 
-    let fn_out = |msg: SonicMessage| {
-        match msg.p {
-            Some(Value::Array(d)) => {
-                println!("{}", d.iter().fold(String::new(), |acc, x| {
-                    format!("{}{:?}\t",acc, x)
-                }).trim_right());
-            }
-            e => panic!("protocol error: expected array in output payload but found {:?}", e)
-        }
+    let fn_out = |msg: sonicd::OutputChunk| {
+        println!("{}", msg.0.iter().fold(String::new(), |acc, x| {
+            format!("{}{:?}\t",acc, x)
+        }).trim_right());
     };
 
-    let fn_meta = |msg: SonicMessage| {
+    let fn_meta = |msg: sonicd::TypeMetadata| {
+        debug!("received type metadata: {:?}", msg);
         if !rows_only {
-            match msg.p {
-                Some(Value::Array(d)) => {
-                    debug!("recv type metadata: {:?}", d);
-                    println!("{}", d.iter().fold(String::new(), |acc, col| {
-                        format!("{}{:?}\t", acc, col.as_array().unwrap()[0])
-                    }).trim_right())
-                },
-                e => panic!("protocol error: expected json array in metadata payload but found {:?}", e)
-            }
+            println!("{}", msg.0.iter().fold(String::new(), |acc, col| {
+                format!("{}{:?}\t", acc, col.0)
+            }).trim_right());
         }
     };
 
-    let fn_prog = |msg: SonicMessage| {
+    let fn_prog = |msg: sonicd::QueryProgress| {
         if !silent {
-            let fields = msg.p.unwrap();
-            fields.find("progress").and_then(|p| {
-                p.as_f64().map(|pi| {
-                    if pi >= 99.0 {
-                        pb.finish();
-                    } else if pi >= 1.0 {
-                        pb.add(pi as u64);
-                    }
-                })
-            });
-            fields.find("output")
-                .and_then(|o| o.as_string().map(|os| {
-                    io::stderr().write(&format!("{}\r", os).as_bytes()).unwrap();
-                }));
+            // FIXME figure out what to do with `unit` and `total`
+            // new progress bar should now happen until
+            // we have a total
+
+            let pi = msg.progress;
+
+            if let Some(total) = msg.total {
+                pb = ProgressBar::new(total as u64);
+            }
+
+            if pi >= 99.0 {
+                pb.finish();
+            } else if pi >= 1.0 {
+                pb.add(pi as u64);
+            };
         }
     };
 
-    try!(stream(query.into_msg(), host, port, fn_out, fn_prog, fn_meta));
+    try!(sonicd::stream(query, addr, fn_out, fn_prog, fn_meta));
 
     Ok(())
 
@@ -113,7 +129,7 @@ fn _main(args: Args) -> Result<()> {
     arg_var, flag_file, flag_c, arg_source,
     cmd_login, flag_execute, flag_version, .. } = args;
 
-    let ClientConfig { sonicd, http_port, tcp_port, sources, auth } = if flag_c != "" {
+    let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
         try!(read_config(&PathBuf::from(flag_c)))
     } else {
@@ -128,13 +144,13 @@ fn _main(args: Args) -> Result<()> {
         let injected = try!(inject_vars(&query_str, &split));
         let query = try!(build(arg_source, sources, auth, injected));
 
-        run(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
+        exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
     } else if flag_execute {
 
         let query = try!(build(arg_source, sources, auth, arg_query));
 
-        run(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
+        exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
     } else if cmd_login {
 
@@ -142,11 +158,9 @@ fn _main(args: Args) -> Result<()> {
 
     } else if flag_version{
 
-        let server_v = try!(version(&sonicd, &http_port));
-        println!("sonic cli version {} ({}); server version {}",
+        println!("Sonic CLI version {} ({})",
         VERSION,
-        COMMIT.unwrap_or_else(|| "dev"),
-        server_v);
+        COMMIT.unwrap_or_else(|| "dev"));
 
         Ok(())
 

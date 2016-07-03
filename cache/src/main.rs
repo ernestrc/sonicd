@@ -45,6 +45,29 @@ macro_rules! perror {
     }}
 }
 
+macro_rules! eagain {
+	($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+		let mut res = None;
+		loop {
+			match $syscall($arg1, $arg2) {
+				Err(nix::Error::Sys(a@nix::Errno::EAGAIN)) => {
+					debug!("{}: {}", $name, a);
+					continue;
+				},
+				Ok(m) => {
+					res = Some(m);
+					break;
+				}
+				Err(e) => {
+					perror!(format!("{}", $name))(e);
+					break;
+				}
+			}
+		}
+		res
+	}}
+}
+
 lazy_static! {
     static ref NO_INTEREST: EpollEvent = {
         EpollEvent {

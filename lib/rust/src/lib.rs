@@ -16,11 +16,13 @@ mod error;
 mod model;
 #[macro_use] mod io;
 
-pub mod tcp;
+pub mod net;
 #[cfg(feature="websocket")]
 pub mod ws;
 
-pub use api::{run, version, stream, authenticate};
-pub use model::{Query, SonicMessage};
+pub use api::{run, stream, authenticate};
+pub use model::{Authenticate, Log, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};
+pub use model::protocol::SonicMessage;
+pub use error::{Result, Error, ErrorKind};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");

@@ -1,4 +1,3 @@
-use sonicd::{Query, Result, Error, authenticate};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::process::Command;
@@ -10,11 +9,15 @@ use std::path::PathBuf;
 use serde_json::Value;
 use regex::Regex;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::fmt::Display;
+use super::{Result, ErrorKind};
+
+static DEFAULT_EDITOR: &'static str = "vim";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientConfig {
     pub sonicd: String,
-    pub http_port: u16,
     pub tcp_port: u16,
     pub sources: BTreeMap<String, Value>,
     pub auth: Option<String>
@@ -24,7 +27,6 @@ impl ClientConfig {
     pub fn empty() -> ClientConfig {
         ClientConfig {
             sonicd: "0.0.0.0".to_string(),
-            http_port: 9111,
             tcp_port: 10001,
             sources: BTreeMap::new(),
             auth: None
@@ -32,7 +34,6 @@ impl ClientConfig {
     }
 }
 
-static DEFAULT_EDITOR: &'static str = "vim";
 
 fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
     let addr = try!(format!("{}:{}", addr, port).parse::<SocketAddr>());
@@ -40,43 +41,34 @@ fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
 }
 
 pub fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
-    parse_addr(addr, port).or_else(|_| {
-        ::std::net::lookup_host(&addr)
-            .map_err(|e| Error::GetAddr(e))
-            .and_then(|mut a| {
-                a.next()
-                    .unwrap()
-                    .map_err(|e| ErrorKind::IoError(e))
-                    .map(|a| SocketAddr::new(a.ip(), *port))
-            })
-    })
+    match parse_addr(addr, port) {
+        Ok(addr) => Ok(addr),
+        Err(_) => {
+            let mut lookup = try!(::std::net::lookup_host(&addr));
+            match lookup.next() {
+                Some(lr) => {
+                    let addr = try!(lr.map(|h| SocketAddr::new(h.ip(), *port)));
+                    Ok(addr)
+                }
+                None => Err(format!("unexpected error when looking up host {}", &addr).into()),
+            }
+        }
+    }
 }
 
-pub fn get_env_var(var: &'static str) -> Result<String> {
-
-    ::std::env::var(var).map_err(|e| {
-        Error::OtherError(format!("could not get env var {}: {}", var, e.to_string()))
-    })
-}
 
 fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
     debug!("overwriting or creating new configuration file with {:?}",
            config);
-    match OpenOptions::new().truncate(true).create(true).write(true).open(path) {
-        Ok(mut f) => {
-            let encoded = ::serde_json::to_string_pretty(config)
-                .map_err(|e| {
-                    format!("error when encoding JSON to config file: {}", e)
-                })
-            .unwrap();
-            f.write_all(encoded.as_bytes())
-                .map_err(|e| format!("error when writing to config file: {}", e))
-                .unwrap();
-            debug!("write success to config file {:?}", path);
-            Ok(())
-        }
-        Err(e) => Err(Error::OtherError(format!("write_config: {}", e.to_string()))),
-    }
+    let mut f = try!(OpenOptions::new().truncate(true).create(true).write(true).open(path));
+
+    let encoded = try!(::serde_json::to_string_pretty(config));
+
+    try!(f.write_all(encoded.as_bytes()));
+
+    debug!("write success to config file {:?}", path);
+
+    Ok(())
 }
 
 fn get_config_path() -> PathBuf {
@@ -86,30 +78,30 @@ fn get_config_path() -> PathBuf {
 }
 
 fn edit_file(path: &PathBuf) -> Result<String> {
-    let editor: String = get_env_var("EDITOR")
-        .unwrap_or_else(|_| DEFAULT_EDITOR.to_owned());
-    let mut cmd = Command::new(&editor);
 
-    try!(cmd.arg(path.to_str().unwrap())
-         .status()
-         .map_err(|e| Error::OtherError(format!("edit_file: {}", e.to_string()))));
+    let editor = option_env!("EDITOR").unwrap_or_else(|| DEFAULT_EDITOR);
 
-    let mut f = try!(OpenOptions::new().read(true).open(path)
-                     .map_err(|e| Error::OtherError(format!("open: {}", e))));
+    let mut cmd = Command::new(editor);
+
+    let path = try!(path.to_str().ok_or_else(|| format!("error checking for utf8 validity {:?}", &path)));
+
+    try!(cmd.arg(path).status());
+
+    let mut f = try!(OpenOptions::new().read(true).open(path));
+
     let mut body = String::new();
-    f.read_to_string(&mut body).unwrap();
+
+    try!(f.read_to_string(&mut body));
 
     Ok(body)
 }
 
 pub fn read_file_contents(path: &PathBuf) -> Result<String> {
 
-    let mut file = try!(File::open(&path).map_err(|e| {
-        Error::OtherError(format!("could not open file in '{:?}': {}", &path, e))
-    }));
+    let mut file = try!(File::open(&path));
     let mut contents = String::new();
-    try!(file.read_to_string(&mut contents)
-         .map_err(|e| Error::OtherError(format!("could not read file in '{:?}': {}", &path, e))));
+
+    try!(file.read_to_string(&mut contents));
 
     return Ok(contents);
 }
@@ -118,8 +110,9 @@ pub fn read_config(path: &PathBuf) -> Result<ClientConfig> {
 
     let contents = try!(read_file_contents(&path));
 
-    ::serde_json::from_str::<ClientConfig>(&contents.to_string())
-        .map_err(|e| Error::OtherError(format!("Could not deserialize config file: {}", e)))
+    let config = try!(::serde_json::from_str::<ClientConfig>(&contents.to_string()));
+
+    Ok(config)
 }
 
 
@@ -138,18 +131,18 @@ pub fn get_default_config() -> Result<ClientConfig> {
         _ => {
             let mut stdout = io::stdout();
             stdout.write(b"It looks like it's the first time you're using the sonic CLI. Let's configure a few things. Press any key to continue").unwrap();
-            stdout.flush().unwrap();
+            try!(stdout.flush());
             let mut input = String::new();
             match io::stdin().read_line(&mut input) {
                 Ok(_) => {
                     try!(write_config(&ClientConfig::empty(), &path));
                     let contents = try!(edit_file(&path));
                     let c: ClientConfig =
-                        ::serde_json::from_str(&contents).unwrap();
+                        try!(::serde_json::from_str(&contents));
                     println!("successfully saved configuration in $HOME/.sonicrc");
                     Ok(c)
                 }
-                Err(error) => Err(Error::OtherError(error.to_string())),
+                Err(error) => Err(error.into()),
             }
         }
     }
@@ -183,20 +176,18 @@ pub fn get_default_config() -> Result<ClientConfig> {
 pub fn split_key_value(vars: &Vec<String>) -> Result<Vec<(String, String)>> {
     debug!("parsing variables {:?}", vars);
     let mut m: Vec<(String, String)> = Vec::new();
-    for var in vars.iter() {
+    for var in vars.into_iter() {
         if var.contains("=") {
             let mut split = var.split("=");
-            m.push((split.next().unwrap().to_string(),
-            split.next().unwrap().to_string()));
+            let left = try!(split.next().ok_or_else(|| ErrorKind::InvalidFormat(var.clone(), "<key>=<value>".to_owned())));
+            let right = try!(split.next().ok_or_else(|| ErrorKind::InvalidFormat(var.clone(), "<key>=<value>".to_owned())));
+            m.push((left.to_owned(), right.to_owned()));
         } else {
-            return Err(Error::OtherError(format!("Cannot split {}. It should follow format \
-                                               'key=value'",
-                                               var)));
+            let err = format!("Cannot split. It should follow format 'key=value'");
+            return Err(ErrorKind::InvalidFormat(var.clone(), err).into());
         }
     }
-    debug!("Successfully parsed parsed variables {:?} into {:?}",
-           vars,
-           &m);
+    debug!("Successfully parsed parsed variables {:?} into {:?}", vars, &m);
     return Ok(m);
 }
 
@@ -240,7 +231,7 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
     for var in vars.iter() {
         let k = "${".to_string() + &var.0 + "}";
         if !q.contains(&k) {
-            return Err(Error::OtherError(format!("{} not found in template", k)));
+            return Err(ErrorKind::InvalidFormat(k, "not found in template".to_owned()).into());
         } else {
             q = q.replace(&k, &var.1);
         }
@@ -251,13 +242,14 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
     // check if some variables were left un-injected
     let re = Regex::new(r"(\$\{.*\})").unwrap();
     if re.is_match(&q) {
-        Err(Error::OtherError("Some variables remain uninjected".to_string()))
+        Err("Some variables remain uninjected".into())
     } else {
         Ok(q)
     }
 }
 
-pub fn build(alias: String, mut sources: BTreeMap<String, Value>, auth: Option<String>, raw_query: String) -> Result<Query> {
+pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
+             auth: Option<String>, raw_query: String) -> Result<::sonicd::Query> {
 
     let clean = sources.remove(&alias);
 
@@ -265,11 +257,11 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>, auth: Option<S
         Some(o@Value::Object(_)) => o,
         None => Value::String(alias),
         _ => {
-            return Err(Error::OtherError(format!("source '{}' config is not an object", &alias)));
+            return Err(format!("source '{}' config is not an object", &alias).into());
         },
     };
 
-    let query = Query {
+    let query = ::sonicd::Query {
         id: None,
         trace_id: None,
         auth: auth,
@@ -282,27 +274,26 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>, auth: Option<S
 
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
-    let user: String = try!(get_env_var("USER"));
+    let user = option_env!("USER").unwrap_or_else(|| "unknown user");
 
-    try!(io::stdout().write(b"Enter key: ")
-         .map_err(|e| Error::OtherError(e.to_string())));
+    try!(io::stdout().write(b"Enter key: "));
 
-    io::stdout().flush().unwrap();
+    try!(io::stdout().flush());
 
     let mut key = String::new();
 
-    match io::stdin().read_line(&mut key) {
-        Ok(_) => {
-            let token = try!(authenticate(user, key.trim().to_owned(), host, tcp_port));
-            let path = get_config_path();
-            let config = try!(read_config(&path));
+    try!(io::stdin().read_line(&mut key));
 
-            let new_config = ClientConfig { auth: Some(token), ..config };
-            try!(write_config(&new_config, &path));
+    let addr = try!(get_addr(host, tcp_port));
 
-            println!("OK");
-            Ok(())
-        },
-        Err(e) => Err(Error::OtherError(e.to_string())),
-    }
+    let token = try!(::sonicd::authenticate(user.to_owned(), key.trim().to_owned(), addr, None));
+    let path = get_config_path();
+    let config = try!(read_config(&path));
+
+    let new_config = ClientConfig { auth: Some(token), ..config };
+
+    try!(write_config(&new_config, &path));
+
+    println!("OK");
+    Ok(())
 }

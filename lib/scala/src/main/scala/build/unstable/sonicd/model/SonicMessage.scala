@@ -57,10 +57,11 @@ object OutputChunk {
   def apply[T: JsonWriter](data: Vector[T]): OutputChunk = OutputChunk(JsArray(data.map(_.toJson)))
 }
 
-case class QueryProgress(progress: Option[Double], output: Option[String]) extends SonicMessage {
+case class QueryProgress(progress: Double, total: Option[Double], unit: Option[String]) extends SonicMessage {
   val payload: Option[JsValue] = Some(JsObject(Map(
-    "progress" → progress.map(JsNumber.apply).getOrElse(JsNull),
-    "output" → output.map(JsString.apply).getOrElse(JsNull)
+    "p" → JsNumber(progress),
+    "t" → total.map(JsNumber.apply).getOrElse(JsNull),
+    "u" → unit.map(JsString.apply).getOrElse(JsNull)
   )))
   val variation = None
   override val eventType = SonicMessage.progress
@@ -162,9 +163,10 @@ object SonicMessage {
           case a ⇒ throw new Exception(s"expecting JsArray found $a")
         }
       case Some(`progress`) ⇒
-        QueryProgress(
-          Try(pay.get.asJsObject.fields.get("progress").map(_.convertTo[Double])).toOption.flatten,
-          Try(pay.get.asJsObject.fields.get("output").map(_.convertTo[String])).toOption.flatten
+        val fields = pay.get.asJsObject.fields
+        QueryProgress(fields("p").convertTo[Double],
+          Try(fields.get("t").map(_.convertTo[Double])).toOption.flatten,
+          Try(fields.get("u").map(_.convertTo[String])).toOption.flatten
         )
       case Some(`query`) ⇒
         val p = pay.get.asJsObject.fields

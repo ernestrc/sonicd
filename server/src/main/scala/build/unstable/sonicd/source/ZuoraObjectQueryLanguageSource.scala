@@ -130,7 +130,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef,
         self ! DoneWithQueryExecution.success
       } else {
         val percPerBatch = 100.0 * effectiveBatchSize / totalSize
-        buffer.enqueue(QueryProgress(Some(percPerBatch), Some(s"querying for $effectiveBatchSize more objects")))
+        buffer.enqueue(QueryProgress(percPerBatch, Some(100), Some(s"querying for $effectiveBatchSize more objects")))
 
         //query-ahead
         if (buffer.size < effectiveBatchSize * 5) {
