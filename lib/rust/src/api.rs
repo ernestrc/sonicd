@@ -1,7 +1,6 @@
 use model::*;
 use model::protocol::{SonicMessage, MessageKind};
 use error::{ErrorKind, Result};
-use curl::easy::Easy;
 use net;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;

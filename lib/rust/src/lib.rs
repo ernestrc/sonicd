@@ -2,7 +2,6 @@
 #![plugin(serde_macros)]
 extern crate serde;
 extern crate serde_json;
-extern crate curl;
 extern crate nix;
 extern crate byteorder;
 #[macro_use] extern crate error_chain;
@@ -14,9 +13,9 @@ extern crate ws as libws;
 mod api;
 mod error;
 mod model;
+pub mod net;
 #[macro_use] mod io;
 
-pub mod net;
 #[cfg(feature="websocket")]
 pub mod ws;
 

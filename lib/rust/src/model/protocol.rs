@@ -70,27 +70,27 @@ impl SonicMessage {
 
 impl From<Query> for SonicMessage {
     fn from(msg: Query) -> Self {
+        let Query { config, query, auth, trace_id, .. } = msg;
         let mut payload = BTreeMap::new();
 
-        payload.insert("config".to_owned(), msg.config.clone());
+        payload.insert("config".to_owned(), config);
         payload.insert("auth".to_owned(),
-                       msg.auth.clone().map(|s| Value::String(s)).unwrap_or_else(|| Value::Null));
+                       auth.map(|s| Value::String(s))
+                           .unwrap_or_else(|| Value::Null));
         payload.insert("trace_id".to_owned(),
-                       msg.trace_id
-                           .clone()
-                           .map(|s| Value::String(s))
+                       trace_id.map(|s| Value::String(s))
                            .unwrap_or_else(|| Value::Null));
 
         SonicMessage {
             event_type: MessageKind::QueryKind,
-            variation: Some(msg.query),
+            variation: Some(query),
             payload: Some(Value::Object(payload)),
         }
     }
 }
 
 impl From<Acknowledge> for SonicMessage {
-    fn from(msg: Acknowledge) -> Self {
+    fn from(_: Acknowledge) -> Self {
         SonicMessage {
             event_type: MessageKind::AcknowledgeKind,
             variation: None,
