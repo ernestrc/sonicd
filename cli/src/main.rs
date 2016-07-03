@@ -81,6 +81,9 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
     let mut pb: ProgressBar = ProgressBar::new(100);
     pb.format("╢░░_╟");
+    pb.tick_format("▏▎▍▌▋▊▉██▉▊▋▌▍▎▏");
+    pb.show_message = true;
+    pb.inc();
 
     let fn_out = |msg: sonicd::OutputChunk| {
         println!("{}", msg.0.iter().fold(String::new(), |acc, x| {
@@ -89,7 +92,7 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
     };
 
     let fn_meta = |msg: sonicd::TypeMetadata| {
-        debug!("received type metadata: {:?}", msg);
+        info!("received type metadata: {:?}", msg);
         if !rows_only {
             println!("{}", msg.0.iter().fold(String::new(), |acc, col| {
                 format!("{}{:?}\t", acc, col.0)
@@ -105,14 +108,20 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
             let pi = msg.progress;
 
-            if let Some(total) = msg.total {
-                pb = ProgressBar::new(total as u64);
-            }
+            //if let Some(msg) = msg.message {
+                pb.message("jrkewljrweklwjrelkwer ");
+            //}
+
+            //if let Some(total) = msg.total {
+            //    pb = ProgressBar::new(total as u64);
+            //}
 
             if pi >= 99.0 {
                 pb.finish();
             } else if pi >= 1.0 {
                 pb.add(pi as u64);
+            } else {
+                pb.tick();
             };
         }
     };
