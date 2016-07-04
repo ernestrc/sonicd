@@ -8,10 +8,20 @@ pub struct Acknowledge;
 #[derive(Debug)]
 pub struct TypeMetadata(pub Vec<(String, Value)>);
 
+#[derive(Debug)]
+pub enum QueryStatus {
+    Queued,
+    Started,
+    Running,
+    Waiting,
+}
+
+#[derive(Debug)]
 pub struct QueryProgress {
+    pub status: QueryStatus,
     pub progress: f64,
     pub total: Option<f64>,
-    pub unit: Option<String>,
+    pub units: Option<String>,
 }
 
 #[derive(Debug)]

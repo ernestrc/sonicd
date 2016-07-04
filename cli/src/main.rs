@@ -7,6 +7,7 @@ extern crate regex;
 extern crate docopt;
 extern crate rustc_serialize;
 extern crate env_logger;
+extern crate ansi_term;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate log;
 #[macro_use] extern crate sonicd;
@@ -14,10 +15,12 @@ extern crate env_logger;
 mod util;
 
 use std::path::PathBuf;
+use ansi_term::Colour::Red;
 use pbr::ProgressBar;
 use util::*;
 use std::process;
-use std::io::{Write, self};
+use std::io::{Write};
+use ::std::io::{Stderr, stderr};
 
 docopt!(Args derive Debug, "
 .
@@ -79,57 +82,56 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
     let addr = try!(get_addr(host, port));
 
-    let mut pb: ProgressBar = ProgressBar::new(100);
+    let mut pb: ProgressBar<Stderr> = ProgressBar::new(stderr(), 100);
     pb.format("╢░░_╟");
-    pb.tick_format("▏▎▍▌▋▊▉██▉▊▋▌▍▎▏");
+    pb.tick_format("▀▐▄▌");
     pb.show_message = true;
-    pb.inc();
 
-    let fn_out = |msg: sonicd::OutputChunk| {
-        println!("{}", msg.0.iter().fold(String::new(), |acc, x| {
-            format!("{}{:?}\t",acc, x)
-        }).trim_right());
-    };
-
-    let fn_meta = |msg: sonicd::TypeMetadata| {
-        info!("received type metadata: {:?}", msg);
-        if !rows_only {
-            println!("{}", msg.0.iter().fold(String::new(), |acc, col| {
-                format!("{}{:?}\t", acc, col.0)
+    let res = {
+        let fn_out = |msg: sonicd::OutputChunk| {
+            println!("{}", msg.0.iter().fold(String::new(), |acc, x| {
+                format!("{}{:?}\t",acc, x)
             }).trim_right());
-        }
+        };
+
+        let fn_meta = |msg: sonicd::TypeMetadata| {
+            info!("received type metadata: {:?}", msg);
+            if !rows_only {
+                println!("{}", msg.0.iter().fold(String::new(), |acc, col| {
+                    format!("{}{:?}\t", acc, col.0)
+                }).trim_right());
+            }
+        };
+
+        let fn_prog = |msg: sonicd::QueryProgress| {
+            if !silent {
+                let sonicd::QueryProgress { total, progress, status, ..} = msg;
+
+                pb.message(&format!("{:?} ", status));
+
+                if let Some(total) = total {
+                    pb.total = total as u64;
+                }
+
+                if progress >= 1.0 {
+                    pb.add(progress as u64);
+                } else {
+                    pb.tick();
+                };
+            }
+        };
+
+        sonicd::stream(query, addr, fn_out, fn_prog, fn_meta)
     };
 
-    let fn_prog = |msg: sonicd::QueryProgress| {
-        if !silent {
-            // FIXME figure out what to do with `unit` and `total`
-            // new progress bar should now happen until
-            // we have a total
-
-            let pi = msg.progress;
-
-            //if let Some(msg) = msg.message {
-                pb.message("jrkewljrweklwjrelkwer ");
-            //}
-
-            //if let Some(total) = msg.total {
-            //    pb = ProgressBar::new(total as u64);
-            //}
-
-            if pi >= 99.0 {
-                pb.finish();
-            } else if pi >= 1.0 {
-                pb.add(pi as u64);
-            } else {
-                pb.tick();
-            };
-        }
-    };
-
-    try!(sonicd::stream(query, addr, fn_out, fn_prog, fn_meta));
-
+    if let Ok(_) = res {
+        pb.message("Done ");
+    } else {
+        pb.message("Error ");
+    }
+    pb.finish();
+    try!(res);
     Ok(())
-
 }
 
 fn _main(args: Args) -> Result<()> {
@@ -190,8 +192,18 @@ fn main() {
 
     match _main(args) {
         Ok(_) => {},
-        Err(r) =>  {
-            io::stderr().write(&format!("{}", r).as_bytes()).unwrap();
+        Err(Error(ErrorKind::SonicdError(sonicd::ErrorKind::QueryError(msg)), _)) =>  {
+            stderr()
+                .write(&format!("\n{} {}",
+                                Red.paint("error:"), msg).as_bytes()).unwrap();
+            stderr().flush().unwrap();
+            process::exit(1)
+        },
+        Err(Error(kind, stacktrace)) =>  {
+            stderr()
+                .write(&format!("\n{} {}\n{:?}",
+                                Red.paint("error:"), kind, stacktrace).as_bytes()).unwrap();
+            stderr().flush().unwrap();
             process::exit(1)
         }
     }

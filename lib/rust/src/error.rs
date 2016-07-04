@@ -25,7 +25,7 @@ error_chain! {
                 display("{}", msg)
         }
 
-        Proto(msg: &'static str) {
+        Proto(msg: String) {
             description("Sonicd protocol error")
                 display("Sonicd protocol error: {}: lib is v.{}", msg, super::VERSION)
         }

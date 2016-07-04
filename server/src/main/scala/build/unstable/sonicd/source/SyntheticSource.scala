@@ -62,7 +62,7 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
     if (totalDemand > 0L && isActive) {
       if (streamed < preTarget) {
         Thread.sleep(progressWait)
-        onNext(QueryProgress(1, Some(100), None))
+        onNext(QueryProgress(QueryProgress.Running, 1, Some(100), Some("%")))
         streamed += 1
         progress(demand - 1L)
       } else {

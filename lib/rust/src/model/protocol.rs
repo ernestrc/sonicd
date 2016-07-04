@@ -17,8 +17,6 @@ pub enum MessageKind {
     TypeMetadataKind,
     #[serde(rename="P")]
     ProgressKind,
-    #[serde(rename="L")]
-    LogKind,
     #[serde(rename="O")]
     OutputKind,
     #[serde(rename="D")]
@@ -129,23 +127,13 @@ impl From<QueryProgress> for SonicMessage {
 
         payload.insert("p".to_owned(), Value::F64(msg.progress));
 
-        msg.unit.map(|u| payload.insert("u".to_owned(), Value::String(u)));
+        msg.units.map(|u| payload.insert("u".to_owned(), Value::String(u)));
         msg.total.map(|t| payload.insert("t".to_owned(), Value::F64(t)));
 
         SonicMessage {
             event_type: MessageKind::ProgressKind,
             variation: None,
             payload: Some(Value::Object(payload)),
-        }
-    }
-}
-
-impl From<Log> for SonicMessage {
-    fn from(msg: Log) -> Self {
-        SonicMessage {
-            event_type: MessageKind::LogKind,
-            variation: Some(msg.0),
-            payload: None,
         }
     }
 }
@@ -173,7 +161,7 @@ impl From<Done> for SonicMessage {
 fn get_payload(payload: Option<Value>) -> Result<BTreeMap<String, Value>> {
     match payload {
         Some(Value::Object(p)) => Ok(p),
-        _ => try!(Err(ErrorKind::Proto("msg payload is empty"))),
+        _ => try!(Err(ErrorKind::Proto("msg payload is empty".to_owned()))),
     }
 }
 
@@ -182,7 +170,7 @@ pub trait SonicMessageLike<T: From<T>> {
 }
 
 impl SonicMessageLike<Acknowledge> for Acknowledge {
-    fn from(msg: SonicMessage) -> Result<Acknowledge> {
+    fn from(_: SonicMessage) -> Result<Acknowledge> {
         Ok(Acknowledge)
     }
 }
@@ -192,10 +180,10 @@ impl SonicMessageLike<Authenticate> for Authenticate {
         let payload = try!(get_payload(msg.payload));
         let user = try!(payload.get("user")
             .and_then(|s| s.as_string().map(|s| s.to_owned()))
-            .ok_or_else(|| ErrorKind::Proto("missing user field in payload")));
+            .ok_or_else(|| ErrorKind::Proto("missing user field in payload".to_owned())));
         let key = try!(payload.get("key")
             .and_then(|s| s.as_string().map(|s| s.to_owned()))
-            .ok_or_else(|| ErrorKind::Proto("missing key field in payload")));
+            .ok_or_else(|| ErrorKind::Proto("missing key field in payload".to_owned())));
         let trace_id = payload.get("trace_id").and_then(|s| s.as_string().map(|s| s.to_owned()));
 
         Ok(Authenticate {
@@ -208,7 +196,8 @@ impl SonicMessageLike<Authenticate> for Authenticate {
 
 impl SonicMessageLike<TypeMetadata> for TypeMetadata {
     fn from(msg: SonicMessage) -> Result<TypeMetadata> {
-        let payload = try!(msg.payload.ok_or_else(|| ErrorKind::Proto("msg payload is empty")));
+        let payload = try!(msg.payload
+            .ok_or_else(|| ErrorKind::Proto("msg payload is empty".to_owned())));
 
         let data = try!(::serde_json::from_value(payload));
         Ok(TypeMetadata(data))
@@ -218,24 +207,34 @@ impl SonicMessageLike<TypeMetadata> for TypeMetadata {
 impl SonicMessageLike<QueryProgress> for QueryProgress {
     fn from(msg: SonicMessage) -> Result<QueryProgress> {
         let payload = try!(get_payload(msg.payload));
+
         let total = payload.get("t").and_then(|s| s.as_f64());
+
+        let js = try!(payload.get("s")
+            .ok_or_else(|| ErrorKind::Proto("missing query status in payload".to_owned())));
+
+        let status = match js {
+            &Value::U64(0) => QueryStatus::Queued,
+            &Value::U64(1) => QueryStatus::Started,
+            &Value::U64(2) => QueryStatus::Running,
+            &Value::U64(3) => QueryStatus::Waiting,
+            s => {
+                return Err(ErrorKind::Proto(format!("unexpected query status {:?}", s)).into());
+            }
+        };
+
         let progress = try!(payload.get("p")
             .and_then(|s| s.as_f64())
-            .ok_or_else(|| ErrorKind::Proto("progress not found in payload")));
+            .ok_or_else(|| ErrorKind::Proto("progress not found in payload".to_owned())));
+
         let units = payload.get("u").and_then(|s| s.as_string().map(|s| s.to_owned()));
 
         Ok(QueryProgress {
             progress: progress,
+            status: status,
             total: total,
-            unit: units,
+            units: units,
         })
-    }
-}
-
-impl SonicMessageLike<Log> for Log {
-    fn from(msg: SonicMessage) -> Result<Log> {
-        let data = try!(msg.variation.ok_or_else(|| ErrorKind::Proto("msg variation is empty")));
-        Ok(Log(data))
     }
 }
 
@@ -243,7 +242,7 @@ impl SonicMessageLike<OutputChunk> for OutputChunk {
     fn from(msg: SonicMessage) -> Result<OutputChunk> {
         match msg.payload {
             Some(Value::Array(data)) => Ok(OutputChunk(data)),
-            _ => try!(Err(ErrorKind::Proto("payload is not an array"))),
+            s => try!(Err(ErrorKind::Proto(format!("payload is not an array: {:?}", s)))),
         }
     }
 }
@@ -265,11 +264,14 @@ impl SonicMessageLike<Query> for Query {
         let auth_token = payload.get("auth")
             .and_then(|a| a.as_string().map(|a| a.to_owned()));
 
-        let query = try!(msg.variation.ok_or_else(|| ErrorKind::Proto("msg variation is empty")));
+        let query = try!(msg.variation
+            .ok_or_else(|| ErrorKind::Proto("msg variation is empty".to_owned())));
 
         let config = try!(payload.get("config")
             .map(|c| c.to_owned())
-            .ok_or_else(|| ErrorKind::Proto("missing 'config' in query message payload")));
+            .ok_or_else(|| {
+                ErrorKind::Proto("missing 'config' in query message payload".to_owned())
+            }));
 
         Ok(Query {
             id: None,

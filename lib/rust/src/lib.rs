@@ -1,4 +1,4 @@
-#![feature(custom_derive, plugin, custom_attribute, box_syntax, lookup_host)]
+#![feature(custom_derive, plugin, custom_attribute, box_syntax)]
 #![plugin(serde_macros)]
 extern crate serde;
 extern crate serde_json;

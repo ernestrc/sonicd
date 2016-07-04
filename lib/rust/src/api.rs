@@ -59,7 +59,6 @@ pub fn stream<C, O, P, M>(command: C,
         match msg.event_type {
             MessageKind::OutputKind => output(try!(msg.into())),
             MessageKind::ProgressKind => progress(try!(msg.into())),
-            MessageKind::LogKind => info!("{}", try!(msg.into::<Log>()).0),
             MessageKind::TypeMetadataKind => metadata(try!(msg.into())),
             MessageKind::DoneKind => {
                 let d: Done = try!(msg.into());
@@ -106,9 +105,9 @@ pub fn authenticate(user: String,
     }
 
     let OutputChunk(data) =
-        try!(buf.into_iter().next().ok_or_else(|| ErrorKind::Proto("no messages returned")));
+        try!(buf.into_iter().next().ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
 
-    let x = try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty")));
-    let s = try!(x.as_string().ok_or_else(|| ErrorKind::Proto("token is not a string")));
+    let x = try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
+    let s = try!(x.as_string().ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
     Ok(s.to_owned())
 }

@@ -57,14 +57,24 @@ object OutputChunk {
   def apply[T: JsonWriter](data: Vector[T]): OutputChunk = OutputChunk(JsArray(data.map(_.toJson)))
 }
 
-case class QueryProgress(progress: Double, total: Option[Double], unit: Option[String]) extends SonicMessage {
+case class QueryProgress(status: QueryProgress.Status, progress: Double,
+                         total: Option[Double], units: Option[String]) extends SonicMessage {
   val payload: Option[JsValue] = Some(JsObject(Map(
     "p" → JsNumber(progress),
+    "s" → JsNumber(status),
     "t" → total.map(JsNumber.apply).getOrElse(JsNull),
-    "u" → unit.map(JsString.apply).getOrElse(JsNull)
+    "u" → units.map(JsString.apply).getOrElse(JsNull)
   )))
   val variation = None
   override val eventType = SonicMessage.progress
+}
+
+object QueryProgress {
+  type Status = Int
+  val Queued = 0
+  val Started = 1
+  val Running = 2
+  val Waiting = 3
 }
 
 case class DoneWithQueryExecution(error: Option[Throwable] = None) extends SonicMessage {
@@ -88,12 +98,6 @@ case object ClientAcknowledge extends SonicMessage {
   override val variation: Option[String] = None
   override val payload: Option[JsValue] = None
   override val eventType: String = SonicMessage.ack
-}
-
-case class Log(message: String) extends SonicMessage {
-  override val variation: Option[String] = Some(message)
-  override val payload: Option[JsValue] = None
-  override val eventType: String = SonicMessage.log
 }
 
 sealed trait SonicCommand extends SonicMessage {
@@ -129,7 +133,6 @@ object SonicMessage {
   val query = "Q"
   val meta = "T"
   val progress = "P"
-  val log = "L"
   val out = "O"
   val ack = "A"
   val done = "D"
@@ -155,7 +158,6 @@ object SonicMessage {
           fields("user").convertTo[String],
           vari.get,
           fields.get("trace_id").flatMap(_.convertTo[Option[String]]))
-      case Some(`log`) ⇒ Log(vari.get)
       case Some(`meta`) ⇒
         pay match {
           case Some(d: JsArray) ⇒ TypeMetadata(d.convertTo[Vector[(String, JsValue)]])
@@ -164,7 +166,9 @@ object SonicMessage {
         }
       case Some(`progress`) ⇒
         val fields = pay.get.asJsObject.fields
-        QueryProgress(fields("p").convertTo[Double],
+        QueryProgress(
+          fields("s").convertTo[Int],
+          fields("p").convertTo[Double],
           Try(fields.get("t").map(_.convertTo[Double])).toOption.flatten,
           Try(fields.get("u").map(_.convertTo[String])).toOption.flatten
         )
