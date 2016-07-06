@@ -1,6 +1,6 @@
 [package]
 name = "sonicd"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 description = "client library for Sonicd, a data streaming gateway"
 license-file = "LICENSE"
@@ -28,10 +28,10 @@ path = "cli/src/main.rs"
 
 [dependencies]
 serde = "0.7.11"
-serde_json = "0.7.3"
+error-chain = "0.1.12"
+serde_json = { git = "https://github.com/serde-rs/json.git" }
 serde_macros = "0.7.11"
 byteorder = "0.5.3"
-curl = "0.3.0"
 nix = "0.6.0"
 log = "0.3.6"
 
@@ -40,10 +40,12 @@ regex = "0.1.71"
 docopt = "0.6.81"
 docopt_macros = "0.6.84"
 rustc-serialize = "0.3.19"
-pbr =  "0.2.1"
 env_logger = "0.3.3"
-
+ansi_term = "0.7"
 ws = { version =  "0.5.0", optional = true }
+
+pbr = { git = "https://github.com/ernestrc/pb.git" }
+
 
 # FIXME cache for now separate toml until
 # https://github.com/rust-lang/cargo/pull/2325

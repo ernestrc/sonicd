@@ -80,7 +80,7 @@ class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll
     "fail if upstream connection closes before Done event" in {
       val tcpFlow: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
         Flow.fromSinkAndSource[ByteString, ByteString](
-        Sink.ignore, Source.single(SonicdSource.lengthPrefixEncode(QueryProgress(Some(100), None).toBytes)))
+        Sink.ignore, Source.single(SonicdSource.lengthPrefixEncode(QueryProgress(QueryProgress.Started, 1, Some(100), None).toBytes)))
           .mapMaterializedValue(_ ⇒ Future.successful(
             Tcp.OutgoingConnection(new InetSocketAddress(1), new InetSocketAddress(2))))
 

@@ -8,6 +8,7 @@ pub struct WsHandler {
     count: Rc<Cell<u32>>,
 }
 
+// TODO this is WIP for cache
 impl WsHandler {
     pub fn new(out: Sender, count: Rc<Cell<u32>>) -> WsHandler {
         WsHandler {
