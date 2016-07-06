@@ -39,7 +39,7 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def expectProgress(wsHandler: ActorRef): Unit = {
-    val prog = QueryProgress(Some(100.0), None)
+    val prog = QueryProgress(QueryProgress.Running, 1, Some(100.0), None)
     wsHandler ! prog
     expectMsg(prog)
   }
@@ -186,7 +186,7 @@ with ImplicitSubscriber with ImplicitGuardian {
 
       msgs.head shouldBe an[TypeMetadata]
       val (progress, tail) = msgs.tail.splitAt(100)
-      progress.tail.foreach(_ shouldBe QueryProgress(Some(1), None))
+      progress.tail.foreach(_ shouldBe QueryProgress(QueryProgress.Running, 1, Some(100), Some("%")))
       tail.head shouldBe a[OutputChunk]
       tail.tail.head shouldBe a[DoneWithQueryExecution]
 

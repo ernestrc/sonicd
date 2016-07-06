@@ -92,7 +92,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   def progressFlowNoAck(tcpHandler: ActorRef): Tcp.Write = {
-    val prog = QueryProgress(Some(100), None)
+    val prog = QueryProgress(QueryProgress.Started, 1, Some(100), None)
     val ack = TcpHandler.Ack(1)
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(prog.toBytes), ack)
     tcpHandler ! prog
@@ -277,7 +277,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     msgs.head shouldBe an[TypeMetadata]
     val (progress, tail) = msgs.tail.splitAt(100)
-    progress.tail.foreach(_ shouldBe QueryProgress(Some(1), None))
+    progress.tail.foreach(_ shouldBe QueryProgress(QueryProgress.Running, 1, Some(100), Some("%")))
     tail.head shouldBe a[OutputChunk]
     tail.tail.head shouldBe a[DoneWithQueryExecution]
 
@@ -359,7 +359,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   "should terminate if connection breaks before sending query" in {
 
-    val (controller, connection, tcpHandler) = newTestCase("_2", syntheticPubProps)
+    val (_, connection, tcpHandler) = newTestCase("_2", syntheticPubProps)
     watch(tcpHandler)
     connection ! PoisonPill
     expectTerminated(tcpHandler)
