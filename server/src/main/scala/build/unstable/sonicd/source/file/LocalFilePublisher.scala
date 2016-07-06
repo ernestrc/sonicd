@@ -212,7 +212,8 @@ trait LocalFilePublisher {
   final def common: Receive = {
     case Cancel ⇒
       debug(log, "client canceled")
-      onCompleteThenStop()
+      onComplete()
+      context.stop(self)
   }
 
   final def streaming(query: FileQuery): Receive = common orElse {

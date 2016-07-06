@@ -70,7 +70,7 @@ class FileWatcherSpec(_system: ActorSystem)
       expectMsg(FileWatcherWorker.DoWatch)
 
       proxy1 ! PoisonPill
-      Thread.sleep(300) //calling thread dispatcher is awesome but not enough
+      Thread.sleep(1000) //calling thread dispatcher is awesome but not enough
 
       watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
       expectMsg(pathEventModify)
@@ -78,7 +78,7 @@ class FileWatcherSpec(_system: ActorSystem)
       expectMsg(FileWatcherWorker.DoWatch)
 
       proxy2 ! PoisonPill
-      Thread.sleep(300)
+      Thread.sleep(1000)
 
       watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
       expectMsgAllOf(pathEventModify, FileWatcherWorker.DoWatch)

@@ -8,6 +8,7 @@ import java.nio.file.WatchEvent.Kind
 import java.nio.file._
 
 import akka.actor._
+import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonicd.model.JsonProtocol._
@@ -117,11 +118,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(Vector("test")))
 
-      //can't use cancel because subscriber is reused for other tests
-      //pub ! Cancel
-      pub ! PoisonPill
-      expectMsg("complete")
-      expectTerminated(pub, 3.seconds)
+      pub ! Cancel
+      expectTerminated(pub)
     }
 
     "fetch files" in {
@@ -157,8 +155,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
         pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY)
         expectNoMsg()
 
-        pub ! PoisonPill
-        expectMsg("complete")
+        pub ! Cancel
         expectTerminated(pub, 3.seconds)
       }
 
