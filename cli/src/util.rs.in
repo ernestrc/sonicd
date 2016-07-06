@@ -9,10 +9,8 @@ use std::path::PathBuf;
 use serde_json::Value;
 use regex::Regex;
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
-use std::fmt::Display;
-use super::{Result, ErrorKind};
-use super::ChainErr;
+use ansi_term::Colour::{Red, Yellow};
+use super::{ChainErr, Error, Result, ErrorKind};
 
 static DEFAULT_EDITOR: &'static str = "vim";
 
@@ -31,28 +29,6 @@ impl ClientConfig {
             tcp_port: 10001,
             sources: BTreeMap::new(),
             auth: None
-        }
-    }
-}
-
-
-fn parse_addr<T: Display>(addr: T, port: &u16) -> Result<SocketAddr> {
-    let addr = try!(format!("{}:{}", addr, port).parse::<SocketAddr>());
-    Ok(addr)
-}
-
-pub fn get_addr(addr: &str, port: &u16) -> Result<SocketAddr> {
-    match parse_addr(addr, port) {
-        Ok(addr) => Ok(addr),
-        Err(_) => {
-            let mut lookup = try!(::std::net::lookup_host(&addr));
-            match lookup.next() {
-                Some(lr) => {
-                    let addr = try!(lr.map(|h| SocketAddr::new(h.ip(), *port)));
-                    Ok(addr)
-                }
-                None => Err(format!("unexpected error when looking up host {}", &addr).into()),
-            }
         }
     }
 }
@@ -274,21 +250,33 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
     Ok(query)
 }
 
+pub fn report_error(e: &Error, show_backtrace: bool) {
+    let stderr = io::stderr();
+    let mut handle = stderr.lock();
+    handle.write(&format!("\n{} {}", Red.paint("error:"), e).as_bytes()).unwrap();
+
+    for e in e.iter().skip(1) {
+        handle.write(&format!("\n{} {}", Yellow.paint("caused_by:"), e).as_bytes()).unwrap();
+    }
+
+    if show_backtrace {
+        handle.write(&format!("\nbacktrace:\n{:?}", e.backtrace()).as_bytes()).unwrap();
+    }
+
+    handle.flush().unwrap();
+}
+
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     let user = option_env!("USER").unwrap_or_else(|| "unknown user");
 
     try!(io::stdout().write(b"Enter key: "));
-
     try!(io::stdout().flush());
 
     let mut key = String::new();
-
     try!(io::stdin().read_line(&mut key));
 
-    let addr = try!(get_addr(host, tcp_port));
-
-    let token = try!(::sonicd::authenticate(user.to_owned(), key.trim().to_owned(), addr, None));
+    let token = try!(::sonicd::authenticate(user.to_owned(), key.trim().to_owned(), (host, *tcp_port), None));
     let path = get_config_path();
     let config = try!(read_config(&path));
 

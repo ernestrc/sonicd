@@ -1,7 +1,5 @@
 use serde_json::Value;
 
-pub mod protocol;
-
 #[derive(Debug)]
 pub struct Acknowledge;
 
@@ -59,3 +57,11 @@ pub struct Authenticate {
 }
 
 impl Command for Authenticate {}
+
+pub mod protocol {
+    #[cfg(feature = "serde_macros")]
+    include!("protocol.rs.in");
+
+    #[cfg(not(feature = "serde_macros"))]
+    include!(concat!(env!("OUT_DIR"), "/protocol.rs"));
+}

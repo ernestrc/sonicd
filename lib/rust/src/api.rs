@@ -6,9 +6,9 @@ use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::io::Write;
 use std::fmt::Debug;
-use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 
-pub fn run(query: Query, addr: SocketAddr) -> Result<Vec<OutputChunk>> {
+pub fn run<A: ToSocketAddrs>(query: Query, addr: A) -> Result<Vec<OutputChunk>> {
 
     let mut buf = Vec::new();
 
@@ -23,19 +23,20 @@ pub fn run(query: Query, addr: SocketAddr) -> Result<Vec<OutputChunk>> {
     Ok(buf)
 }
 
-pub fn stream<C, O, P, M>(command: C,
-                          addr: SocketAddr,
-                          mut output: O,
-                          mut progress: P,
-                          mut metadata: M)
-                          -> Result<()>
+pub fn stream<C, O, P, M, A>(command: C,
+                             addr: A,
+                             mut output: O,
+                             mut progress: P,
+                             mut metadata: M)
+                             -> Result<()>
     where O: FnMut(OutputChunk) -> (),
           P: FnMut(QueryProgress) -> (),
           M: FnMut(TypeMetadata) -> (),
-          C: Command + Debug + Into<SonicMessage>
+          C: Command + Debug + Into<SonicMessage>,
+          A: ToSocketAddrs
 {
 
-    let mut stream = try!(TcpStream::connect(&addr));
+    let mut stream = try!(TcpStream::connect(addr));
 
     // set timeout 10s
     try!(stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))));
@@ -83,11 +84,11 @@ pub fn stream<C, O, P, M>(command: C,
     return res;
 }
 
-pub fn authenticate(user: String,
-                    key: String,
-                    addr: SocketAddr,
-                    trace_id: Option<String>)
-                    -> Result<String> {
+pub fn authenticate<A: ToSocketAddrs>(user: String,
+                                      key: String,
+                                      addr: A,
+                                      trace_id: Option<String>)
+                                      -> Result<String> {
 
     let auth = Authenticate {
         key: key,
@@ -104,10 +105,12 @@ pub fn authenticate(user: String,
         try!(stream(auth, addr, fn_buf, |_| {}, |_| {}));
     }
 
-    let OutputChunk(data) =
-        try!(buf.into_iter().next().ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
+    let OutputChunk(data) = try!(buf.into_iter()
+        .next()
+        .ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
 
-    let x = try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
-    let s = try!(x.as_string().ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
+    let x =
+        try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
+    let s = try!(x.as_str().ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
     Ok(s.to_owned())
 }

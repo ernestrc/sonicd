@@ -8,15 +8,19 @@ documentation = "http://sonicd.unstable.build/rustdoc"
 homepage = "http://sonicd.unstable.build"
 repository = "https://github.com/xarxa6/sonicd"
 include = [
-  "lib/rust/**/*.rs",
-  "cli/**/*.rs",
+  "lib/rust/**/*.rs*",
+  "cli/**/*.rs*",
   "Cargo.toml",
+  "build.rs",
   "Cargo.lock"
 ]
+build = "build.rs"
 
 [features]
 # cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
 websocket = ["ws"]
+default = ["serde_codegen"]
+nightly = ["serde_macros"]
 
 [lib]
 name = "sonicd"
@@ -26,11 +30,15 @@ path = "lib/rust/src/lib.rs"
 name = "sonic"
 path = "cli/src/main.rs"
 
+[build-dependencies]
+serde_codegen = { version = "*", optional = true }
+syntex = "*"
+
 [dependencies]
 serde = "0.7.11"
 error-chain = "0.1.12"
 serde_json = { git = "https://github.com/serde-rs/json.git" }
-serde_macros = "0.7.11"
+serde_macros = { version = "0.7.11", optional = true }
 byteorder = "0.5.3"
 nix = "0.6.0"
 log = "0.3.6"
@@ -38,7 +46,6 @@ log = "0.3.6"
 # cli
 regex = "0.1.71"
 docopt = "0.6.81"
-docopt_macros = "0.6.84"
 rustc-serialize = "0.3.19"
 env_logger = "0.3.3"
 ansi_term = "0.7"

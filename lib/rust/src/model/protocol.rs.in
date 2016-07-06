@@ -179,12 +179,12 @@ impl SonicMessageLike<Authenticate> for Authenticate {
     fn from(msg: SonicMessage) -> Result<Authenticate> {
         let payload = try!(get_payload(msg.payload));
         let user = try!(payload.get("user")
-            .and_then(|s| s.as_string().map(|s| s.to_owned()))
+            .and_then(|s| s.as_str().map(|s| s.to_owned()))
             .ok_or_else(|| ErrorKind::Proto("missing user field in payload".to_owned())));
         let key = try!(payload.get("key")
-            .and_then(|s| s.as_string().map(|s| s.to_owned()))
+            .and_then(|s| s.as_str().map(|s| s.to_owned()))
             .ok_or_else(|| ErrorKind::Proto("missing key field in payload".to_owned())));
-        let trace_id = payload.get("trace_id").and_then(|s| s.as_string().map(|s| s.to_owned()));
+        let trace_id = payload.get("trace_id").and_then(|s| s.as_str().map(|s| s.to_owned()));
 
         Ok(Authenticate {
             user: user,
@@ -228,7 +228,7 @@ impl SonicMessageLike<QueryProgress> for QueryProgress {
             .and_then(|s| s.as_f64())
             .ok_or_else(|| ErrorKind::Proto("progress not found in payload".to_owned())));
 
-        let units = payload.get("u").and_then(|s| s.as_string().map(|s| s.to_owned()));
+        let units = payload.get("u").and_then(|s| s.as_str().map(|s| s.to_owned()));
 
         Ok(QueryProgress {
             progress: progress,
@@ -260,10 +260,10 @@ impl SonicMessageLike<Query> for Query {
         let payload = try!(get_payload(msg.payload));
 
         let trace_id = payload.get("trace_id")
-            .and_then(|t| t.as_string().map(|t| t.to_owned()));
+            .and_then(|t| t.as_str().map(|t| t.to_owned()));
 
         let auth_token = payload.get("auth")
-            .and_then(|a| a.as_string().map(|a| a.to_owned()));
+            .and_then(|a| a.as_str().map(|a| a.to_owned()));
 
         let query = try!(msg.variation
             .ok_or_else(|| ErrorKind::Proto("msg variation is empty".to_owned())));

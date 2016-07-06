@@ -23,7 +23,7 @@ docker run -d -p 9111:9111 -p 10001:10001 -v ${CONFIG_DIR}:/etc/sonicd/ -v ${JDB
 ```
 
 # Install CLI
-If you have the rust toolchain installed already, then simply `cargo install sonicd`, otherwise install rustup with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/) - the CLI uses several compiler plugins that are only enabled in the nightly version of rust, so we'll need a specific nightly version. Execute `cd cli && rustup override set nightly-2016-06-23 && cargo build --release`. You will find the binary inside `cli/target/release`.
+If you have the rust toolchain installed already, then simply `cargo install sonicd`, otherwise install rustup first with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/).
 
 # Examples
 Check [examples](examples) folder. For an example in Rust check the [cli](cli).

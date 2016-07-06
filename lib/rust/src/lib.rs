@@ -1,5 +1,5 @@
-#![feature(custom_derive, plugin, custom_attribute, box_syntax)]
-#![plugin(serde_macros)]
+#![cfg_attr(feature = "serde_macros", feature(custom_derive, plugin))]
+#![cfg_attr(feature = "serde_macros", plugin(serde_macros))]
 extern crate serde;
 extern crate serde_json;
 extern crate nix;
@@ -14,7 +14,7 @@ mod api;
 mod error;
 mod model;
 pub mod net;
-#[macro_use] mod io;
+#[macro_use] pub mod io;
 
 #[cfg(feature="websocket")]
 pub mod ws;

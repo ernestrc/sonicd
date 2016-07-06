@@ -1,5 +1,3 @@
-#![feature(custom_derive, plugin, custom_attribute, box_syntax, lookup_host)]
-#![plugin(docopt_macros, serde_macros)]
 extern crate serde_json;
 extern crate serde;
 extern crate pbr;
@@ -8,21 +6,29 @@ extern crate docopt;
 extern crate rustc_serialize;
 extern crate env_logger;
 extern crate ansi_term;
-#[macro_use] extern crate error_chain;
-#[macro_use] extern crate log;
-#[macro_use] extern crate sonicd;
+#[macro_use]
+extern crate error_chain;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate sonicd;
 
-mod util;
+mod util {
+    #[cfg(feature = "serde_macros")]
+    include!("util.rs.in");
+
+    #[cfg(not(feature = "serde_macros"))]
+    include!(concat!(env!("OUT_DIR"), "/util.rs"));
+}
 
 use std::path::PathBuf;
-use ansi_term::Colour::Red;
 use pbr::ProgressBar;
 use util::*;
+use docopt::Docopt;
 use std::process;
-use std::io::Write;
 use ::std::io::{Stderr, stderr};
 
-docopt!(Args derive Debug, "
+const USAGE: &'static str = "
 .
                            d8b
                            Y8P
@@ -36,7 +42,7 @@ docopt!(Args derive Debug, "
 Usage:
   sonic <source> [-d <var>...] [options] -e <query>
   sonic <source> [-d <var>...] [options] -f <file>
-  sonic login
+  sonic login [options]
   sonic -h | --help
   sonic --version
 
@@ -49,11 +55,28 @@ Options:
   -r, --rows-only       print rows only
   -h, --help            show this message
   --version             show server and cli version
-");
+  --verbose             set log level to 'debug'
+";
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONIC_COMMIT");
 
+#[derive(Debug, RustcDecodable)]
+struct Args {
+    arg_file: String,
+    arg_query: String,
+    flag_silent: bool,
+    flag_rows_only: bool,
+    arg_var: Vec<String>,
+    flag_file: bool,
+    flag_c: String,
+    flag_verbose: bool,
+    arg_source: String,
+    cmd_login: bool,
+    flag_execute: bool,
+    flag_version: bool,
+    flag_help: bool,
+}
 
 error_chain! {
     types {
@@ -65,9 +88,8 @@ error_chain! {
     }
 
     foreign_links {
-        ::std::io::Error, IoError, "io error";
-        ::serde_json::Error, Json, "JSON serde error";
-        ::std::net::AddrParseError, AddrParseError, "error parsing inet address";
+        ::std::io::Error, IoError, "I/O operation failed";
+        ::serde_json::Error, Json, "JSON serialization/deserialization error";
     }
 
     errors {
@@ -80,8 +102,6 @@ error_chain! {
 
 fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
 
-    let addr = try!(get_addr(host, port));
-
     let mut pb: ProgressBar<Stderr> = ProgressBar::new(stderr(), 100);
     pb.format("╢░░_╟");
     pb.tick_format("▀▐▄▌");
@@ -89,23 +109,27 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
     let res = {
         let fn_out = |msg: sonicd::OutputChunk| {
-            println!("{}", msg.0.iter().fold(String::new(), |acc, x| {
-                format!("{}{:?}\t",acc, x)
-            }).trim_right());
+            println!("{}",
+                     msg.0
+                         .iter()
+                         .fold(String::new(), |acc, x| format!("{}{:?}\t", acc, x))
+                         .trim_right());
         };
 
         let fn_meta = |msg: sonicd::TypeMetadata| {
             info!("received type metadata: {:?}", msg);
             if !rows_only {
-                println!("{}", msg.0.iter().fold(String::new(), |acc, col| {
-                    format!("{}{:?}\t", acc, col.0)
-                }).trim_right());
+                println!("{}",
+                         msg.0
+                             .iter()
+                             .fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0))
+                             .trim_right());
             }
         };
 
         let fn_prog = |msg: sonicd::QueryProgress| {
             if !silent {
-                let sonicd::QueryProgress { total, progress, status, ..} = msg;
+                let sonicd::QueryProgress { total, progress, status, .. } = msg;
 
                 pb.message(&format!("{:?} ", status));
 
@@ -121,7 +145,7 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
             }
         };
 
-        sonicd::stream(query, addr, fn_out, fn_prog, fn_meta)
+        sonicd::stream(query, (host, *port), fn_out, fn_prog, fn_meta)
     };
 
     if let Ok(_) = res {
@@ -136,9 +160,18 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
 fn _main(args: Args) -> Result<()> {
 
-    let Args { arg_file, arg_query, flag_silent, flag_rows_only,
-    arg_var, flag_file, flag_c, arg_source,
-    cmd_login, flag_execute, flag_version, .. } = args;
+    let Args { arg_file,
+               arg_query,
+               flag_silent,
+               flag_rows_only,
+               arg_var,
+               flag_file,
+               flag_c,
+               arg_source,
+               cmd_login,
+               flag_execute,
+               flag_version,
+               .. } = args;
 
     let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
@@ -167,11 +200,11 @@ fn _main(args: Args) -> Result<()> {
 
         login(&sonicd, &tcp_port)
 
-    } else if flag_version{
+    } else if flag_version {
 
         println!("Sonic CLI version {} ({})",
-        VERSION,
-        COMMIT.unwrap_or_else(|| "dev"));
+                 VERSION,
+                 COMMIT.unwrap_or_else(|| "dev"));
 
         Ok(())
 
@@ -184,26 +217,24 @@ fn _main(args: Args) -> Result<()> {
 
 fn main() {
 
-    let args: Args = Args::docopt().decode().unwrap_or_else(|e| e.exit());
+    let args: Args = Docopt::new(USAGE).and_then(|d| d.decode()).unwrap_or_else(|e| e.exit());
 
-    env_logger::init().unwrap();
+    let verbose: bool = args.flag_verbose;
+
+    if verbose {
+        let mut builder = env_logger::LogBuilder::new();
+        builder.parse("debug");
+        builder.init().unwrap();
+    } else {
+        env_logger::init().unwrap();
+    }
 
     debug!("parsed args {:?}", args);
 
     match _main(args) {
-        Ok(_) => {},
-        Err(Error(ErrorKind::SonicdError(sonicd::ErrorKind::QueryError(msg)), _)) =>  {
-            stderr()
-                .write(&format!("\n{} {}",
-                                Red.paint("error:"), msg).as_bytes()).unwrap();
-            stderr().flush().unwrap();
-            process::exit(1)
-        },
-        Err(Error(kind, stacktrace)) =>  {
-            stderr()
-                .write(&format!("\n{} {}\n{:?}",
-                                Red.paint("error:"), kind, stacktrace).as_bytes()).unwrap();
-            stderr().flush().unwrap();
+        Ok(_) => {}
+        Err(e) => {
+            report_error(&e, verbose);
             process::exit(1)
         }
     }
