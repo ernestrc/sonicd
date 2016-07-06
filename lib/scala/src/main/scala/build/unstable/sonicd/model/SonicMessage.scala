@@ -75,6 +75,7 @@ object QueryProgress {
   val Started = 1
   val Running = 2
   val Waiting = 3
+  val Finished = 4
 }
 
 case class DoneWithQueryExecution(error: Option[Throwable] = None) extends SonicMessage {

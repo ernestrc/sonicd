@@ -19,7 +19,7 @@ use ansi_term::Colour::Red;
 use pbr::ProgressBar;
 use util::*;
 use std::process;
-use std::io::{Write};
+use std::io::Write;
 use ::std::io::{Stderr, stderr};
 
 docopt!(Args derive Debug, "

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::fmt::Display;
 use super::{Result, ErrorKind};
+use super::ChainErr;
 
 static DEFAULT_EDITOR: &'static str = "vim";
 
@@ -110,7 +111,8 @@ pub fn read_config(path: &PathBuf) -> Result<ClientConfig> {
 
     let contents = try!(read_file_contents(&path));
 
-    let config = try!(::serde_json::from_str::<ClientConfig>(&contents.to_string()));
+    let config = try!(::serde_json::from_str::<ClientConfig>(&contents.to_string())
+                      .chain_err(|| format!("config {:?} doesn't seem to be a valid JSON", path)));
 
     Ok(config)
 }

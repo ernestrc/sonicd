@@ -218,6 +218,7 @@ impl SonicMessageLike<QueryProgress> for QueryProgress {
             &Value::U64(1) => QueryStatus::Started,
             &Value::U64(2) => QueryStatus::Running,
             &Value::U64(3) => QueryStatus::Waiting,
+            &Value::U64(4) => QueryStatus::Finished,
             s => {
                 return Err(ErrorKind::Proto(format!("unexpected query status {:?}", s)).into());
             }

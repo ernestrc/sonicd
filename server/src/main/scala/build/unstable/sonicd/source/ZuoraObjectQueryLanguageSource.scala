@@ -117,10 +117,10 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
   def streaming(streamLimit: Option[Int], completeBufEmpty: Boolean, zoql: String, colNames: Vector[String]): Receive = {
 
     case ReceiveTimeout ⇒
-      buffer.enqueue(QueryProgress(QueryProgress.Waiting, 0, None, None))
-
-      stream()
-
+      if(!completeBufEmpty) {
+        buffer.enqueue(QueryProgress(QueryProgress.Waiting, 0, None, None))
+      }
+    stream()
 
     case Request(n) ⇒
       stream()
@@ -133,10 +133,10 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
 
       if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
         log.info(s"successfully fetched $totalSize zuora objects")
+        buffer.enqueue(QueryProgress(QueryProgress.Finished, 0, None, None))
         self ! DoneWithQueryExecution.success
       } else {
-        val percPerBatch = 100.0 * effectiveBatchSize / totalSize
-        buffer.enqueue(QueryProgress(QueryProgress.Running, percPerBatch, Some(100), Some("%")))
+        buffer.enqueue(QueryProgress(QueryProgress.Running, effectiveBatchSize, Some(totalSize), Some("objects")))
 
         //query-ahead
         if (buffer.size < effectiveBatchSize * 5) {
@@ -161,11 +161,11 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
       self ! DoneWithQueryExecution.error(res.error)
 
     case r: DoneWithQueryExecution ⇒
-      if (totalDemand > 0) {
-        onNext(r)
+      buffer.enqueue(r)
+      stream()
+      if (buffer.isEmpty) {
         onCompleteThenStop()
       } else {
-        buffer.enqueue(r)
         context.become(streaming(streamLimit, completeBufEmpty = true, zoql, colNames))
       }
 
@@ -182,13 +182,12 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
 
     //first time client requests
     case r@Request(n) ⇒
-      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, Some(100), Some("%")))
+      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, Some("%")))
       val trim = query.trim().toLowerCase
       lazy val nothing = (true, Vector.empty, None)
       val (isComplete, colNames, limit): (Boolean, Vector[String], Option[Int]) =
         if (trim.startsWith("show")) {
           log.debug("showing table names")
-          buffer.enqueue(QueryProgress(QueryProgress.Running, 100, Some(100), Some("%")))
           buffer.enqueue(ZuoraService.ShowTables.output: _*)
           buffer.enqueue(DoneWithQueryExecution.success)
           nothing

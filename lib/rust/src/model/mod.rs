@@ -14,6 +14,7 @@ pub enum QueryStatus {
     Started,
     Running,
     Waiting,
+    Finished,
 }
 
 #[derive(Debug)]
