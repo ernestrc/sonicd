@@ -277,7 +277,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     msgs.head shouldBe an[TypeMetadata]
     val (progress, tail) = msgs.tail.splitAt(100)
-    progress.tail.foreach(_ shouldBe QueryProgress(QueryProgress.Running, 1, Some(100), Some("%")))
+    progress.tail.foreach(_.getClass() shouldBe classOf[QueryProgress])
     tail.head shouldBe a[OutputChunk]
     tail.tail.head shouldBe a[DoneWithQueryExecution]
 
