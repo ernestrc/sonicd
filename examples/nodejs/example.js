@@ -44,8 +44,8 @@ stream.on('data', function(data) {
 });
 
 stream.on('progress', function(p) {
-  done += p;
-  console.log('running.. ' + done + '% done');
+  done += p.progress;
+  console.log('running.. ' + done + "/" + p.total + " "+ p.units);
 });
 
 stream.on('output', function(out) {
