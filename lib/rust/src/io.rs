@@ -1,6 +1,9 @@
-use nix::unistd;
-use nix::errno::Errno::*;
+use model::protocol::SonicMessage;
 use error::Result;
+use std::io::Cursor;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use nix::unistd;
+use std::os::unix::io::RawFd;
 
 #[macro_export]
 macro_rules! eagain {
@@ -9,14 +12,46 @@ macro_rules! eagain {
         loop {
             match $syscall($arg1, $arg2) {
                 Ok(m) => {
-                    res = m;
+                    res = Ok(m);
                     break;
                 },
-                Err(::nix::Error::Sys(a@EAGAIN)) | Err(::nix::Error::Sys(a@EINTR)) => {
-                    debug!("{} {}, re-submitting syscall", $name, a);
+                Err(::nix::Error::Sys(a@::nix::errno::EINTR)) |
+                    Err(::nix::Error::Sys(a@::nix::errno::EAGAIN))=> {
+                        debug!("{}: {}: re-submitting syscall", $name, a);
+                        continue;
+                    },
+                    Err(err) => {
+                        res = Err(err);
+                        break;
+                    }
+            }
+        }
+        res
+    }}
+}
+
+#[macro_export]
+macro_rules! eintr {
+    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+        let res;
+        loop {
+            match $syscall($arg1, $arg2) {
+                Ok(m) => {
+                    res = Ok(Some(m));
+                    break;
                 },
-                Err(e) => {
-                    return Err(e.into());
+                Err(::nix::Error::Sys(::nix::errno::EAGAIN)) => {
+                    trace!("{}: EAGAIN: socket not ready", $name);
+                    res = Ok(None);
+                    break;
+                },
+                Err(::nix::Error::Sys(::nix::errno::EINTR)) => {
+                    debug!("{}: EINTR: re-submitting syscall", $name);
+                    continue;
+                },
+                Err(err) => {
+                    res = Err(err);
+                    break;
                 }
             }
         }
@@ -24,15 +59,21 @@ macro_rules! eagain {
     }}
 }
 
-pub fn read(fd: i32, buf: &mut [u8]) -> Result<usize> {
-
-    let b = eagain!(unistd::read, "unistd::read", fd, buf);
+pub fn write(fd: RawFd, buf: &[u8]) -> Result<Option<usize>> {
+    let b = try!(eintr!(unistd::write, "unistd::write", fd, buf));
 
     Ok(b)
 }
 
-pub fn read_next(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
-    let b = eagain!(unistd::read, "unistd::read", fd, buf);
+pub fn read(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
+
+    let b = try!(eintr!(unistd::read, "unistd::read", fd, buf));
+
+    Ok(b)
+}
+
+pub fn read_next(len: usize, fd: RawFd, buf: &mut [u8]) -> Result<usize> {
+    let b = try!(eagain!(unistd::read, "unistd::read", fd, buf));
 
     if b == len {
         // result as intended
@@ -55,5 +96,36 @@ pub fn read_next(len: usize, fd: i32, buf: &mut [u8]) -> Result<usize> {
         debug!("unistd::read 0 bytes: EOF");
         Ok(b)
     }
+}
 
+pub fn read_message(fd: RawFd) -> Result<SonicMessage> {
+
+    let len_buf = &mut [0; 4];
+
+    // read length header bytes
+    try!(read_next(4, fd, len_buf));
+
+    let mut rdr = Cursor::new(len_buf);
+
+    // decode length header
+    let len = try!(rdr.read_i32::<BigEndian>()) as usize;
+
+    let mut buf = vec!(0; len);
+
+    // read message bytes
+    try!(read_next(len, fd, buf.as_mut_slice()));
+
+    SonicMessage::from_slice(buf.as_slice())
+}
+
+pub fn frame(msg: SonicMessage) -> Result<Vec<u8>> {
+    let qbytes = try!(msg.into_bytes());
+
+    let qlen = qbytes.len() as i32;
+    let mut fbytes = Vec::new();
+
+    try!(fbytes.write_i32::<BigEndian>(qlen));
+
+    fbytes.extend(qbytes.as_slice());
+    Ok(fbytes)
 }

@@ -1,11 +1,11 @@
 use model::*;
+use std::fmt::Debug;
 use model::protocol::{SonicMessage, MessageKind};
 use error::{ErrorKind, Result};
-use net;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::io::Write;
-use std::fmt::Debug;
+use io::*;
 use std::net::ToSocketAddrs;
 
 pub fn run<A: ToSocketAddrs>(query: Query, addr: A) -> Result<Vec<OutputChunk>> {
@@ -44,7 +44,7 @@ pub fn stream<C, O, P, M, A>(command: C,
     debug!("framing command {:?}", &command);
 
     // frame command
-    let fbytes = try!(net::frame(command.into()));
+    let fbytes = try!(frame(command.into()));
 
     debug!("framed command into {} bytes", fbytes.len());
 
@@ -56,7 +56,7 @@ pub fn stream<C, O, P, M, A>(command: C,
     let res: Result<()>;
 
     loop {
-        let msg = try!(net::read_message(&fd));
+        let msg = try!(read_message(fd));
         match msg.event_type {
             MessageKind::OutputKind => output(try!(msg.into())),
             MessageKind::ProgressKind => progress(try!(msg.into())),
@@ -69,7 +69,7 @@ pub fn stream<C, O, P, M, A>(command: C,
                     res = Ok(());
                 };
                 let msg: SonicMessage = Acknowledge.into();
-                let fbytes = try!(net::frame(msg));
+                let fbytes = try!(frame(msg));
                 // send ack
                 try!(stream.write(&fbytes.as_slice()));
                 debug!("disconnected");
