@@ -16,8 +16,8 @@ mod model;
 pub mod net;
 #[macro_use] pub mod io;
 
-#[cfg(feature="websocket")]
-pub mod ws;
+//#[cfg(feature="websocket")]
+//pub mod ws;
 
 pub use api::{run, stream, authenticate};
 pub use model::{Authenticate, Log, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};

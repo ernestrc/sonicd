@@ -256,7 +256,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "pbr"
 version = "0.2.1"
-source = "git+https://github.com/ernestrc/pb.git#11fe8a64e6259679b56cc12e0ac77315e0a04420"
+source = "git+https://github.com/ernestrc/pb.git#8dfe0bcd0497588e78a03012c061df750b71eb27"
 dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",

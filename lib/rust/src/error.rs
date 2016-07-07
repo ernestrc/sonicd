@@ -15,10 +15,6 @@ error_chain! {
     }
 
     errors {
-        BigEndianError(e: ::std::io::Error) {
-            description("BigEndian error")
-                display("{}", e)
-        }
 
         QueryError(msg: String) {
             description("error in query")

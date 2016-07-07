@@ -4,7 +4,7 @@
 var Client = require('../../lib/nodejs/lib.js').Client;
 var assert = require('assert');
 
-var client = new Client('wss://0.0.0.0:443');
+var client = new Client('wss://hubble-dev.tokbox.com:443');
 
 
 var query = {
@@ -44,8 +44,8 @@ stream.on('data', function(data) {
 });
 
 stream.on('progress', function(p) {
-  done += p;
-  console.log('running.. ' + done + '% done');
+  done += p.progress;
+  console.log('running.. ' + done + "/" + p.total + " "+ p.units);
 });
 
 stream.on('output', function(out) {
@@ -85,7 +85,7 @@ client.run(query2, function(err, res) {
 })
 
 
-var API_KEY = '1234';
+var API_KEY = 't0kb0x!!';
 var USER = 'serrallonga';
 
 //first we need to authenticate

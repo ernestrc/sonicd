@@ -26,8 +26,9 @@ use pbr::ProgressBar;
 use util::*;
 use docopt::Docopt;
 use std::process;
-use ::std::io::{Stderr, stderr};
+use std::io::{Write, Stderr, stderr, stdout};
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 const USAGE: &'static str = "
 .
                            d8b
@@ -40,22 +41,22 @@ const USAGE: &'static str = "
  88888P'  \"Y88P\"  888  888 888  \"Y8888P
 
 Usage:
-  sonic <source> [-d <var>...] [options] -e <query>
-  sonic <source> [-d <var>...] [options] -f <file>
+  sonic <source> [options] -e <query>
+  sonic <source> [options] -f <file>
   sonic login [options]
   sonic -h | --help
-  sonic --version
+  sonic -v | --version
 
 Options:
-  --execute, -e         run command literal
-  --file, -f            run command from file
-  -c <config>           use config file (default: $HOME/.sonicrc)
-  -d                    inject variable name to value (i.e. -d foo=bar)
-  --silent, -S          output data only
-  -r, --rows-only       print rows only
-  -h, --help            show this message
-  --version             show server and cli version
-  --verbose             set log level to 'debug'
+  -e, --execute         Run command literal
+  -f, --file            Run command from file
+  -c <config>           Use a different configuration file (default: $HOME/.sonicrc)
+  -d <inject>           Replace variable in query in the form of `${foo}` with value (i.e. -d foo=bar)
+  -r, --rows-only       Skip printing column names
+  -S, --silent          Skip printing query progress bar
+  -V, --verbose         Enable debug mode
+  -h, --help            Print this message
+  -v, --version         Print version
 ";
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -67,7 +68,7 @@ struct Args {
     arg_query: String,
     flag_silent: bool,
     flag_rows_only: bool,
-    arg_var: Vec<String>,
+    flag_d: Vec<String>,
     flag_file: bool,
     flag_c: String,
     flag_verbose: bool,
@@ -100,30 +101,48 @@ error_chain! {
     }
 }
 
+fn hide(pb: &mut ProgressBar<Stderr>) {
+    pb.show_bar = false;
+    pb.show_speed = false;
+    pb.show_percent = false;
+    pb.show_counter = false;
+    pb.show_time_left = false;
+    pb.show_tick = false;
+    pb.show_message = false;
+}
+
+fn show(pb: &mut ProgressBar<Stderr>) {
+    pb.show_bar = true;
+    pb.show_speed = true;
+    pb.show_percent = true;
+    pb.show_counter = true;
+    pb.show_time_left = true;
+    pb.show_tick = true;
+    pb.show_message = true;
+}
+
 fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
 
-    let mut pb: ProgressBar<Stderr> = ProgressBar::new(stderr(), 100);
+    let mut pb = ProgressBar::on(stderr(), 0);
     pb.format("╢░░_╟");
     pb.tick_format("▀▐▄▌");
-    pb.show_message = true;
+    if !silent {
+        show(&mut pb);
+    }
 
     let res = {
         let fn_out = |msg: sonicd::OutputChunk| {
-            println!("{}",
-                     msg.0
-                         .iter()
-                         .fold(String::new(), |acc, x| format!("{}{:?}\t", acc, x))
-                         .trim_right());
+            let cols = msg.0.iter().fold(String::new(), |acc, x| format!("{}{:?}\t", acc, x));
+            let row = format!("{}\n", cols.trim_right());
+            stdout().write_all(row.as_bytes()).unwrap();
         };
 
         let fn_meta = |msg: sonicd::TypeMetadata| {
-            info!("received type metadata: {:?}", msg);
+            debug!("received type metadata: {:?}", msg);
             if !rows_only {
-                println!("{}",
-                         msg.0
-                             .iter()
-                             .fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0))
-                             .trim_right());
+                let cols = msg.0 .iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0));
+                let row = format!("{}\n", cols.trim_right());
+                stdout().write_all(row.as_bytes()).unwrap();
             }
         };
 
@@ -132,6 +151,7 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
                 let sonicd::QueryProgress { total, progress, status, .. } = msg;
 
                 pb.message(&format!("{:?} ", status));
+                debug!("{:?}: {:?}/{:?}", status, progress, total);
 
                 if let Some(total) = total {
                     pb.total = total as u64;
@@ -148,30 +168,31 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
         sonicd::stream(query, (host, *port), fn_out, fn_prog, fn_meta)
     };
 
-    if let Ok(_) = res {
-        pb.message("Done ");
-    } else {
-        pb.message("Error ");
-    }
-    pb.finish();
     try!(res);
+    if !silent {
+        // pb.tick();
+        hide(&mut pb);
+        pb.finish();
+        stderr().flush().unwrap();
+    }
+    stdout().flush().unwrap();
     Ok(())
 }
 
 fn _main(args: Args) -> Result<()> {
 
     let Args { arg_file,
-               arg_query,
-               flag_silent,
-               flag_rows_only,
-               arg_var,
-               flag_file,
-               flag_c,
-               arg_source,
-               cmd_login,
-               flag_execute,
-               flag_version,
-               .. } = args;
+    arg_query,
+    flag_silent,
+    flag_rows_only,
+    flag_d,
+    flag_file,
+    flag_c,
+    arg_source,
+    cmd_login,
+    flag_execute,
+    flag_version,
+    .. } = args;
 
     let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
@@ -184,7 +205,7 @@ fn _main(args: Args) -> Result<()> {
     if flag_file {
 
         let query_str = try!(read_file_contents(&PathBuf::from(&arg_file)));
-        let split = try!(split_key_value(&arg_var));
+        let split = try!(split_key_value(&flag_d));
         let injected = try!(inject_vars(&query_str, &split));
         let query = try!(build(arg_source, sources, auth, injected));
 
@@ -203,8 +224,8 @@ fn _main(args: Args) -> Result<()> {
     } else if flag_version {
 
         println!("Sonic CLI version {} ({})",
-                 VERSION,
-                 COMMIT.unwrap_or_else(|| "dev"));
+        VERSION,
+        COMMIT.unwrap_or_else(|| "dev"));
 
         Ok(())
 
