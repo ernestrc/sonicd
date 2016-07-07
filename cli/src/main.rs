@@ -41,8 +41,8 @@ const USAGE: &'static str = "
  88888P'  \"Y88P\"  888  888 888  \"Y8888P
 
 Usage:
-  sonic <source> [options] -e <query>
-  sonic <source> [options] -f <file>
+  sonic <source> [-d <foo=bar>...] [options] -e <query>
+  sonic <source> [-d <foo=bar>...] [options] -f <file>
   sonic login [options]
   sonic -h | --help
   sonic -v | --version
@@ -51,7 +51,7 @@ Options:
   -e, --execute         Run command literal
   -f, --file            Run command from file
   -c <config>           Use a different configuration file (default: $HOME/.sonicrc)
-  -d <inject>           Replace variable in query in the form of `${foo}` with value (i.e. -d foo=bar)
+  -d <foo=bar>          Replace variable in query in the form of `${foo}` with value `var`
   -r, --rows-only       Skip printing column names
   -S, --silent          Skip printing query progress bar
   -V, --verbose         Enable debug mode
@@ -170,7 +170,6 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
 
     try!(res);
     if !silent {
-        // pb.tick();
         hide(&mut pb);
         pb.finish();
         stderr().flush().unwrap();
