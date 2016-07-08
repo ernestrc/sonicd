@@ -50,7 +50,7 @@ trait SonicdLogging extends TypedLogging {
 
   case class RetryStatement(n: Int) extends CallType
 
-  case class HttpReq(method: String) extends CallType
+  case class HttpReq(method: String, endpoint: String) extends CallType
 
 
   case object DownloadHttpBody extends CallType

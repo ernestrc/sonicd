@@ -79,17 +79,17 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
 
   def doRequest[S: JsonFormat](traceId: String, request: HttpRequest)
                               (mapSuccess: (String) ⇒ (HttpResponse) ⇒ Future[S]): Future[S] = {
-    trace(log, traceId, HttpReq(request.method.value), Variation.Attempt,
+    trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Attempt,
       "sending {} http request to {}{}", request.method.value, masterUrl, request._2)
     Source.single(request.copy(headers = request.headers ++: extraHeaders) → traceId)
       .via(connectionPool)
       .runWith(Sink.head)
       .flatMap {
         case t@(Success(response), _) if response.status.isSuccess() =>
-          trace(log, traceId, HttpReq(request.method.value), Variation.Success, "")
+          trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Success, "")
           mapSuccess(traceId)(response)
         case (Success(response), _) ⇒
-          trace(log, traceId, HttpReq(request.method.value), Variation.Success,
+          trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Success,
             "http request succeded but response status is {}", response._1)
           val parsed = response.entity.toStrict(httpEntityTimeout)
           parsed.recoverWith {
@@ -104,7 +104,7 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
             Future.failed(er)
           }
         case (Failure(e), _) ⇒
-          trace(log, traceId, HttpReq(request.method.value),
+          trace(log, traceId, HttpReq(request.method.value, masterUrl),
             Variation.Failure(e), "http request failed ")
           Future.failed(e)
       }
