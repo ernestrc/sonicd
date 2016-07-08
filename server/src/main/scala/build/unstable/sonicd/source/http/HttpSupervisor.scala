@@ -81,7 +81,7 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
                               (mapSuccess: (String) ⇒ (HttpResponse) ⇒ Future[S]): Future[S] = {
     trace(log, traceId, HttpReq(request.method.value), Variation.Attempt,
       "sending {} http request to {}{}", request.method.value, masterUrl, request._2)
-    Source.single(request.copy(headers = extraHeaders) → traceId)
+    Source.single(request.copy(headers = request.headers ++: extraHeaders) → traceId)
       .via(connectionPool)
       .runWith(Sink.head)
       .flatMap {

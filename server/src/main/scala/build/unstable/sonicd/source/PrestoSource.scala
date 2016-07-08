@@ -4,7 +4,6 @@ import akka.actor._
 import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
-import akka.pattern._
 import akka.stream.actor.ActorPublisher
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
@@ -128,8 +127,6 @@ object Presto {
   implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat5(ErrorMessage.apply)
   implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
 
-  case class GetQueryResults(queryId: String, nextUri: String)
-
 }
 
 class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
@@ -143,6 +140,12 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
 
   val supervisorName = Presto.getSupervisorName(masterUrl)
 
+  def getSupervisor(name: String): ActorRef = {
+    actorContext.child(name).getOrElse {
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
+    }
+  }
+
   lazy val handlerProps: Props = {
     //if no presto supervisor has been initialized yet for this presto cluster, initialize one
     val prestoSupervisor = actorContext.child(supervisorName).getOrElse {
@@ -150,15 +153,12 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
     }
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
-      masterUrl, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN, context)
+      SonicdConfig.PRESTO_MAX_RETRIES, SonicdConfig.PRESTO_RETRYIN, context)
   }
 }
 
 class PrestoSupervisor(val masterUrl: String, val port: Int)
   extends HttpSupervisor[Presto.QueryResults] {
-
-  import context.dispatcher
 
   lazy val debug: Boolean = false
 
@@ -168,26 +168,16 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 
   lazy val httpEntityTimeout: FiniteDuration = SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT
 
-  lazy val extraHeaders: Seq[HttpHeader] = scala.collection.immutable.Seq(Presto.Headers.USER("sonicd"), Presto.Headers.SOURCE)
+  lazy val extraHeaders: Seq[HttpHeader] = scala.collection.immutable.Seq(Presto.Headers.SOURCE)
 
   override def cancelRequestFromResult(t: Presto.QueryResults): Option[HttpRequest] =
     t.partialCancelUri.map { uri ⇒
       HttpRequest(HttpMethods.DELETE, uri)
     }
-
-  override def receive: Actor.Receive = {
-    val recv: Receive = {
-      case Presto.GetQueryResults(queryId, nextUri) ⇒
-        val req = HttpRequest(HttpMethods.GET, nextUri)
-        doRequest(queryId, req)(to[Presto.QueryResults])
-          .map(r ⇒ HttpCommandSuccess(r.copy(queryId))).pipeTo(self)(sender())
-    }
-    recv orElse super.receive
-  }
 }
 
 class PrestoPublisher(traceId: String, query: String,
-                      supervisor: ActorRef, masterUrl: String,
+                      supervisor: ActorRef,
                       maxRetries: Int, retryIn: FiniteDuration,
                       ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
@@ -201,14 +191,14 @@ class PrestoPublisher(traceId: String, query: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    info(log, "stopping presto publisher of '{}' pointing at '{}'", traceId, masterUrl)
+    debug(log, "stopping presto publisher of '{}'", traceId)
     retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
     context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting presto publisher of '{}' pointing at '{}'", traceId, masterUrl)
+    debug(log, "starting presto publisher of '{}'", traceId)
     context watch supervisor
   }
 
@@ -223,11 +213,14 @@ class PrestoPublisher(traceId: String, query: String,
 
   def tryPullUpstream() {
     if (lastQueryResults.isDefined && lastQueryResults.get.nextUri.isDefined && (buffer.isEmpty || shouldQueryAhead)) {
-      supervisor ! GetQueryResults(lastQueryResults.get.id, lastQueryResults.get.nextUri.get)
+      val cmd = HttpRequestCommand(traceId,
+        HttpRequest(HttpMethods.GET, lastQueryResults.get.nextUri.get, headers = headers))
+      supervisor ! cmd
       lastQueryResults = None
     }
   }
 
+  // TODO def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
   def shouldQueryAhead: Boolean = buffer.length < 2466 * 2
 
   def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
@@ -246,12 +239,16 @@ class PrestoPublisher(traceId: String, query: String,
   }
 
   val uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
+  val headers: scala.collection.immutable.Seq[HttpHeader] =
+    Seq(ctx.user.map(u ⇒ Headers.USER(u.user)).getOrElse(Headers.USER("sonicd")))
 
   val queryCommand = {
     val entity: RequestEntity = query
-    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
+    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity, headers = headers)
     HttpRequestCommand(traceId, httpRequest)
   }
+
+  val units = Some("splits")
 
 
   /* STATE */
@@ -262,6 +259,7 @@ class PrestoPublisher(traceId: String, query: String,
   var retryScheduled: Option[Cancellable] = None
   var retried = 0
   var callType: CallType = ExecuteStatement
+  var completedSplits = 0
 
 
   /* BEHAVIOUR */
@@ -293,8 +291,19 @@ class PrestoPublisher(traceId: String, query: String,
         bufferedMeta = true
       }
 
+      val splits = r.stats.completedSplits - completedSplits
+      val totalSplits = Some(r.stats.totalSplits.toDouble)
+      completedSplits = r.stats.completedSplits
+
       r.stats.state match {
-        case "RUNNING" | "QUEUED" | "PLANNING" | "STARTING" ⇒
+
+        case "QUEUED" | "PLANNING" ⇒
+          buffer.enqueue(QueryProgress(QueryProgress.Waiting, splits, totalSplits, units))
+          r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
+          tryPullUpstream()
+
+        case "RUNNING" | "STARTING" | "FINISHING" ⇒
+          buffer.enqueue(QueryProgress(QueryProgress.Running, splits, totalSplits, units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           tryPullUpstream()
 
@@ -309,6 +318,7 @@ class PrestoPublisher(traceId: String, query: String,
           trace(log, traceId, callType, Variation.Failure(e),
             "query status is FAILED: {}", r.error.get)
           error.errorCode match {
+            // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
             case 65540 /* PAGE_TRANSPORT_TIMEOUT */ if retried < maxRetries ⇒
               retried += 1
               callType = RetryStatement(retried)
@@ -351,6 +361,7 @@ class PrestoPublisher(traceId: String, query: String,
 
     //first time client requests
     case Request(n) ⇒
+      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, None))
       runStatement(callType, queryCommand)
       context.become(materialized)
   }
