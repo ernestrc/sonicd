@@ -153,7 +153,9 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
     }
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
-      SonicdConfig.PRESTO_MAX_RETRIES, SonicdConfig.PRESTO_RETRYIN, context)
+      SonicdConfig.PRESTO_HIGH_WATERMARK, SonicdConfig.PRESTO_LOW_WATERMARK,
+      SonicdConfig.PRESTO_MAX_RETRIES,
+      SonicdConfig.PRESTO_RETRYIN, context)
   }
 }
 
@@ -178,6 +180,8 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 
 class PrestoPublisher(traceId: String, query: String,
                       supervisor: ActorRef,
+                      highWatermark: Int,
+                      lowWatermark: Int,
                       maxRetries: Int, retryIn: FiniteDuration,
                       ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
@@ -220,8 +224,9 @@ class PrestoPublisher(traceId: String, query: String,
     }
   }
 
-  // TODO def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
-  def shouldQueryAhead: Boolean = buffer.length < 2466 * 2
+  def shouldQueryAhead: Boolean =
+    highWatermark > 0 && lowWatermark > 0 &&
+      buffer.length < highWatermark && buffer.length
 
   def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
     TypeMetadata(v.map {
@@ -293,6 +298,7 @@ class PrestoPublisher(traceId: String, query: String,
 
       val splits = r.stats.completedSplits - completedSplits
       val totalSplits = Some(r.stats.totalSplits.toDouble)
+      println(s"total $totalSplits; splits $splits")
       completedSplits = r.stats.completedSplits
 
       r.stats.state match {
@@ -350,7 +356,8 @@ class PrestoPublisher(traceId: String, query: String,
   def commonReceive: Receive = {
     case Cancel ⇒
       log.debug("client canceled")
-      onCompleteThenStop()
+      onComplete()
+      context.stop(self)
   }
 
   def receive: Receive = commonReceive orElse {
@@ -363,6 +370,7 @@ class PrestoPublisher(traceId: String, query: String,
     case Request(n) ⇒
       buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, None))
       runStatement(callType, queryCommand)
+      tryPushDownstream()
       context.become(materialized)
   }
 }
