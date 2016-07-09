@@ -153,8 +153,7 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
     }
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
-      SonicdConfig.PRESTO_HIGH_WATERMARK, SonicdConfig.PRESTO_LOW_WATERMARK,
-      SonicdConfig.PRESTO_MAX_RETRIES,
+      SonicdConfig.PRESTO_WATERMARK, SonicdConfig.PRESTO_MAX_RETRIES,
       SonicdConfig.PRESTO_RETRYIN, context)
   }
 }
@@ -180,8 +179,7 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 
 class PrestoPublisher(traceId: String, query: String,
                       supervisor: ActorRef,
-                      highWatermark: Int,
-                      lowWatermark: Int,
+                      watermark: Int,
                       maxRetries: Int, retryIn: FiniteDuration,
                       ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
@@ -224,9 +222,7 @@ class PrestoPublisher(traceId: String, query: String,
     }
   }
 
-  def shouldQueryAhead: Boolean =
-    highWatermark > 0 && lowWatermark > 0 &&
-      buffer.length < highWatermark && buffer.length
+  def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
 
   def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
     TypeMetadata(v.map {
@@ -243,13 +239,13 @@ class PrestoPublisher(traceId: String, query: String,
     })
   }
 
-  val uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
+  val submitUri = s"/${SonicdConfig.PRESTO_APIV}/statement"
   val headers: scala.collection.immutable.Seq[HttpHeader] =
     Seq(ctx.user.map(u ⇒ Headers.USER(u.user)).getOrElse(Headers.USER("sonicd")))
 
   val queryCommand = {
     val entity: RequestEntity = query
-    val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity, headers = headers)
+    val httpRequest = HttpRequest.apply(HttpMethods.POST, submitUri, entity = entity, headers = headers)
     HttpRequestCommand(traceId, httpRequest)
   }
 
@@ -288,7 +284,7 @@ class PrestoPublisher(traceId: String, query: String,
       tryPullUpstream()
 
     case r: QueryResults ⇒
-      log.debug("recv query results of query '{}'", r.id)
+      debug(log, "received query results of query '{}'", r.id)
       lastQueryResults = Some(r)
       //extract type metadata
       if (!bufferedMeta && r.columns.isDefined) {
@@ -298,7 +294,6 @@ class PrestoPublisher(traceId: String, query: String,
 
       val splits = r.stats.completedSplits - completedSplits
       val totalSplits = Some(r.stats.totalSplits.toDouble)
-      println(s"total $totalSplits; splits $splits")
       completedSplits = r.stats.completedSplits
 
       r.stats.state match {

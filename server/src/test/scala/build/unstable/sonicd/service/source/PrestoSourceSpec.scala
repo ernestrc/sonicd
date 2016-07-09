@@ -1,19 +1,19 @@
 package build.unstable.sonicd.service.source
 
-import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
+import akka.actor._
 import akka.http.scaladsl.model.{ContentTypes, HttpRequest}
 import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
 import build.unstable.sonicd.source.Presto.{ColMeta, QueryResults, StatementStats}
-import build.unstable.sonicd.source.PrestoPublisher
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
+import build.unstable.sonicd.source.{Presto, PrestoPublisher}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
-import JsonProtocol._
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -47,10 +47,10 @@ class PrestoSourceSpec(_system: ActorSystem)
     TestActorRef(Props(classOf[TestController], self).
       withDispatcher(CallingThreadDispatcher.Id))
 
-  def newPublisher(q: String, context: RequestContext = testCtx,
+  def newPublisher(q: String, context: RequestContext = testCtx, watermark: Int = -1,
                    maxRetries: Int = 0, retryIn: FiniteDuration = 1.second): TestActorRef[PrestoPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
-    val src = new PrestoSource(maxRetries, retryIn, self, query, controller.underlyingActor.context, context)
+    val src = new PrestoSource(watermark, maxRetries, retryIn, self, query, controller.underlyingActor.context, context)
     val ref = TestActorRef[PrestoPublisher](src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
@@ -170,68 +170,77 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       pub ! QueryResults("", "", None, Some("http://1"),
-        Some(defaultColumns), None, stats1, None, None, None)
+        Some(defaultColumns), None, stats1.copy(state = "RUNNING"), None, None, None)
+
+      assert(pub.underlyingActor.lastQueryResults.nonEmpty)
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectTypeMetadata()
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectQueryProgress(0, QueryProgress.Running, Some(0), Some("splits"))
+
+      assert(pub.underlyingActor.buffer.isEmpty)
 
       {
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("1"))
-        pub ! ActorPublisherMessage.Request(1)
-        expectTypeMetadata()
-
-        pub ! ActorPublisherMessage.Request(1)
-        expectQueryProgress(0, QueryProgress.Running, Some(0), Some("splits"))
 
         pub ! QueryResults("", "", None, Some("http://2"),
-          Some(defaultColumns), None, stats1.copy(completedSplits = 100, totalSplits = 1000),
-          None, None, None)
+          Some(defaultColumns), None, stats1.copy(completedSplits = 0,
+            totalSplits = 1000), None, None, None)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectQueryProgress(0, QueryProgress.Running, Some(1000), Some("splits"))
       }
       {
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("2"))
-        pub ! ActorPublisherMessage.Request(1)
-        expectQueryProgress(100, QueryProgress.Running, Some(1000), Some("splits"))
 
         pub ! QueryResults("", "", None, Some("http://3"),
-          Some(defaultColumns), None, stats1.copy(completedSplits = 200, totalSplits = 1000), None, None, None)
+          Some(defaultColumns), None, stats1.copy(completedSplits = 100, totalSplits = 1000), None, None, None)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectQueryProgress(100, QueryProgress.Running, Some(1000), Some("splits"))
       }
       {
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("3"))
 
+        pub ! QueryResults("", "", None, Some("http://4"),
+          Some(defaultColumns), None, stats1.copy(completedSplits = 200, totalSplits = 1000), None, None, None)
+
         pub ! ActorPublisherMessage.Request(1)
         expectQueryProgress(100, QueryProgress.Running, Some(1000), Some("splits"))
 
-        pub ! QueryResults("", "", None, Some("http://4"),
-          Some(defaultColumns), None, stats1.copy(completedSplits = 900, totalSplits = 1000), None, None, None)
       }
       {
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("4"))
 
-        pub ! ActorPublisherMessage.Request(1)
-        expectQueryProgress(700, QueryProgress.Running, Some(1000), Some("splits"))
-
         pub ! QueryResults("", "", None, Some("http://5"),
           Some(defaultColumns), None, stats1.copy(state = "RUNNING",
             completedSplits = 950, totalSplits = 1000), None, None, None)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectQueryProgress(750, QueryProgress.Running, Some(1000), Some("splits"))
+
       }
       {
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("5"))
 
+        pub ! QueryResults("", "", None, Some("http://6"),
+          Some(defaultColumns), None, stats1.copy(state = "RUNNING", completedSplits = 1000, totalSplits = 1000), None, None, None)
+
         pub ! ActorPublisherMessage.Request(1)
         expectQueryProgress(50, QueryProgress.Running, Some(1000), Some("splits"))
 
-        pub ! QueryResults("", "", None, Some("http://6"),
-          Some(defaultColumns), None, stats1.copy(state = "RUNNING", completedSplits = 1000, totalSplits = 100), None, None, None)
       }
       {
         /* 100 - 50 */
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("6"))
-
-        pub ! ActorPublisherMessage.Request(1)
-        expectQueryProgress(50, QueryProgress.Running, Some(100), Some("splits"))
 
         pub ! QueryResults("", "", None, None,
           Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 100), None, None, None)
@@ -243,10 +252,10 @@ class PrestoSourceSpec(_system: ActorSystem)
 
     "should stop if user cancels" in {
       val pub = newPublisher(query1)
+
       pub ! ActorPublisherMessage.Request(1)
       val httpCmd = expectMsgType[HttpRequestCommand]
 
-      pub ! ActorPublisherMessage.Request(1)
       expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
 
       pub ! QueryResults("", "", Some("http://cancel"), None, Some(defaultColumns),
@@ -263,7 +272,7 @@ class PrestoSourceSpec(_system: ActorSystem)
     }
 
     "should attempt to query ahead" in {
-      val pub = newPublisher(query1, watermark = 10)
+      val pub = newPublisher(query1, watermark = 5)
       pub ! ActorPublisherMessage.Request(1)
       expectMsgType[HttpRequestCommand]
 
@@ -283,38 +292,102 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectQueryProgress(0, QueryProgress.Running, Some(0), Some("splits"))
 
       pub ! QueryResults("", "", None, Some("http://2"),
-        Some(defaultColumns), None, stats1.copy(completedSplits = 100, totalSplits = 1000),
+        Some(defaultColumns), None, stats1.copy(completedSplits = 200, totalSplits = 1000),
         None, None, None)
 
+      //buffer 1, streamed = 0
 
       expectMsgType[HttpRequestCommand]
       pub ! ActorPublisherMessage.Request(1)
-      expectQueryProgress(100, QueryProgress.Running, Some(1000), Some("splits"))
+      expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
 
       pub ! QueryResults("", "", None, Some("http://3"),
-        Some(defaultColumns), Some(defaultData), stats1.copy(completedSplits = 200, totalSplits = 1000), None, None, None)
+        Some(defaultColumns), None, stats1.copy(completedSplits = 400, totalSplits = 1000), None, None, None)
 
 
       expectMsgType[HttpRequestCommand]
-      pub ! ActorPublisherMessage.Request(1)
-      expectQueryProgress(100, QueryProgress.Running, Some(1000), Some("splits"))
 
       pub ! QueryResults("", "", None, Some("http://3"),
-        Some(defaultColumns), Some(defaultData), stats1.copy(completedSplits = 200, totalSplits = 1000), None, None, None)
+        Some(defaultColumns), None, stats1.copy(completedSplits = 600, totalSplits = 1000), None, None, None)
 
       //buffer is 2 streamed is 0
 
+      expectMsgType[HttpRequestCommand]
 
+      pub ! QueryResults("", "", None, Some("http://3"),
+        Some(defaultColumns), Some(Vector(defaultRow)),
+        stats1.copy(completedSplits = 800, totalSplits = 1000), None, None, None)
+
+      //buffer is 4 streamed is 0
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, Some("http://3"),
+        Some(defaultColumns), Some(defaultData),
+        stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000),
+        None, None, None)
+
+      //buffer is 7 streamed is 0
+      assert(pub.underlyingActor.totalDemand == 0)
+      expectNoMsg()
+
+      pub ! ActorPublisherMessage.Request(100)
+      expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
+      expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
+      expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
+      expectMsgType[OutputChunk]
+      expectMsgType[OutputChunk]
+      expectMsgType[OutputChunk]
+
+      expectDone(pub)
     }
 
     "should retry up to a maximum of n retries if error code is PAGE_TRANSPORT_TIMEOUT" in {
-      assert(false)
+      val pub = newPublisher(query1, maxRetries = 2, retryIn = 1.second)
+      pub ! ActorPublisherMessage.Request(100)
+
+      val httpCmd = expectMsgType[HttpRequestCommand]
+      expectQueryProgress(0, QueryProgress.Started, None, None)
+
+      val error = Presto.ErrorMessage("", 65540, "", "",
+        Presto.FailureInfo("", Vector.empty, None))
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectDone(pub, success = false)
+    }
+
+    "should NOT retry if config retries is 0" in {
+      val pub = newPublisher(query1, maxRetries = 0, retryIn = 1.second)
+      pub ! ActorPublisherMessage.Request(100)
+
+      val httpCmd = expectMsgType[HttpRequestCommand]
+      expectQueryProgress(0, QueryProgress.Started, None, None)
+
+      val error = Presto.ErrorMessage("", 65540, "", "",
+        Presto.FailureInfo("", Vector.empty, None))
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectDone(pub, success = false)
     }
   }
 }
 
 //override supervisor
-class PrestoSource(maxRetries: Int, retryIn: FiniteDuration, implicitSender: ActorRef,
+class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, implicitSender: ActorRef,
                    query: Query, actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.PrestoSource(query, actorContext, context) {
 
@@ -324,6 +397,6 @@ class PrestoSource(maxRetries: Int, retryIn: FiniteDuration, implicitSender: Act
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 
-    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, maxRetries, retryIn, context)
+    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark, maxRetries, retryIn, context)
   }
 }

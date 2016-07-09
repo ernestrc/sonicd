@@ -61,8 +61,7 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
   val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
   val PRESTO_APIV = "v1"
-  val PRESTO_HIGH_WATERMARK = config.getInt("sonicd.presto.low-watermark")
-  val PRESTO_LOW_WATERMARK = config.getInt("sonicd.presto.high-watermark")
+  val PRESTO_WATERMARK = config.getInt("sonicd.presto.watermark")
 
   val ES_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.es")
   val ES_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.es.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
