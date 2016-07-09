@@ -1,12 +1,43 @@
-<configuration>
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true">
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <!-- encoders are assigned the type ch.qos.logback.classic.encoder.PatternLayoutEncoder by default -->
         <encoder>
+            <charset>UTF-8</charset>
             <pattern>[%highlight(%level)][%d{ISO8601}][%.12thread][%logger{36}] - %msg%n</pattern>
         </encoder>
     </appender>
-    <logger name="akka" level="DEBUG"/>
-    <root level="DEBUG">
+
+    <appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>/var/log/sonicd/sonicd.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- daily rollover. Make sure the path matches the one in the file element or else
+             the rollover logs are placed in the working directory. -->
+            <fileNamePattern>/var/log/sonicd/sonicd_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>5MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <!-- keep 30 days' worth of history -->
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>
+                {"component":"sonicd","trace_id":"%mdc{trace_id}","timestamp":"%d","thread":"%thread","level":"%level","logger":"%logger{35}","call_type":"%mdc{call_type}","variation":"%mdc{variation}","message":"%replace(%msg){'\"|\n', ''}","exception":"%replace(%rEx){'\"|\n', '\\n'}"}%nopex%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1000000</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <appender-ref ref="JSON"/>
+    </appender>
+
+    <logger name="akka" level="INFO"/>
+
+    <root level="TRACE">
         <appender-ref ref="STDOUT"/>
+        <appender-ref ref="ASYNC"/>
     </root>
 </configuration>

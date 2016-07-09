@@ -2,18 +2,17 @@ import com.typesafe.sbt.SbtGit.GitKeys._
 import sbt.Keys._
 import sbt._
 import sbtassembly.AssemblyKeys._
-import sbtassembly.{MergeStrategy, PathList}
+import sbtassembly.{PathList, MergeStrategy}
 import sbtbuildinfo.BuildInfoKeys._
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin._
 import spray.revolver.RevolverPlugin._
 
-object Sonic extends Build {
+object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.6"
-  val sonicdV = "0.4.4"
-  val sparkV = "1.6.1"
+  val sonicdV = "0.5.1"
 
   val commonSettings = Seq(
     organization := "build.unstable",
@@ -25,6 +24,10 @@ object Sonic extends Build {
       "-unchecked",
       "-Xlog-free-terms",
       "-deprecation",
+      "-feature",
+      "-Xlint",
+      "-Ywarn-dead-code",
+      "-Ywarn-unused",
       "-encoding", "UTF-8",
       "-target:jvm-1.8"
     )
@@ -33,10 +36,8 @@ object Sonic extends Build {
   val meta = """META.INF(.)*""".r
 
   val assemblyStrategy = assemblyMergeStrategy in assembly := {
-    case PathList(ps@_*) if ps.last endsWith ".class" => MergeStrategy.last //FIXME dangerous!
-    case PathList(ps@_*) if ps.last endsWith ".jar" => MergeStrategy.last
-    case PathList("javax", "servlet", xs@_*) => MergeStrategy.last
     case "reference.conf" => MergeStrategy.concat
+    case "application.conf" => MergeStrategy.discard
     case meta(_) => MergeStrategy.discard
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
@@ -48,6 +49,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog" % "0.2.4",
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
@@ -57,25 +59,6 @@ object Sonic extends Build {
         )
       }
     )
-
-  val spark: Project = Project("sonicd-spark", file("server/spark"))
-    .settings(commonSettings: _*)
-    .settings(
-      assemblyStrategy,
-      libraryDependencies ++= {
-        Seq(
-          "org.apache.spark" %% "spark-sql" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
-          "ch.qos.logback" % "logback-classic" % "1.0.13"
-        )
-      },
-      artifact in(Compile, assembly) := {
-        val art = (artifact in(Compile, assembly)).value
-        art.copy(`classifier` = Some("assembly"))
-      }
-    ).settings(addArtifact(artifact in(Compile, assembly), assembly).settings: _*)
-    .dependsOn(core)
-
-  val AsResource = config("asResource")
 
   val server: Project = Project("sonicd-server", file("server"))
     .settings(Revolver.settings: _*)
@@ -93,20 +76,13 @@ object Sonic extends Build {
         },
         "commit" -> gitHeadCommit.value.map(_.take(7)).getOrElse("unknown-commit")),
       buildInfoPackage := "build.unstable.sonicd",
-      ivyConfigurations += AsResource,
-      resources in Compile ++= update.value.select(configurationFilter(AsResource.name)),
       assemblyStrategy,
       assemblyJarName in assembly := "sonicd-assembly.jar",
       libraryDependencies ++= {
         Seq(
-          //spark source
-          "build.unstable" %% "sonicd-spark" % sonicdV % AsResource classifier "assembly" notTransitive(),
-          "org.apache.spark" %% "spark-core" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
-          "org.apache.spark" %% "spark-yarn" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
-          "org.apache.spark" %% "spark-sql" % sparkV excludeAll ExclusionRule(name = "slf4j-log4j12"),
           //core
-          "build.unstable" %% "tylog-core" % "0.1.3",
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "com.auth0" % "java-jwt" % "2.1.0",
           "ch.megard" %% "akka-http-cors" % "0.1.2",
           "ch.qos.logback" % "logback-classic" % "1.0.13",
           "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
@@ -122,6 +98,7 @@ object Sonic extends Build {
     .settings(
       libraryDependencies ++= {
         Seq(
+          "build.unstable" %% "tylog-core" % "0.1.3",
           "ch.qos.logback" % "logback-classic" % "1.0.13"
         )
       }

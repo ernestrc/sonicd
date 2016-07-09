@@ -24,12 +24,13 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
 
-class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends DataSource(config, queryId, query, context) {
+class ZuoraObjectQueryLanguageSource(query: build.unstable.sonicd.model.Query, actorContext: ActorContext, context: RequestContext)
+  extends DataSource(query, actorContext, context) {
 
-  val MIN_RECORDS = 100
+  val MIN_FETCH_SIZE = 100
 
-  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))(context)
+  implicit val materializer: ActorMaterializer =
+    ActorMaterializer(ActorMaterializerSettings(actorContext.system))(actorContext)
 
   def newConnectionPool(host: String): ConnectionPool = {
     Sonicd.http.newHostConnectionPoolHttps[String](host = host,
@@ -45,24 +46,25 @@ class ZuoraObjectQueryLanguageSource(config: JsObject, queryId: String, query: S
     val host: String = getConfig[String]("host")
     val batchSize: Int =
       getOption[Int]("batch-size").map { i ⇒
-        if (i > SonicdConfig.ZUORA_MAX_NUMBER_RECORDS || i <= MIN_RECORDS)
-          throw new Exception(s"'batch-size' must be between ${SonicdConfig.ZUORA_MAX_NUMBER_RECORDS} and $MIN_RECORDS")
+        if (i > SonicdConfig.ZUORA_MAX_FETCH_SIZE || i <= MIN_FETCH_SIZE)
+          throw new Exception(s"'batch-size' must be between ${SonicdConfig.ZUORA_MAX_FETCH_SIZE} and $MIN_FETCH_SIZE")
         i
-      }.getOrElse(SonicdConfig.ZUORA_MAX_NUMBER_RECORDS)
+      }.getOrElse(SonicdConfig.ZUORA_MAX_FETCH_SIZE)
 
     val auth = ZuoraAuth(user, password, host)
     val zuoraServiceActorName = ZuoraService.getZuoraServiceActorName(auth)
 
-    val zuoraService = context.child(zuoraServiceActorName).getOrElse {
+    val zuoraService = actorContext.child(zuoraServiceActorName).getOrElse {
       val pool: ConnectionPool = newConnectionPool(auth.host)
-      context.actorOf(Props(classOf[ZuoraService], pool, materializer), zuoraServiceActorName)
+      actorContext.actorOf(Props(classOf[ZuoraService], pool, materializer), zuoraServiceActorName)
     }
 
-    Props(classOf[ZOQLPublisher], query, queryId, zuoraService, auth, batchSize)
+    Props(classOf[ZOQLPublisher], query.query, query.traceId.get, zuoraService, auth, batchSize, context)
   }
 }
 
-class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: ZuoraAuth, batchSize: Int)
+class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
+                    auth: ZuoraAuth, batchSize: Int, ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
   import ZuoraObjectQueryLanguageSource._
@@ -70,18 +72,19 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug(s"starting ZOQLPublisher of '$queryId'")
+    log.debug(s"starting ZOQLPublisher of '$traceId'")
   }
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    log.debug(s"stopping ZOQLPublisher of '$queryId'")
+    log.debug(s"stopping ZOQLPublisher of '$traceId'")
   }
 
   // STATE
   val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
   var streamed = 0
-  var effectiveBatchSize: Int = batchSize //can be overriden if query has limit
+  var effectiveBatchSize: Int = batchSize
+  //can be overriden if query has limit
   var metaSent = false
 
   // HELPERS
@@ -99,7 +102,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
       } else ListBuffer.empty[SonicMessage]
       // unfortunately zuora doesn't give us any type information at runtime
       // the only way to pass type information would be to hardcode types in the table describes
-       v.foreach { n ⇒
+      v.foreach { n ⇒
         val child = n.xml.child
         val values = fields.map(k ⇒ child.find(_.label equalsIgnoreCase k).map(_.text).getOrElse(""))
         buf.append(OutputChunk(values))
@@ -113,6 +116,12 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
   // RECEIVE
   def streaming(streamLimit: Option[Int], completeBufEmpty: Boolean, zoql: String, colNames: Vector[String]): Receive = {
 
+    case ReceiveTimeout ⇒
+      if(!completeBufEmpty) {
+        buffer.enqueue(QueryProgress(QueryProgress.Waiting, 0, None, None))
+      }
+    stream()
+
     case Request(n) ⇒
       stream()
       if (completeBufEmpty && buffer.isEmpty) {
@@ -124,14 +133,14 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
 
       if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
         log.info(s"successfully fetched $totalSize zuora objects")
-        self ! DoneWithQueryExecution(success = true)
+        buffer.enqueue(QueryProgress(QueryProgress.Finished, 0, None, None))
+        self ! DoneWithQueryExecution.success
       } else {
-        val percPerBatch = 100.0 * effectiveBatchSize / totalSize
-        buffer.enqueue(QueryProgress(Some(percPerBatch), Some(s"querying for $effectiveBatchSize more objects")))
+        buffer.enqueue(QueryProgress(QueryProgress.Running, effectiveBatchSize, Some(totalSize), Some("objects")))
 
         //query-ahead
         if (buffer.size < effectiveBatchSize * 5) {
-          service ! RunQueryMore(QueryMore(zoql, res.queryLocator.get, queryId), effectiveBatchSize, auth)
+          service ! RunQueryMore(QueryMore(zoql, res.queryLocator.get, traceId), effectiveBatchSize, auth)
           log.debug("querying ahead, buffer size is {}", buffer)
         }
       }
@@ -152,11 +161,11 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
       self ! DoneWithQueryExecution.error(res.error)
 
     case r: DoneWithQueryExecution ⇒
-      if (totalDemand > 0) {
-        onNext(r)
+      buffer.enqueue(r)
+      stream()
+      if (buffer.isEmpty) {
         onCompleteThenStop()
       } else {
-        buffer.enqueue(r)
         context.become(streaming(streamLimit, completeBufEmpty = true, zoql, colNames))
       }
 
@@ -173,20 +182,21 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
 
     //first time client requests
     case r@Request(n) ⇒
+      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, Some("%")))
       val trim = query.trim().toLowerCase
       lazy val nothing = (true, Vector.empty, None)
       val (isComplete, colNames, limit): (Boolean, Vector[String], Option[Int]) =
         if (trim.startsWith("show")) {
           log.debug("showing table names")
           buffer.enqueue(ZuoraService.ShowTables.output: _*)
-          buffer.enqueue(DoneWithQueryExecution(success = true))
+          buffer.enqueue(DoneWithQueryExecution.success)
           nothing
         } else if (trim.startsWith("desc") || trim.startsWith("describe")) {
           log.debug("describing table {}", trim)
           query.split(" ").lastOption.map { parsed ⇒
             ZuoraService.tables.find(t ⇒ t.name == parsed || t.nameLower == parsed)
               .map { table ⇒
-                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution(success = true)
+                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution.success
                 buffer.enqueue(msgs: _*)
                 nothing
               }.getOrElse {
@@ -198,7 +208,7 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
             nothing
           }
         } else {
-          log.debug("running query with id '{}'", queryId)
+          log.debug("running query with id '{}'", traceId)
           val lim: Option[Int] =
             Try(ZuoraService.LIMIT.findFirstMatchIn(query).map(_.group("lim").toInt)) match {
               case Success(Some(i)) ⇒
@@ -211,12 +221,13 @@ class ZOQLPublisher(query: String, queryId: String, service: ActorRef, auth: Zuo
           val col = extractSelectColumnNames(query)
           log.debug("extracted column names: {}", col)
 
-          service ! ZuoraService.RunZOQLQuery(queryId, query, effectiveBatchSize, auth)
+          service ! ZuoraService.RunZOQLQuery(traceId, query, effectiveBatchSize, auth)
 
           (false, col, lim)
         }
 
       self ! r
+      context.setReceiveTimeout(500.millis)
       context.become(streaming(limit, completeBufEmpty = isComplete, query, colNames))
 
     case Cancel ⇒
@@ -453,7 +464,7 @@ object ZuoraService {
   //https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/E_SOAP_API_Calls/query_call
   val MAX_NUMBER_RECORDS = 2000
 
-  case class RunZOQLQuery(queryId: String, zoql: String, batchSize: Int, user: ZuoraAuth)
+  case class RunZOQLQuery(traceId: String, zoql: String, batchSize: Int, user: ZuoraAuth)
 
   case class RunQueryMore(q: QueryMore, batchSize: Int, auth: ZuoraAuth)
 

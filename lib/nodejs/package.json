@@ -1,6 +1,6 @@
 {
   "name": "sonicd",
-  "version": "0.4.4",
+  "version": "0.5.1",
   "description": "Client library for Sonicd",
   "main": "lib.js",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "author": "ernest@unstable.build",
   "license": "MIT",
-  "repository": "https://github.com/ernestrc/sonicd",
+  "repository": "https://github.com/xarxa6/sonicd",
   "dependencies": {
     "bufferutil": "^1.2.1",
     "utf-8-validate": "^1.2.1",

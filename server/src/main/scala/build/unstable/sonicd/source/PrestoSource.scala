@@ -4,44 +4,21 @@ import akka.actor._
 import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
-import akka.pattern._
 import akka.stream.actor.ActorPublisher
-import akka.stream.scaladsl.{Sink, Source}
-import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.{BuildInfo, Sonicd, SonicdConfig}
+import build.unstable.sonicd.source.http.HttpSupervisor
+import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
+import build.unstable.sonicd.{BuildInfo, SonicdConfig}
+import build.unstable.tylog.Variation
 import spray.json._
 
+import scala.collection.immutable.Seq
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
-import scala.util.{Failure, Success}
-
-class PrestoSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends DataSource(config, queryId, query, context) {
-
-  def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
-    Props(classOf[PrestoSupervisor], masterUrl, masterPort)
-
-  val masterUrl: String = getConfig[String]("url")
-  val masterPort: Int = getOption[Int]("port").getOrElse(8889)
-
-  val supervisorName = Presto.getSupervisorName(masterUrl)
-
-  lazy val handlerProps: Props = {
-    //if no presto supervisor has been initialized yet for this presto cluster, initialize one
-    val prestoSupervisor = context.child(supervisorName).getOrElse {
-      context.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
-    }
-
-    Props(classOf[PrestoPublisher], queryId, query, prestoSupervisor,
-      masterUrl, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN)
-  }
-}
 
 object Presto {
-  def getSupervisorName(masterUrl: String): String = s"suppresto_$masterUrl"
+  def getSupervisorName(masterUrl: String): String = s"presto_$masterUrl"
 
   object Headers {
     private def mkHeader(name: String, value: String): HttpHeader =
@@ -119,7 +96,10 @@ object Presto {
                           stats: StatementStats,
                           error: Option[ErrorMessage],
                           updateType: Option[String],
-                          updateCount: Option[Long])
+                          updateCount: Option[Long]) extends HttpSupervisor.Traceable {
+    override def setTraceId(newId: String): HttpSupervisor.Traceable =
+      this.copy(id = newId)
+  }
 
   case class ErrorCode(code: Int, name: String)
 
@@ -147,122 +127,62 @@ object Presto {
   implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat5(ErrorMessage.apply)
   implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
 
-  case class PostQuery(queryId: String, query: String)
-
-  case class GetQueryResults(queryId: String, nextUri: String)
-
 }
 
-class PrestoSupervisor(masterUrl: String, port: Int) extends Actor with ActorLogging {
+class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
+  extends DataSource(query, actorContext, context) {
 
-  import Presto._
-  import context.dispatcher
+  def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
+    Props(classOf[PrestoSupervisor], masterUrl, masterPort)
 
-  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(context.system))
+  val masterUrl: String = getConfig[String]("url")
+  val masterPort: Int = getOption[Int]("port").getOrElse(8889)
 
-  lazy val connectionPool = Sonicd.http.newHostConnectionPool[String](
-    host = masterUrl,
-    port = port,
-    settings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
-  )
+  val supervisorName = Presto.getSupervisorName(masterUrl)
 
-  val toQueryResults: (String) ⇒ (HttpResponse) ⇒ Future[QueryResults] = { queryId ⇒ response ⇒
-    log.debug("http req query for '{}' is successful", queryId)
-    response.entity.toStrict(SonicdConfig.PRESTO_TIMEOUT).map { d ⇒
-      log.debug("recv response from presto master for '{}' {} bytes", queryId, d.data.size)
-      val str = d.data.decodeString("UTF-8")
-      log.debug("{}", str)
-      str.parseJson.convertTo[QueryResults]
+  def getSupervisor(name: String): ActorRef = {
+    actorContext.child(name).getOrElse {
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
     }
   }
 
-  def doRequest[T](queryId: String, request: HttpRequest)
-                  (mapSuccess: (String) ⇒ (HttpResponse) ⇒ Future[T]): Future[T] = {
-    val headers = scala.collection.immutable.Seq(Headers.USER("sonicd"), Headers.SOURCE)
-    Source.single(request.copy(headers = headers) → queryId)
-      .via(connectionPool)
-      .runWith(Sink.head)
-      .flatMap {
-        case t@(Success(response), _) if response.status.isSuccess() =>
-          mapSuccess(queryId)(response)
-        case (Success(response), _) ⇒
-          log.debug("http request for query '{}' failed", queryId)
-          val parsed = response.entity.toStrict(SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT)
-          parsed.recoverWith {
-            case e: Exception ⇒
-              val error = new PrestoError(s"request failed with status ${response.status}")
-              log.error(error, s"unsuccessful response from server")
-              Future.failed(error)
-          }
-          parsed.flatMap { en ⇒
-            en.toStrict(SonicdConfig.PRESTO_TIMEOUT).flatMap { entity ⇒
-              val entityMsg = entity.data.decodeString("UTF-8")
-              val error = new PrestoError(entityMsg)
-              log.error(error, "unsuccessful response from server")
-              Future.failed(error)
-            }
-          }
-        case (Failure(e), _) ⇒ Future.failed(e)
-      }
-  }
-
-  def runStatement(queryId: String, statement: String): Future[QueryResults] = {
-    val uri: Uri = s"/${SonicdConfig.PRESTO_APIV}/statement"
-    val entity: RequestEntity = statement
-    val httpRequest: HttpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
-
-    doRequest(queryId, httpRequest)(toQueryResults).map(r ⇒ r.copy(id = queryId))
-  }
-
-  def cancelQuery(queryId: String, cancelUri: String): Future[Boolean] =
-    doRequest(queryId, HttpRequest(HttpMethods.DELETE, cancelUri)) { queryId ⇒ resp ⇒
-      Future.successful(resp.status.isSuccess())
+  lazy val handlerProps: Props = {
+    //if no presto supervisor has been initialized yet for this presto cluster, initialize one
+    val prestoSupervisor = actorContext.child(supervisorName).getOrElse {
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
     }
 
-  val queries = scala.collection.mutable.Map.empty[ActorRef, QueryResults]
-
-  override def receive: Actor.Receive = {
-
-    case Terminated(ref) ⇒
-      queries.remove(ref).map { res ⇒
-        val queryId = res.id
-        res.partialCancelUri.map { cancelUri ⇒
-          cancelQuery(queryId, cancelUri).andThen {
-            case Success(wasCanceled) if wasCanceled ⇒ log.debug("successfully canceled query '{}'", queryId)
-            case s: Success[_] ⇒ log.error("could not cancel query '{}': DELETE response was not 200 OK", queryId)
-            case Failure(e) ⇒ log.error(e, "error canceling query '{}'", queryId)
-          }
-        }.getOrElse(log.warning("could not cancel query '{}': paritalCancelUri is empty", ref))
-      }.getOrElse(log.debug("could not remove query of publisher: {}: not queryresults found", ref))
-
-    case GetQueryResults(queryId, nextUri) ⇒
-      log.debug("getting query results of '{}'", queryId)
-      val req = HttpRequest(HttpMethods.GET, nextUri)
-      doRequest(queryId, req)(toQueryResults).map(r ⇒ r.copy(id = queryId)).pipeTo(self)(sender())
-
-    case r: QueryResults ⇒
-      val pub = sender()
-      queries.update(pub, r)
-      log.debug("extracted query results for query '{}'", r.id)
-      pub ! r
-
-    case PostQuery(queryId, s) ⇒
-      log.debug("{} supervising query '{}'", self.path, s)
-      val pub = sender()
-      context.watch(pub)
-      runStatement(queryId, s).pipeTo(self)(pub)
-
-    case f: Status.Failure ⇒ sender() ! f
-
-    case anyElse ⇒ log.warning("recv unexpected msg: {}", anyElse)
+    Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
+      SonicdConfig.PRESTO_WATERMARK, SonicdConfig.PRESTO_MAX_RETRIES,
+      SonicdConfig.PRESTO_RETRYIN, context)
   }
-
 }
 
-class PrestoPublisher(queryId: String, query: String,
-                      supervisor: ActorRef, masterUrl: String,
-                      maxRetries: Int, retryIn: FiniteDuration)
-  extends ActorPublisher[SonicMessage] with ActorLogging {
+class PrestoSupervisor(val masterUrl: String, val port: Int)
+  extends HttpSupervisor[Presto.QueryResults] {
+
+  lazy val debug: Boolean = false
+
+  lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
+
+  implicit lazy val jsonFormat: RootJsonFormat[Presto.QueryResults] = Presto.queryResultsJsonFormat
+
+  lazy val httpEntityTimeout: FiniteDuration = SonicdConfig.PRESTO_HTTP_ENTITY_TIMEOUT
+
+  lazy val extraHeaders: Seq[HttpHeader] = scala.collection.immutable.Seq(Presto.Headers.SOURCE)
+
+  override def cancelRequestFromResult(t: Presto.QueryResults): Option[HttpRequest] =
+    t.partialCancelUri.map { uri ⇒
+      HttpRequest(HttpMethods.DELETE, uri)
+    }
+}
+
+class PrestoPublisher(traceId: String, query: String,
+                      supervisor: ActorRef,
+                      watermark: Int,
+                      maxRetries: Int, retryIn: FiniteDuration,
+                      ctx: RequestContext)
+  extends ActorPublisher[SonicMessage] with SonicdLogging {
 
   import Presto._
   import akka.stream.actor.ActorPublisherMessage._
@@ -273,14 +193,77 @@ class PrestoPublisher(queryId: String, query: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    log.info(s"stopping presto publisher of '$queryId' pointing at '$masterUrl'")
+    debug(log, "stopping presto publisher of '{}'", traceId)
     retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
+    context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.info(s"starting presto publisher of '$queryId' pointing at '$masterUrl'")
+    debug(log, "starting presto publisher of '{}'", traceId)
+    context watch supervisor
   }
+
+
+  /* HELPERS */
+
+  def tryPushDownstream() {
+    while (isActive && totalDemand > 0 && buffer.nonEmpty) {
+      onNext(buffer.dequeue())
+    }
+  }
+
+  def tryPullUpstream() {
+    if (lastQueryResults.isDefined && lastQueryResults.get.nextUri.isDefined && (buffer.isEmpty || shouldQueryAhead)) {
+      val cmd = HttpRequestCommand(traceId,
+        HttpRequest(HttpMethods.GET, lastQueryResults.get.nextUri.get, headers = headers))
+      supervisor ! cmd
+      lastQueryResults = None
+    }
+  }
+
+  def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
+
+  def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
+    TypeMetadata(v.map {
+      case ColMeta(name, "boolean") ⇒ (name, JsBoolean(false))
+      case ColMeta(name, "bigint") ⇒ (name, JsNumber(0L))
+      case ColMeta(name, "double") ⇒ (name, JsNumber(0d))
+      case ColMeta(name, "varchar" | "time" | "date" | "timestamp") ⇒ (name, JsString(""))
+      case ColMeta(name, "varbinary") ⇒ (name, JsArray(JsNumber(0)))
+      case ColMeta(name, "array") ⇒ (name, JsArray.empty)
+      case ColMeta(name, "json" | "map") ⇒ (name, JsObject(Map.empty[String, JsValue]))
+      case ColMeta(name, anyElse) ⇒
+        warning(log, "could not map type {}", anyElse)
+        (name, JsString(""))
+    })
+  }
+
+  val submitUri = s"/${SonicdConfig.PRESTO_APIV}/statement"
+  val headers: scala.collection.immutable.Seq[HttpHeader] =
+    Seq(ctx.user.map(u ⇒ Headers.USER(u.user)).getOrElse(Headers.USER("sonicd")))
+
+  val queryCommand = {
+    val entity: RequestEntity = query
+    val httpRequest = HttpRequest.apply(HttpMethods.POST, submitUri, entity = entity, headers = headers)
+    HttpRequestCommand(traceId, httpRequest)
+  }
+
+  val units = Some("splits")
+
+
+  /* STATE */
+
+  var bufferedMeta: Boolean = false
+  val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
+  var lastQueryResults: Option[QueryResults] = None
+  var retryScheduled: Option[Cancellable] = None
+  var retried = 0
+  var callType: CallType = ExecuteStatement
+  var completedSplits = 0
+
+
+  /* BEHAVIOUR */
 
   def terminating(done: DoneWithQueryExecution): Receive = {
     tryPushDownstream()
@@ -294,50 +277,14 @@ class PrestoPublisher(queryId: String, query: String,
     }
   }
 
-  def tryPushDownstream() {
-    while (isActive && totalDemand > 0 && buffer.nonEmpty) {
-      onNext(buffer.dequeue())
-    }
-  }
-
-  def tryPullUpstream() {
-    if (lastQueryResults.isDefined && lastQueryResults.get.nextUri.isDefined && (buffer.isEmpty || shouldQueryAhead)) {
-      supervisor ! GetQueryResults(lastQueryResults.get.id, lastQueryResults.get.nextUri.get)
-      lastQueryResults = None
-    }
-  }
-
-  def shouldQueryAhead: Boolean = buffer.length < 2466 * 2
-
-  def getTypeMetadata(v: Vector[ColMeta]): TypeMetadata = {
-    TypeMetadata(v.map {
-      case ColMeta(name, "boolean") ⇒ (name, JsBoolean(false))
-      case ColMeta(name, "bigint") ⇒ (name, JsNumber(0L))
-      case ColMeta(name, "double") ⇒ (name, JsNumber(0d))
-      case ColMeta(name, "varchar" | "time" | "date" | "timestamp") ⇒ (name, JsString(""))
-      case ColMeta(name, "varbinary") ⇒ (name, JsArray(JsNumber(0)))
-      case ColMeta(name, "array") ⇒ (name, JsArray.empty)
-      case ColMeta(name, "json" | "map") ⇒ (name, JsObject(Map.empty[String, JsValue]))
-      case ColMeta(name, anyElse) ⇒
-        log.warning(s"could not map type $anyElse")
-        (name, JsString(""))
-    })
-  }
-
-  var bufferedMeta: Boolean = false
-  val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
-  var lastQueryResults: Option[QueryResults] = None
-  var retryScheduled: Option[Cancellable] = None
-  var retried = 0
-
-  def connected: Receive = commonReceive orElse {
+  def materialized: Receive = commonReceive orElse {
 
     case Request(n) ⇒
       tryPushDownstream()
       tryPullUpstream()
 
     case r: QueryResults ⇒
-      log.debug("recv query results of query '{}'", r.id)
+      debug(log, "received query results of query '{}'", r.id)
       lastQueryResults = Some(r)
       //extract type metadata
       if (!bufferedMeta && r.columns.isDefined) {
@@ -345,42 +292,67 @@ class PrestoPublisher(queryId: String, query: String,
         bufferedMeta = true
       }
 
+      val splits = r.stats.completedSplits - completedSplits
+      val totalSplits = Some(r.stats.totalSplits.toDouble)
+      completedSplits = r.stats.completedSplits
+
       r.stats.state match {
-        case "RUNNING" | "QUEUED" | "PLANNING" | "STARTING" ⇒
+
+        case "QUEUED" | "PLANNING" ⇒
+          buffer.enqueue(QueryProgress(QueryProgress.Waiting, splits, totalSplits, units))
+          r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
+          tryPullUpstream()
+
+        case "RUNNING" | "STARTING" | "FINISHING" ⇒
+          buffer.enqueue(QueryProgress(QueryProgress.Running, splits, totalSplits, units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           tryPullUpstream()
 
         case "FINISHED" ⇒
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
-          context.become(terminating(done = DoneWithQueryExecution(success = true)))
+          trace(log, traceId, callType, Variation.Success, r.stats.state)
+          context.become(terminating(done = DoneWithQueryExecution.success))
 
         case "FAILED" ⇒
-          val e = new Exception(r.error.get.message)
-          r.error.get.errorCode match {
+          val error = r.error.get
+          val e = new Exception(error.message)
+          trace(log, traceId, callType, Variation.Failure(e),
+            "query status is FAILED: {}", r.error.get)
+          error.errorCode match {
+            // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
             case 65540 /* PAGE_TRANSPORT_TIMEOUT */ if retried < maxRetries ⇒
               retried += 1
-              log.warning("retrying query '{}' for the {} time in {}: {}",
-                query, retried, retryIn, r.error.get)
+              callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
-                .scheduleOnce(retryIn, supervisor, PostQuery(queryId, query)))
-            case _ ⇒
-              log.warning("query failed {}; retried {}", r, retried)
-              context.become(terminating(DoneWithQueryExecution.error(e)))
+                .scheduleOnce(retryIn, supervisor,
+                  runStatement(callType, queryCommand)))
+            case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
         case state ⇒
-          val e = new Exception(s"unexpected query state from presto $state")
+          val msg = s"unexpected query state from presto $state"
+          val e = new Exception(msg)
+          trace(log, traceId, callType, Variation.Failure(e), msg)
           context.become(terminating(DoneWithQueryExecution.error(e)))
       }
       tryPushDownstream()
 
-    case Status.Failure(e) ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
+    case Status.Failure(e) ⇒
+      trace(log, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
+      context.become(terminating(DoneWithQueryExecution.error(e)))
+  }
+
+  def runStatement(callType: CallType, post: HttpRequestCommand) = Future {
+    trace(log, traceId, callType, Variation.Attempt,
+      "send query to supervisor in path {}", supervisor.path)
+    supervisor ! post
   }
 
   def commonReceive: Receive = {
     case Cancel ⇒
       log.debug("client canceled")
-      onCompleteThenStop()
+      onComplete()
+      context.stop(self)
   }
 
   def receive: Receive = commonReceive orElse {
@@ -391,8 +363,9 @@ class PrestoPublisher(queryId: String, query: String,
 
     //first time client requests
     case Request(n) ⇒
-      supervisor ! PostQuery(queryId, query)
-      log.debug("sent query to supervisor {}", supervisor)
-      context.become(connected)
+      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, None))
+      runStatement(callType, queryCommand)
+      tryPushDownstream()
+      context.become(materialized)
   }
 }

@@ -1,18 +1,20 @@
 package build.unstable.sonicd.service
 
+import java.net.InetAddress
+
 import akka.actor._
 import akka.io.Tcp
-import akka.stream.actor.ActorPublisher
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.SyntheticPublisher
-import build.unstable.sonicd.system.SonicController.NewQuery
-import build.unstable.sonicd.system.TcpHandler
+import build.unstable.sonicd.system.actor.SonicController.NewQuery
+import build.unstable.sonicd.system.actor.TcpHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.duration._
+import scala.util.Success
 
 class MockController(msg: Any) extends Actor {
 
@@ -22,7 +24,7 @@ class MockController(msg: Any) extends Actor {
   override def receive: Receive = {
     case Terminated(ref) ⇒
       isTerminated = true
-    case NewQuery(query) ⇒
+    case query: NewQuery ⇒
       isMaterialized = true
       sender() ! msg
       context watch sender()
@@ -61,27 +63,36 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       TestActorRef[MockConnection](Props[MockConnection], "connection" + name)
 
     val tcpHandler =
-      TestActorRef[TcpHandler](Props(classOf[TcpHandler], controller, connection), "tcpHandler" + name)
+      TestActorRef[TcpHandler](Props(classOf[TcpHandler],
+      controller, self, connection, InetAddress.getLocalHost), "tcpHandler" + name)
 
     (controller, connection, tcpHandler)
   }
 
+  def newHandler: TestActorRef[TcpHandler] = {
+    TestActorRef[TcpHandler](
+      Props(classOf[TcpHandler], self, self, self, InetAddress.getLocalHost)
+      .withDispatcher(CallingThreadDispatcher.Id))
+  }
+
   def newHandlerOnStreamingState(props: Props): TestActorRef[TcpHandler] = {
-    val tcpHandler =
-      TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
+    val tcpHandler = newHandler
+
     expectMsg(Tcp.ResumeReading)
 
     tcpHandler ! Tcp.Received(queryBytes)
-    //expectMsg(Tcp.ResumeReading)
-    //expectMsgType[NewQuery]
-    receiveN(2) //race condition between resume and q
+    val q = expectMsgType[NewQuery]
+    expectMsg(Tcp.ResumeReading)
+
+    //make sure that traceId is injected
+    assert(q.query.traceId.nonEmpty)
 
     tcpHandler ! props
     tcpHandler
   }
 
   def progressFlowNoAck(tcpHandler: ActorRef): Tcp.Write = {
-    val prog = QueryProgress(Some(100), None)
+    val prog = QueryProgress(QueryProgress.Started, 1, Some(100), None)
     val ack = TcpHandler.Ack(1)
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(prog.toBytes), ack)
     tcpHandler ! prog
@@ -99,7 +110,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   def sendDoneNoAck(tcpHandler: ActorRef, ack: Int): Tcp.Write = {
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     val a = TcpHandler.Ack(ack)
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), a)
     tcpHandler ! done
@@ -116,8 +127,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   }
 
   "should buffer and frame incoming query bytes" in {
-    val tcpHandler =
-      TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
+    val tcpHandler = newHandler
     watch(tcpHandler)
 
     expectMsg(Tcp.ResumeReading)
@@ -133,9 +143,34 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     expectTerminated(tcpHandler)
   }
 
+  "should handle authenticate cmd" in {
+    val tcpHandler = newHandler
+    watch(tcpHandler)
+
+    expectMsg(Tcp.ResumeReading)
+    val (qChunk1, qChunk2) = SonicdSource.lengthPrefixEncode(
+      Authenticate("test", "1234", None).toBytes).splitAt(10)
+
+    tcpHandler ! Tcp.Received(qChunk1)
+    expectMsg(Tcp.ResumeReading)
+    tcpHandler ! Tcp.Received(qChunk2)
+
+    val withTraceId = expectMsgType[Authenticate]
+    expectMsg(Tcp.ResumeReading)
+
+    assert(withTraceId.traceId.nonEmpty)
+
+    tcpHandler ! Success("token")
+
+    val out = OutputChunk(Vector("token"))
+    expectMsg(Tcp.Write(SonicdSource.lengthPrefixEncode(out.toBytes), TcpHandler.Ack(1)))
+    clientAcknowledge(tcpHandler)
+
+    expectTerminated(tcpHandler)
+  }
+
   "should send 'done' event dowsntream if publisher props can't be created" in {
-    val tcpHandler =
-      TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
+    val tcpHandler = newHandler
     watch(tcpHandler)
 
     expectMsg(Tcp.ResumeReading)
@@ -242,7 +277,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     msgs.head shouldBe an[TypeMetadata]
     val (progress, tail) = msgs.tail.splitAt(100)
-    progress.tail.foreach( _ shouldBe QueryProgress(Some(1), None))
+    progress.tail.foreach(_.getClass() shouldBe classOf[QueryProgress])
     tail.head shouldBe a[OutputChunk]
     tail.tail.head shouldBe a[DoneWithQueryExecution]
 
@@ -274,7 +309,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     tcpHandler2 ! Tcp.PeerClosed
 
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     controller.underlyingActor.isMaterialized shouldBe true
     tcpHandler2 ! done
 
@@ -301,8 +336,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   "should handle error event when controller fails to instantiate publisher" in {
 
-    val tcpHandler =
-      TestActorRef[TcpHandler](Props(classOf[TcpHandler], self, self))
+    val tcpHandler = newHandler
     watch(tcpHandler)
     expectMsg(Tcp.ResumeReading)
 
@@ -325,7 +359,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   "should terminate if connection breaks before sending query" in {
 
-    val (controller, connection, tcpHandler) = newTestCase("_2", syntheticPubProps)
+    val (_, connection, tcpHandler) = newTestCase("_2", syntheticPubProps)
     watch(tcpHandler)
     connection ! PoisonPill
     expectTerminated(tcpHandler)
@@ -335,7 +369,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
   "in closing state, it should buffer all messages received and send them for writing when possible before terminating" in {
     val tcpHandler = newHandlerOnStreamingState(zombiePubProps)
     watch(tcpHandler)
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
 
     val ack1 = TcpHandler.Ack(1)
     val w1 = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack1)
@@ -393,12 +427,12 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     tcpHandler ! TcpHandler.CompletedStream
     tcpHandler.underlying.isTerminated shouldBe false
 
-    expectMsgPF(){
+    expectMsgPF() {
       case w: Tcp.Write ⇒ SonicMessage.fromBytes(w.data.splitAt(4)._2) match {
         case d: DoneWithQueryExecution ⇒
           d.success shouldBe false
-          d.errors.length shouldBe 1
-          d.errors.head.getMessage.contains("Protocol") shouldBe true //an[ProtocolException] doesn't match
+          assert(d.error.nonEmpty)
+          d.error.get.getMessage.contains("Protocol") shouldBe true //an[ProtocolException] doesn't match
           tcpHandler ! w.ack
       }
     }
@@ -418,7 +452,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
     //send done before ack2
     val ack3 = TcpHandler.Ack(3)
-    val done = DoneWithQueryExecution(success = true)
+    val done = DoneWithQueryExecution.success
     val w = Tcp.Write(SonicdSource.lengthPrefixEncode(done.toBytes), ack3)
     tcpHandler ! done
     expectNoMsg()

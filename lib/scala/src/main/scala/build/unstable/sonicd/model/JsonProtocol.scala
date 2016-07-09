@@ -1,7 +1,12 @@
 package build.unstable.sonicd.model
 
+import java.net.InetAddress
+import java.util.concurrent.TimeUnit
+
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import spray.json._
+
+import scala.concurrent.duration.FiniteDuration
 
 trait JsonProtocol extends SprayJsonSupport with DefaultJsonProtocol {
 
@@ -19,21 +24,22 @@ trait JsonProtocol extends SprayJsonSupport with DefaultJsonProtocol {
     }
   }
 
-  implicit val receiptJsonFormat: RootJsonFormat[Receipt] = jsonFormat4(Receipt.apply)
+  implicit val inetAddressJsonFormat: RootJsonFormat[InetAddress] = new RootJsonFormat[InetAddress] {
+    override def read(json: JsValue): InetAddress = InetAddress.getByName(json.convertTo[String])
 
-  implicit val queryJsonFormat: RootJsonFormat[Query] = new RootJsonFormat[Query] {
-    override def write(obj: Query): JsValue = JsObject(Map(
-      "config" → obj._config, //when we write, we don't want to leak the server side 'config'
-      "query_id" → obj.query_id.map(JsString.apply).getOrElse(JsNull),
-      "query" → JsString(obj.query)
-    ))
+    override def write(obj: InetAddress): JsValue = JsString(obj.getHostName)
+  }
 
-    override def read(json: JsValue): Query = {
-      val f = json.asJsObject.fields
-      val config = f("config")
-      val query = f("query").convertTo[String]
-      new Query(None, query, config)
+  implicit val durationJsonFormat: RootJsonFormat[FiniteDuration] = new RootJsonFormat[FiniteDuration] {
+    def read(json: JsValue): FiniteDuration = {
+      val obj = json.asJsObject.fields
+      FiniteDuration(obj("length").convertTo[Long], TimeUnit.valueOf(obj("unit").convertTo[String]))
     }
+
+    def write(obj: FiniteDuration): JsValue = JsObject(Map(
+      "length" → JsNumber(obj.length),
+      "unit" → JsString(obj.unit.toString)
+    ))
   }
 
 }

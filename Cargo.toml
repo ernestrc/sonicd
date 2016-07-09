@@ -1,7 +1,26 @@
 [package]
 name = "sonicd"
-version = "0.4.0"
+version = "0.5.1"
 authors = ["Ernest Romero <ernest@unstable.build>"]
+description = "client library for Sonicd, a data streaming gateway"
+license-file = "LICENSE"
+documentation = "http://sonicd.unstable.build/rustdoc"
+homepage = "http://sonicd.unstable.build"
+repository = "https://github.com/xarxa6/sonicd"
+include = [
+  "lib/rust/**/*.rs*",
+  "cli/**/*.rs*",
+  "Cargo.toml",
+  "build.rs",
+  "Cargo.lock"
+]
+build = "build.rs"
+
+[features]
+# cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
+websocket = ["ws"]
+default = ["serde_codegen"]
+nightly = ["serde_macros"]
 
 [lib]
 name = "sonicd"
@@ -11,21 +30,38 @@ path = "lib/rust/src/lib.rs"
 name = "sonic"
 path = "cli/src/main.rs"
 
+[build-dependencies]
+serde_codegen = { version = "*", optional = true }
+syntex = "*"
+
 [dependencies]
-serde = "*"
-serde_json = "*"
-serde_macros = "*"
-byteorder = "*"
-curl = "*"
-nix = "*"
-log = "*"
+serde = "0.7.11"
+error-chain = "0.1.12"
+serde_json = { git = "https://github.com/serde-rs/json.git" }
+serde_macros = { version = "0.7.11", optional = true }
+byteorder = "0.5.3"
+nix = "0.6.0"
+log = "0.3.6"
 
-regex = "*"
-docopt = "0.6"
-docopt_macros = "0.6"
-rustc-serialize = "0.3"
-env_logger = "*"
-pbr = "*"
+# cli
+regex = "0.1.71"
+docopt = "0.6.81"
+rustc-serialize = "0.3.19"
+env_logger = "0.3.3"
+ansi_term = "0.7"
+ws = { version =  "0.5.0", optional = true }
+pbr = { git = "https://github.com/ernestrc/pb.git" }
+# pbr = { path = "../../dev/rust/pb" }
 
-#[profile.release]
-#debug = true
+
+# FIXME cache for now separate toml until
+# https://github.com/rust-lang/cargo/pull/2325
+# otherwise on non-linux os project does not compile
+# threadpool = { version = "*", optional = true }
+# num_cpus = { version = "0.2", optional = true }
+# lazy_static = { version =  "0.1.*", optional = true }
+#
+# [[bin]]
+# name = "sonicc"
+# path = "cache/src/main.rs"
+# features = ["cache"]

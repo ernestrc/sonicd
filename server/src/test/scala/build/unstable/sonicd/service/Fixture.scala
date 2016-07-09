@@ -1,11 +1,16 @@
 package build.unstable.sonicd.service
 
-import akka.actor.{Actor, Props}
+import java.io.File
+import java.nio.file.{StandardWatchEventKinds, WatchEvent, Path}
+import java.nio.file.WatchEvent.Kind
+
+import akka.actor.{Actor, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
-import build.unstable.sonicd.model.{SonicMessage, SonicdSource}
+import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonicd.model.{RequestContext, SonicMessage, SonicdSource}
 import build.unstable.sonicd.source.SyntheticPublisher
-import spray.json._
+import build.unstable.sonicd.source.file.FileWatcherWorker
 
 object Fixture {
 
@@ -14,26 +19,44 @@ object Fixture {
   val queryBytes = SonicdSource.lengthPrefixEncode(syntheticQuery.toBytes)
 
   // in memory db
-  val testDB = "testdb"
-  val H2Url = s"jdbc:h2:mem:$testDB;DB_CLOSE_DELAY=-1;"
   val H2Driver = "org.h2.Driver"
-  val H2Config =
-    s"""
-       | {
-       |  "driver" : "$H2Driver",
-       |  "url" : "$H2Url",
-       |  "class" : "JdbcSource"
-       | }
-    """.stripMargin.parseJson.asJsObject
 
-  val syntheticPubProps = Props(classOf[SyntheticPublisher], 1000, Some(1), 10, "1", false)
+  val testUser = ApiUser("serrallonga", 10, ApiKey.Mode.ReadWrite, None)
+
+  val testCtx = RequestContext("1", Some(testUser))
+
+  val syntheticPubProps = Props(classOf[SyntheticPublisher], 1L, 1000, Some(1), 10, "1", false, testCtx)
     .withDispatcher(CallingThreadDispatcher.Id)
 
   val zombiePubProps = Props[Zombie].withDispatcher(CallingThreadDispatcher.Id)
+
+  val tmp = new File("/tmp/sonicd_specs")
+  val tmp2 = new File("/tmp/sonicd_specs/recursive")
+  val tmp3 = new File("/tmp/sonicd_specs/recursive/rec2")
+  val tmp32 = new File("/tmp/sonicd_specs/recursive/rec2/rec2")
+  val tmp4 = new File("/tmp/sonicd_specs/recursive2")
+  val file = new File("/tmp/sonicd_specs/recursive/tmp.txt")
+  val file2 = new File("/tmp/sonicd_specs/recursive/rec2/tmp.txt")
+  val file3 = new File("/tmp/sonicd_specs/logback.xml")
+
+  def getEvent(k: Kind[Path], path: Path) = new WatchEvent[Path] {
+    override def count(): Int = 1
+
+    override def kind(): Kind[Path] = k
+
+    override def context(): Path = path
+  }
 }
 
 class Zombie extends ActorPublisher[SonicMessage] {
   override def receive: Actor.Receive = {
     case any ⇒ //ignore
+  }
+}
+
+class ImplicitRedirectActor(implicitSender: ActorRef) extends Actor {
+  override def receive: Receive = {
+    case FileWatcherWorker.DoWatch ⇒ implicitSender ! FileWatcherWorker.DoWatch
+    case anyMsg ⇒ implicitSender ! anyMsg
   }
 }

@@ -4,15 +4,15 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{DataSource, SonicMessage}
-import spray.json.{JsArray, JsString, JsNumber, JsObject}
+import build.unstable.sonicd.model.{DataSource, Query, RequestContext, SonicMessage}
+import spray.json.{JsArray, JsNumber, JsString}
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
 
-class SyntheticSource(config: JsObject, queryId: String, query: String, context: ActorContext)
-  extends DataSource(config, queryId, query, context) {
+class SyntheticSource(query: Query, actorContext: ActorContext, context: RequestContext)
+  extends DataSource(query, actorContext, context) {
 
   val handlerProps: Props = {
     val seed = getOption[Int]("seed").getOrElse(1000)
@@ -20,12 +20,13 @@ class SyntheticSource(config: JsObject, queryId: String, query: String, context:
     val progress = getOption[Int]("progress-delay").getOrElse(10)
     val indexed = getOption[Boolean]("indexed").getOrElse(false)
 
-    Props(classOf[SyntheticPublisher], seed, size, progress, query, indexed)
+    Props(classOf[SyntheticPublisher], query.id.get, seed, size,
+      progress, query.query, indexed, context)
   }
 }
 
-class SyntheticPublisher(seed: Int, size: Option[Int], progressWait: Int,
-                         query: String, indexed: Boolean)
+class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWait: Int,
+                         query: String, indexed: Boolean, ctx: RequestContext)
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
   import build.unstable.sonicd.model._
@@ -61,7 +62,8 @@ class SyntheticPublisher(seed: Int, size: Option[Int], progressWait: Int,
     if (totalDemand > 0L && isActive) {
       if (streamed < preTarget) {
         Thread.sleep(progressWait)
-        onNext(QueryProgress(Some(1), None))
+        if (streamed + 1 == preTarget) onNext(QueryProgress(QueryProgress.Finished, 1, Some(100), Some("%")))
+        else onNext(QueryProgress(QueryProgress.Running, 1, Some(100), Some("%")))
         streamed += 1
         progress(demand - 1L)
       } else {
@@ -83,7 +85,7 @@ class SyntheticPublisher(seed: Int, size: Option[Int], progressWait: Int,
 
     case Request(n) if target.nonEmpty && streamed >= target.get ⇒
       log.info(s"reached target of ${target.get - preTarget}")
-      onNext(DoneWithQueryExecution(success = true))
+      onNext(DoneWithQueryExecution.success)
       onCompleteThenStop()
 
     case Request(n) ⇒ stream(n)

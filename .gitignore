@@ -12,4 +12,5 @@ server/src/main/resources/sonicd-spark-sql.jar
 server/src/main/resources/application.conf
 examples/nodejs/node_modules
 lib/nodejs/node_modules
-
+.cargo
+scripts/certs

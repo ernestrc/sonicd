@@ -1,45 +1,14 @@
-use model::{Query, Error, Result, SonicMessage};
-use std::collections::HashMap;
-use curl::http::{Response, Request, Handle};
-use curl::http::handle::Method;
+use model::*;
+use model::protocol::{SonicMessage, MessageKind};
+use error::{ErrorKind, Result};
+use net;
+use std::net::TcpStream;
+use std::os::unix::io::AsRawFd;
+use std::io::Write;
+use std::fmt::Debug;
+use std::net::ToSocketAddrs;
 
-static API_VERSION: &'static str = "v1";
-
-fn build_uri(scheme: &str, host: &str, http_port: &u16, path: &str) -> String {
-    format!("{}://{}:{}/{}/{}",
-            scheme,
-            host,
-            http_port,
-            API_VERSION,
-            path)
-}
-
-fn request(path: &str,
-           body: Option<&str>,
-           method: Method,
-           host: &str,
-           http_port: &u16,
-           client: &mut Handle)
-           -> Result<Response> {
-
-    let url = build_uri("http", host, http_port, path);
-
-    let mut headers = HashMap::new();
-    headers.insert("Content-Type", "application/json");
-
-    let req = Request::new(client, method)
-                  .uri(url)
-                  .headers(headers.into_iter());
-
-    let res = match body {
-        Some(b) => req.body(b).exec(),
-        None => req.exec(),
-    };
-
-    res.map_err(|e| Error::HttpError(e))
-}
-
-pub fn run(query: Query, host: &str, tcp_port: &u16) -> Result<Vec<SonicMessage>> {
+pub fn run<A: ToSocketAddrs>(query: Query, addr: A) -> Result<Vec<OutputChunk>> {
 
     let mut buf = Vec::new();
 
@@ -48,14 +17,100 @@ pub fn run(query: Query, host: &str, tcp_port: &u16) -> Result<Vec<SonicMessage>
             buf.push(msg);
         };
 
-        try!(::tcp::stream(query, host, tcp_port, fn_buf, |_| {}, |_| {}));
+        try!(stream(query, addr, fn_buf, |_| {}, |_| {}));
     }
 
     Ok(buf)
 }
 
-pub fn version(host: &str, http_port: &u16) -> Result<String> {
-    let mut client = Handle::new();
-    let r = try!(request("version", None, Method::Get, host, http_port, &mut client));
-    String::from_utf8(r.move_body()).map_err(|e| Error::SerDe(format!("{}", e)))
+pub fn stream<C, O, P, M, A>(command: C,
+                             addr: A,
+                             mut output: O,
+                             mut progress: P,
+                             mut metadata: M)
+                             -> Result<()>
+    where O: FnMut(OutputChunk) -> (),
+          P: FnMut(QueryProgress) -> (),
+          M: FnMut(TypeMetadata) -> (),
+          C: Command + Debug + Into<SonicMessage>,
+          A: ToSocketAddrs
+{
+
+    let mut stream = try!(TcpStream::connect(addr));
+
+    // set timeout 10s
+    try!(stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))));
+
+    debug!("framing command {:?}", &command);
+
+    // frame command
+    let fbytes = try!(net::frame(command.into()));
+
+    debug!("framed command into {} bytes", fbytes.len());
+
+    // send query
+    try!(stream.write(&fbytes.as_slice()));
+
+    let fd = stream.as_raw_fd();
+
+    let res: Result<()>;
+
+    loop {
+        let msg = try!(net::read_message(&fd));
+        match msg.event_type {
+            MessageKind::OutputKind => output(try!(msg.into())),
+            MessageKind::ProgressKind => progress(try!(msg.into())),
+            MessageKind::TypeMetadataKind => metadata(try!(msg.into())),
+            MessageKind::DoneKind => {
+                let d: Done = try!(msg.into());
+                if let Some(error) = d.0 {
+                    res = Err(ErrorKind::QueryError(error).into())
+                } else {
+                    res = Ok(());
+                };
+                let msg: SonicMessage = Acknowledge.into();
+                let fbytes = try!(net::frame(msg));
+                // send ack
+                try!(stream.write(&fbytes.as_slice()));
+                debug!("disconnected");
+                break;
+            }
+            MessageKind::QueryKind |
+            MessageKind::AuthKind |
+            MessageKind::AcknowledgeKind => {}
+        }
+    }
+
+    return res;
+}
+
+pub fn authenticate<A: ToSocketAddrs>(user: String,
+                                      key: String,
+                                      addr: A,
+                                      trace_id: Option<String>)
+                                      -> Result<String> {
+
+    let auth = Authenticate {
+        key: key,
+        user: user,
+        trace_id: trace_id,
+    };
+    let mut buf: Vec<OutputChunk> = Vec::new();
+
+    {
+        let fn_buf = |msg| {
+            buf.push(msg);
+        };
+
+        try!(stream(auth, addr, fn_buf, |_| {}, |_| {}));
+    }
+
+    let OutputChunk(data) = try!(buf.into_iter()
+        .next()
+        .ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
+
+    let x =
+        try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
+    let s = try!(x.as_str().ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
+    Ok(s.to_owned())
 }
