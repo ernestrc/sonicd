@@ -15,6 +15,10 @@ error_chain! {
     }
 
     errors {
+        UnexpectedState(state: &'static str) {
+            description("Unexpected handler state")
+                display("unexpected handler state: {} ", state)
+        }
 
         QueryError(msg: String) {
             description("error in query")

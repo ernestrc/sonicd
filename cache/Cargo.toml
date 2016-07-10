@@ -17,8 +17,6 @@ lazy_static =   "0.1.*"
 error-chain = "0.1.12"
 byteorder = "0.5.3"
 bytes = "0.3.0"
-log4rs-rolling-file = "0.1.2"
-log4rs = "0.4.8"
 
 [dependencies.sonicd]
 version = "*"

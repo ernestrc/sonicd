@@ -42,6 +42,9 @@ serde_macros = { version = "0.7.11", optional = true }
 byteorder = "0.5.3"
 nix = "0.6.0"
 log = "0.3.6"
+lazy_static = "0.1.*"
+bytes = "0.3.0"
+slab = "*"
 
 # cli
 regex = "0.1.71"
@@ -59,7 +62,6 @@ pbr = { git = "https://github.com/ernestrc/pb.git" }
 # otherwise on non-linux os project does not compile
 # threadpool = { version = "*", optional = true }
 # num_cpus = { version = "0.2", optional = true }
-# lazy_static = { version =  "0.1.*", optional = true }
 #
 # [[bin]]
 # name = "sonicc"

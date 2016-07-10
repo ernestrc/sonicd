@@ -36,23 +36,9 @@ use handler::*;
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONICD_COMMIT");
 
-// TODO use select! in main loop for signals
 // TODO https://github.com/BurntSushi/chan-signal
 // use nix::sys::signal;
 fn ssig() {}
-
-macro_rules! perror {
-    ($name:expr, $res:expr) => {{
-        match $res {
-            Ok(s) => s,
-            Err(err) => {
-                let err: Error = err.into();
-                error!("{}: {}\n{:?}", $name, err, err.backtrace());
-                continue;
-            }
-        }
-    }}
-}
 
 lazy_static! {
     static ref NO_INTEREST: EpollEvent = {
@@ -94,7 +80,7 @@ fn _main() -> Result<()> {
     // epoll_wait with no timeout
     let loop_ms = -1 as isize;
 
-    // TODO change epoll register to be edge triggered, 
+    // TODO change epoll register to be edge triggered,
     // TODO bench all epoll instances monitoring all files with edge triggered
     // vs one epoll instance per fd with level triggered
     // vs one epoll instance per fd with edge triggered
@@ -131,7 +117,7 @@ fn _main() -> Result<()> {
                         debug!("unregistered interests for {}", clifd);
                     } else {
 
-                        let mut handler: &mut Rc<Box<Handler>> = match handlers.entry(clifd) {
+                        let mut handler: &mut Rc<Box<Handler + Send>> = match handlers.entry(clifd) {
                             Occupied(entry) => entry.into_mut(),
                             Vacant(entry) =>
                                 entry.insert(Rc::new(Box::new(IoHandler::new(epfd, clifd)))),
@@ -181,23 +167,27 @@ fn _main() -> Result<()> {
 
         for _ in evts {
 
-            let clifd = perror!("accept4" ,eagain!(accept4, "accept4", srvfd, sockf));
-            debug!("accept4: accpeted new tcp client {}", &clifd);
+            // TODO!!! Keep track of what fd is assigned to what epoll instance
+            // and register interests for closed connections to do better
+            // load balancing
+            if let Some(clifd) = eagain!(accept4, "accept4", srvfd, sockf) {
+                debug!("accept4: accpeted new tcp client {}", &clifd);
 
-            let info = ginterest(clifd);
+                let info = ginterest(clifd);
 
-            // round robin
-            let next = (accepted % io_cpus as u64) as usize;
+                // round robin
+                let next = (accepted % io_cpus as u64) as usize;
 
-            let epfd: RawFd = *epfds.get(next).unwrap();
+                let epfd: RawFd = *epfds.get(next).unwrap();
 
-            debug!("assigned client to next {} epoll instance {}", &next, &epfd);
+                debug!("assigned client to next {} epoll instance {}", &next, &epfd);
 
-            perror!("epoll_ctl", epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info));
+                perror!("epoll_ctl", epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info));
 
-            debug!("epoll_ctl: registered interests for {}", clifd);
+                debug!("epoll_ctl: registered interests for {}", clifd);
 
-            accepted += 1;
+                accepted += 1;
+            }
         }
     }
 }

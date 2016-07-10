@@ -1,39 +1,51 @@
-/*
-use error::{Result, ErrorKind, Error};
-use sonicd::SonicMessage;
-use sonicd::io::{read, write};
 use std::os::unix::io::RawFd;
 use std::io::{Cursor, Write, Read};
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use byteorder::{BigEndian, ByteOrder};
 use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
+
+use model::protocol::SonicMessage;
+use error::*;
+use super::connection::Connection;
+use source::Source;
+use super::poll::Registry;
+use std::marker::Sized;
 
 const MEGABYTE: usize = 1024 * 1024;
 
 pub trait Handler {
+    fn on_error(&mut self) -> Result<()>;
+    fn on_close(&mut self) -> Result<()>;
     fn on_readable(&mut self) -> Result<()>;
     fn on_writable(&mut self) -> Result<()>;
 }
 
 // TODO close fds and unregister events from epoll
 // TODO implement flags to keep state for edge-triggered
-pub struct IoHandler {
+pub struct IoHandler<C: Write + Read> {
+    // only one handler at a time can perform mut borrows
+    registry: Rc<Registry>,
     sockw: bool,
     sockr: bool,
-    epfd: RawFd,
-    clifd: RawFd,
+    conn: C,
+    source: Option<Box<Source>>,
     buf: Option<ByteBuf>,
     mut_buf: Option<MutByteBuf>,
     mbuf: Vec<SonicMessage>,
 }
 
-impl IoHandler {
-    /// Instantiate a new I/O
-    pub fn new(epfd: RawFd, clifd: RawFd) -> IoHandler {
+impl IoHandler<Connection> {
+    /// Instantiate a new I/O handler
+    pub fn new(epfd: RawFd, registry: Rc<Registry>, clifd: RawFd) -> IoHandler<Connection> {
+        let conn = Connection::new(epfd, clifd);
         IoHandler {
+            registry: registry,
             sockw: false,
             sockr: false,
-            epfd: epfd,
-            clifd: clifd,
+            conn: conn,
+            source: None,
             buf: Some(ByteBuf::none()),
             mut_buf: Some(ByteBuf::mut_with_capacity(MEGABYTE)),
             mbuf: Vec::new(),
@@ -41,8 +53,8 @@ impl IoHandler {
     }
 }
 
-impl IoHandler {
-    fn try_read_buf(&mut self, buf: &[u8]) -> Result<usize> {
+impl<C: Write + Read> IoHandler<C> {
+    pub fn try_into_buf(&mut self, buf: &[u8]) -> Result<usize> {
 
         let mut read = 0;
         let total = buf.len();
@@ -60,20 +72,16 @@ impl IoHandler {
         }
         Ok(read)
     }
-
-    fn try_write_sock(&mut self, buf: &[u8]) -> Result<Option<usize>> {
-        let n = try!(write(self.clifd, buf));
-        Ok(n)
-    }
-
-    fn try_read_sock(&mut self, buf: &mut [u8]) -> Result<Option<usize>> {
-        let n = try!(read(self.clifd, buf));
-        Ok(n)
-    }
 }
 
 // TODO check for overflow
-impl Handler for IoHandler {
+impl<C: Write + Read> Handler for IoHandler<C> {
+    fn on_error(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+    fn on_close(&mut self) -> Result<()> {
+        unimplemented!()
+    }
     fn on_readable(&mut self) -> Result<()> {
         self.sockr = true;
 
@@ -81,21 +89,27 @@ impl Handler for IoHandler {
 
         let mut buf: MutByteBuf = try!(self.mut_buf
             .take()
-            .ok_or(|| {
-                ErrorKind::UnexpectedState.into()
-                    .chain_err(|| "io handler not ready for on_readable()".into())
-            }));
+            .ok_or(ErrorKind::UnexpectedState("io handler not ready for on_readable()")));
 
-        let read = try!(self.try_read_sock(unsafe { buf.mut_bytes() }));
+        self.sockr = false;
+
+        let read = try!(self.conn.read(unsafe { buf.mut_bytes() }));
 
         match read {
-            Some(cnt) => {
+            0 => {
+                trace!("on_readable() socket not ready");
+                self.mut_buf = Some(buf);
+                Ok(())
+            }
+            cnt => {
                 unsafe { buf.advance(cnt) };
                 trace!("on_readable() bytes {}", cnt);
 
                 let buf = buf.flip();
 
-                let parsed = try!(self.try_read_buf((&buf).bytes()));
+                // FIXME here is where it should be handed into source
+                // let parsed = try!(self.try_into_buf((&buf).bytes()));
+                let parsed = 0;
 
                 if parsed == cnt {
                     trace!("on_readable() complete");
@@ -104,11 +118,6 @@ impl Handler for IoHandler {
                     trace!("on_readable() incomplete");
                     self.mut_buf = Some(buf.resume());
                 }
-                Ok(())
-            }
-            None => {
-                trace!("on_readable() socket not ready");
-                self.mut_buf = Some(buf);
                 Ok(())
             }
         }
@@ -120,15 +129,15 @@ impl Handler for IoHandler {
 
         let mut buf: ByteBuf = try!(self.buf
             .take()
-            .ok_or(|| "io handler not ready for on_writable()".into()));
+            .ok_or(ErrorKind::UnexpectedState("io handler not ready for on_writable()")));
 
-        let res = try!(self.try_write_sock((&buf).bytes()));
+        let cnt = try!(self.conn.write((&buf).bytes()));
 
-        if let Some(cnt) = res {
-            unsafe { buf.advance(cnt) };
+        if cnt > 0 {
+            buf.advance(cnt)
         }
+
         self.mut_buf = Some(buf.flip());
         Ok(())
     }
 }
-*/
