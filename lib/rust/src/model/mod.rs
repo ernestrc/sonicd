@@ -24,9 +24,6 @@ pub struct QueryProgress {
 }
 
 #[derive(Debug)]
-pub struct Log(pub String);
-
-#[derive(Debug)]
 pub struct OutputChunk(pub Vec<Value>);
 
 /// Signals when a stream is done. Inner option
@@ -35,7 +32,7 @@ pub struct OutputChunk(pub Vec<Value>);
 pub struct Done(pub Option<String>);
 
 
-/// Marker trait for messages that client can send to server
+/// Marker trait for messages sent from client to server
 pub trait Command {}
 
 #[derive(Debug)]

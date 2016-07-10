@@ -1,9 +1,40 @@
 use model::protocol::SonicMessage;
-use error::Result;
+use error::{Result, Error, ErrorKind};
 use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use nix::unistd;
 use std::os::unix::io::RawFd;
+use nix::sys::epoll::{EpollEvent, EpollEventKind};
+
+#[macro_export]
+macro_rules! eintr {
+    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+        let res;
+        loop {
+            match $syscall($arg1, $arg2) {
+                Ok(m) => {
+                    res = Ok(Some(m));
+                    break;
+                },
+                Err(::nix::Error::Sys(::nix::errno::EAGAIN)) => {
+                    trace!("{}: EAGAIN: socket not ready", $name);
+                    res = Ok(None);
+                    break;
+                },
+                Err(::nix::Error::Sys(::nix::errno::EINTR)) => {
+                    debug!("{}: EINTR: re-submitting syscall", $name);
+                    continue;
+                },
+                Err(err) => {
+                    res = Err(err);
+                    error!("{}: {}", $name, err);
+                    break;
+                }
+            }
+        }
+        res
+    }}
+}
 
 #[macro_export]
 macro_rules! eagain {
@@ -30,33 +61,41 @@ macro_rules! eagain {
     }}
 }
 
+/// helper to short-circuit loops and log error
 #[macro_export]
-macro_rules! eintr {
-    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
-        let res;
-        loop {
-            match $syscall($arg1, $arg2) {
-                Ok(m) => {
-                    res = Ok(Some(m));
-                    break;
-                },
-                Err(::nix::Error::Sys(::nix::errno::EAGAIN)) => {
-                    trace!("{}: EAGAIN: socket not ready", $name);
-                    res = Ok(None);
-                    break;
-                },
-                Err(::nix::Error::Sys(::nix::errno::EINTR)) => {
-                    debug!("{}: EINTR: re-submitting syscall", $name);
-                    continue;
-                },
-                Err(err) => {
-                    res = Err(err);
-                    break;
-                }
+macro_rules! perror_continue {
+    ($name:expr, $res:expr) => {{
+        match $res {
+            Ok(s) => s,
+            Err(err) => {
+                let err: Error = err.into();
+                error!("{}: {}\n{:?}", $name, err, err.backtrace());
+                continue;
             }
         }
-        res
     }}
+}
+
+#[macro_export]
+macro_rules! perror {
+    ($name:expr, $res:expr) => {{
+        match $res {
+            Ok(s) => s,
+            Err(err) => {
+                let err: Error = err.into();
+                error!("{}: {}\n{:?}", $name, err, err.backtrace());
+            }
+        }
+    }}
+}
+
+lazy_static! {
+    pub static ref NO_INTEREST: EpollEvent = {
+        EpollEvent {
+            events: EpollEventKind::empty(),
+            data: 0,
+        }
+    };
 }
 
 pub fn write(fd: RawFd, buf: &[u8]) -> Result<Option<usize>> {
@@ -129,3 +168,7 @@ pub fn frame(msg: SonicMessage) -> Result<Vec<u8>> {
     fbytes.extend(qbytes.as_slice());
     Ok(fbytes)
 }
+
+pub mod handler;
+pub mod connection;
+pub mod poll;
