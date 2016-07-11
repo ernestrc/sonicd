@@ -40,7 +40,7 @@ error-chain = "0.1.12"
 serde_json = { git = "https://github.com/serde-rs/json.git" }
 serde_macros = { version = "0.7.11", optional = true }
 byteorder = "0.5.3"
-nix = "0.6.0"
+nix = { version = "0.6.0", features = ["signalfd"] }
 log = "0.3.6"
 lazy_static = "0.1.*"
 bytes = "0.3.0"

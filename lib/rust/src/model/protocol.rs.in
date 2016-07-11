@@ -3,7 +3,7 @@ use serde_json::Value;
 use error::{Result, ErrorKind};
 use super::*;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub enum MessageKind {
     // client ~> server
     #[serde(rename="A")]
@@ -60,7 +60,7 @@ impl SonicMessage {
         ::serde_json::to_value::<SonicMessage>(&self)
     }
 
-    pub fn into_bytes(self) -> Result<Vec<u8>> {
+    pub fn as_bytes(&self) -> Result<Vec<u8>> {
         let s = try!(::serde_json::to_string(&self));
         Ok(s.into_bytes())
     }

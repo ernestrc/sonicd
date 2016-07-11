@@ -3,14 +3,12 @@ use std::io::{Write, Read};
 use std::{fmt, io};
 
 use nix::unistd;
-use nix::sys::epoll::*;
 
-use super::NO_INTEREST;
 use error::Error;
 
 pub struct Connection {
     epfd: RawFd,
-    fd: RawFd,
+    pub fd: RawFd,
 }
 
 impl Connection {
@@ -22,11 +20,10 @@ impl Connection {
     }
 }
 
+// TODO not sure if needed?
 impl Drop for Connection {
     fn drop(&mut self) {
         perror!("unisdtd::close", unistd::close(self.fd));
-        perror!("epoll_ctl",
-                epoll_ctl(self.epfd, EpollOp::EpollCtlDel, self.fd, &NO_INTEREST));
         debug!("closed and unregistered {}", self);
     }
 }

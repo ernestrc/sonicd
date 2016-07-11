@@ -44,7 +44,7 @@ pub fn stream<C, O, P, M, A>(command: C,
     debug!("framing command {:?}", &command);
 
     // frame command
-    let fbytes = try!(frame(command.into()));
+    let fbytes = try!(frame(&command.into()));
 
     debug!("framed command into {} bytes", fbytes.len());
 
@@ -69,7 +69,7 @@ pub fn stream<C, O, P, M, A>(command: C,
                     res = Ok(());
                 };
                 let msg: SonicMessage = Acknowledge.into();
-                let fbytes = try!(frame(msg));
+                let fbytes = try!(frame(&msg));
                 // send ack
                 try!(stream.write(&fbytes.as_slice()));
                 debug!("disconnected");

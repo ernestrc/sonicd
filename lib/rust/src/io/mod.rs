@@ -8,10 +8,10 @@ use nix::sys::epoll::{EpollEvent, EpollEventKind};
 
 #[macro_export]
 macro_rules! eintr {
-    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+    ($syscall:expr, $name:expr, $($arg:expr),*) => {{
         let res;
         loop {
-            match $syscall($arg1, $arg2) {
+            match $syscall($($arg),*) {
                 Ok(m) => {
                     res = Ok(Some(m));
                     break;
@@ -27,7 +27,6 @@ macro_rules! eintr {
                 },
                 Err(err) => {
                     res = Err(err);
-                    error!("{}: {}", $name, err);
                     break;
                 }
             }
@@ -38,10 +37,10 @@ macro_rules! eintr {
 
 #[macro_export]
 macro_rules! eagain {
-    ($syscall:expr, $name:expr, $arg1: expr, $arg2: expr) => {{
+    ($syscall:expr, $name:expr, $($arg:expr),*) => {{
         let res;
         loop {
-            match $syscall($arg1, $arg2) {
+            match $syscall($($arg),*) {
                 Ok(m) => {
                     res = Ok(m);
                     break;
@@ -61,16 +60,28 @@ macro_rules! eagain {
     }}
 }
 
+#[macro_export]
+macro_rules! report_err {
+    ($name:expr, $err:expr) => {{
+        let e: Error = $err;
+        error!("{}: {}\n{:?}", $name, e, e.backtrace());
+
+        for e in e.iter().skip(1) {
+            error!("caused_by: {}", e);
+        }
+    }}
+}
+
 /// helper to short-circuit loops and log error
 #[macro_export]
-macro_rules! perror_continue {
+macro_rules! perrorr {
     ($name:expr, $res:expr) => {{
         match $res {
             Ok(s) => s,
             Err(err) => {
                 let err: Error = err.into();
-                error!("{}: {}\n{:?}", $name, err, err.backtrace());
-                continue;
+                report_err!($name, err);
+                return;
             }
         }
     }}
@@ -81,10 +92,9 @@ macro_rules! perror {
     ($name:expr, $res:expr) => {{
         match $res {
             Ok(s) => s,
-            Err(err) => {
-                let err: Error = err.into();
-                error!("{}: {}\n{:?}", $name, err, err.backtrace());
-            }
+            Err(e) => {
+                report_err!($name, e.into());
+            },
         }
     }}
 }
@@ -157,8 +167,8 @@ pub fn read_message(fd: RawFd) -> Result<SonicMessage> {
     SonicMessage::from_slice(buf.as_slice())
 }
 
-pub fn frame(msg: SonicMessage) -> Result<Vec<u8>> {
-    let qbytes = try!(msg.into_bytes());
+pub fn frame(msg: &SonicMessage) -> Result<Vec<u8>> {
+    let qbytes = try!(msg.as_bytes());
 
     let qlen = qbytes.len() as i32;
     let mut fbytes = Vec::new();
