@@ -13,6 +13,7 @@ error_chain! {
     }
 
     errors {
+        /*
         UnexpectedState {
             description("Unexpected handler state")
                 display("unexpected handler state")
@@ -20,6 +21,6 @@ error_chain! {
         Bufferoverflow {
             description("Buffer overflow")
                 display("buffer overflow error")
-        }
+        }*/
     }
 }

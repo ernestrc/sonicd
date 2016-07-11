@@ -1,6 +1,7 @@
 use std::os::unix::io::RawFd;
 use std::io::{Cursor, Write, Read};
 use std::cell::RefCell;
+use std::marker::Sized;
 use std::rc::Rc;
 
 use byteorder::{BigEndian, ByteOrder};
@@ -8,25 +9,18 @@ use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
 
 use model::protocol::SonicMessage;
 use error::*;
-use super::connection::Connection;
+use super::super::connection::Connection;
 use source::Source;
-use super::poll::Registry;
-use std::marker::Sized;
+use super::Handler;
 
 const MEGABYTE: usize = 1024 * 1024;
 
-pub trait Handler {
-    fn on_error(&mut self) -> Result<()>;
-    fn on_close(&mut self) -> Result<()>;
-    fn on_readable(&mut self) -> Result<()>;
-    fn on_writable(&mut self) -> Result<()>;
-}
-
 // TODO close fds and unregister events from epoll
 // TODO implement flags to keep state for edge-triggered
-pub struct IoHandler<C: Write + Read> {
+pub struct TcpHandler<C: Write + Read> {
     // only one handler at a time can perform mut borrows
-    registry: Rc<Registry>,
+    id: usize,
+    epfd: RawFd,
     sockw: bool,
     sockr: bool,
     conn: C,
@@ -36,12 +30,13 @@ pub struct IoHandler<C: Write + Read> {
     mbuf: Vec<SonicMessage>,
 }
 
-impl IoHandler<Connection> {
+impl TcpHandler<Connection> {
     /// Instantiate a new I/O handler
-    pub fn new(epfd: RawFd, registry: Rc<Registry>, clifd: RawFd) -> IoHandler<Connection> {
+    pub fn new(id: usize, epfd: RawFd, clifd: RawFd) -> TcpHandler<Connection> {
         let conn = Connection::new(epfd, clifd);
-        IoHandler {
-            registry: registry,
+        TcpHandler {
+            id: id,
+            epfd: epfd,
             sockw: false,
             sockr: false,
             conn: conn,
@@ -53,7 +48,7 @@ impl IoHandler<Connection> {
     }
 }
 
-impl<C: Write + Read> IoHandler<C> {
+impl<C: Write + Read> TcpHandler<C> {
     pub fn try_into_buf(&mut self, buf: &[u8]) -> Result<usize> {
 
         let mut read = 0;
@@ -75,13 +70,19 @@ impl<C: Write + Read> IoHandler<C> {
 }
 
 // TODO check for overflow
-impl<C: Write + Read> Handler for IoHandler<C> {
+impl<C: Write + Read> Handler for TcpHandler<C> {
+    fn id(&self) -> usize {
+        self.id
+    }
+
     fn on_error(&mut self) -> Result<()> {
         unimplemented!()
     }
+
     fn on_close(&mut self) -> Result<()> {
         unimplemented!()
     }
+
     fn on_readable(&mut self) -> Result<()> {
         self.sockr = true;
 

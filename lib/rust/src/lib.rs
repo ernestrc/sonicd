@@ -12,6 +12,7 @@ extern crate slab;
 
 mod error;
 mod model;
+mod api;
 mod source;
 #[macro_use] pub mod io;
 //pub mod client;
@@ -29,6 +30,7 @@ mod source;
 //extern crate ws as libws;
 
 
+pub use api::{run, stream, authenticate};
 pub use model::{Authenticate, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};
 pub use model::protocol::SonicMessage;
 pub use error::{Result, Error, ErrorKind};
