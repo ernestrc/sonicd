@@ -42,6 +42,7 @@ serde_macros = { version = "0.7.11", optional = true }
 byteorder = "0.5.3"
 nix = { version = "0.6.0", features = ["signalfd"] }
 log = "0.3.6"
+num_cpus = "*"
 lazy_static = "0.1.*"
 bytes = "0.3.0"
 slab = "*"

@@ -14,6 +14,7 @@ pub struct SyncController<F: Factory> {
     epfd: EpollFd,
     handlers: Slab<RefCell<Box<Handler>>, usize>,
     factory: F,
+    terminated: bool
 }
 
 impl<F: Factory> SyncController<F> {
@@ -22,6 +23,7 @@ impl<F: Factory> SyncController<F> {
             epfd: epfd,
             handlers: Slab::new(capacity),
             factory: factory,
+            terminated: false,
         }
     }
 
@@ -64,22 +66,27 @@ impl<F: Factory> SyncController<F> {
 }
 
 impl<F: Factory> Controller for SyncController<F> {
+
+    fn is_terminated(&self) -> bool {
+        self.terminated
+    }
+
     fn ready(&mut self, ev: &EpollEvent) -> Result<()> {
 
         match self.factory.decode(ev.data) {
 
             Action::New(proto, fd) => {
                 let id = try!(self.handlers
-                    .insert(RefCell::new(self.factory.new(proto)))
+                    .insert(RefCell::new(self.factory.new(proto, fd)))
                     .map_err(|_| "reached maximum number of handlers"));
 
-                let action: Action<F> = Action::Notify(id, fd);
+                let action: Action = Action::Notify(id, fd);
 
                 // respects set of events of the original caller
                 // but encodes Notify action in data
                 let interest = EpollEvent {
                     events: ev.events | EPOLLET | EPOLLHUP | EPOLLRDHUP,
-                    data: action.encode(),
+                    data: self.factory.encode(action),
                 };
 
                 try!(self.epfd.reregister(fd, &interest));
@@ -96,15 +103,22 @@ impl<F: Factory> Controller for SyncController<F> {
 }
 
 pub type HandlerId = usize;
+pub type Protocol = usize;
 
-pub enum Action<F: Factory> {
-    New(F::Protocol, RawFd),
+pub enum Action {
+    New(Protocol, RawFd),
     Notify(HandlerId, RawFd),
 }
 
-impl<F: Factory> Action<F> {
-    pub fn encode(self) -> u64 {
-        match self {
+pub trait Factory
+    where Self: Sized + Send + Copy
+{
+    //type Protocol: From<usize> + Into<usize>;
+
+    fn new(&self, p: Protocol, fd: RawFd) -> Box<Handler>;
+
+    fn encode(&self, action: Action) -> u64 {
+        match action {
             Action::Notify(id, fd) => ((fd as u64) << 31) | ((id as u64) << 15) | 0,
             Action::New(protocol, fd) => {
                 let protocol: usize = protocol.into();
@@ -112,16 +126,8 @@ impl<F: Factory> Action<F> {
             }
         }
     }
-}
 
-pub trait Factory
-    where Self: Sized
-{
-    type Protocol: From<usize> + Into<usize>;
-
-    fn new(&self, p: Self::Protocol) -> Box<Handler>;
-
-    fn decode(&self, data: u64) -> Action<Self> {
+    fn decode(&self, data: u64) -> Action {
         let arg1 = ((data >> 15) & 0xffff) as usize;
         let fd = (data >> 31) as i32;
         match data & 0x7fff {
@@ -129,6 +135,15 @@ pub trait Factory
             1 => Action::New(From::from(arg1), fd),
             a => panic!("unrecognized action: {}", a),
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct EchoFactory;
+
+impl Factory for EchoFactory {
+    fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
+        Box::new(EchoHandler::new(fd))
     }
 }
 
@@ -190,7 +205,7 @@ mod tests {
     #[test]
     fn decode_encode_new_action() {
         let test = TestFactory;
-        let data = Action::<TestFactory>::encode(Action::New(PROTO1, ::std::i32::MAX));
+        let data = test.encode(Action::New(PROTO1, ::std::i32::MAX));
 
         if let Action::New(protocol, fd) = test.decode(data) {
             assert!(protocol == PROTO1);

@@ -319,6 +319,7 @@ dependencies = [
  "lazy_static 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num_cpus 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "pbr 0.2.1 (git+https://github.com/ernestrc/pb.git)",
  "regex 0.1.73 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",

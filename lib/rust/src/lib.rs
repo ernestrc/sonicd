@@ -6,6 +6,7 @@ extern crate nix;
 extern crate byteorder;
 extern crate bytes;
 extern crate slab;
+extern crate num_cpus;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate log;
