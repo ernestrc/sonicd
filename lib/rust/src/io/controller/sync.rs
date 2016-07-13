@@ -3,9 +3,10 @@ use std::cell::RefCell;
 use std::boxed::Box;
 
 use nix::sys::epoll::*;
+use nix::unistd;
 use slab::Slab;
 
-use error::Result;
+use error::{Result, Error};
 use io::controller::*;
 use io::handler::*;
 use io::poll::*;
@@ -31,34 +32,36 @@ impl<F: Factory> SyncController<F> {
 
         if events.contains(EPOLLRDHUP) || events.contains(EPOLLHUP) {
 
-            debug!("socket {}: EPOLLHUP", fd);
+            trace!("socket {}: EPOLLHUP", fd);
             // droped when out of scope
             // handler should take care of cleaning resources
             // outside of interests on this epoll facility
             match self.handlers.remove(id) {
-                Some(handler) => try!(handler.borrow_mut().on_close()),
+                Some(handler) => perror!("on_close()", handler.borrow_mut().on_close()),
                 None => error!("on_close(): handler not found"),
             }
 
-            try!(self.epfd.unregister(fd));
+            perror!("unregister()", self.epfd.unregister(fd));
+            perror!("close()", unistd::close(fd));
 
         } else {
 
             let handler = &mut self.handlers[id];
 
+            // TODO keep track and shutdown ?
             if events.contains(EPOLLERR) {
-                error!("socket {}: EPOLERR", fd);
-                try!(handler.borrow_mut().on_error());
+                trace!("socket {}: EPOLERR", fd);
+                perror!("on_error()", handler.borrow_mut().on_error());
             }
 
             if events.contains(EPOLLIN) {
-                debug!("socket {}: EPOLLIN", fd);
-                try!(handler.borrow_mut().on_readable());
+                trace!("socket {}: EPOLLIN", fd);
+                perror!("on_readable()", handler.borrow_mut().on_readable());
             }
 
             if events.contains(EPOLLOUT) {
-                debug!("socket {}: EPOLLOUT", fd);
-                try!(handler.borrow_mut().on_writable());
+                trace!("socket {}: EPOLLOUT", fd);
+                perror!("on_writable()", handler.borrow_mut().on_writable());
             }
         }
         Ok(())
@@ -82,10 +85,8 @@ impl<F: Factory> Controller for SyncController<F> {
 
                 let action: Action = Action::Notify(id, fd);
 
-                // respects set of events of the original caller
-                // but encodes Notify action in data
                 let interest = EpollEvent {
-                    events: ev.events | EPOLLET | EPOLLHUP | EPOLLRDHUP,
+                    events: EPOLLIN | EPOLLOUT | EPOLLET | EPOLLHUP | EPOLLRDHUP,
                     data: self.factory.encode(action),
                 };
 
@@ -135,15 +136,6 @@ pub trait Factory
             1 => Action::New(From::from(arg1), fd),
             a => panic!("unrecognized action: {}", a),
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct EchoFactory;
-
-impl Factory for EchoFactory {
-    fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
-        Box::new(EchoHandler::new(fd))
     }
 }
 

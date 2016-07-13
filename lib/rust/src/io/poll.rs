@@ -13,8 +13,6 @@ use io::handler::Handler;
 use io::controller::Controller;
 
 static EVENTS_N: &'static usize = &1000;
-static LOOP_MS: &'static isize = &-1;
-static MAX_HANDLERS: &'static usize = &8192;
 
 lazy_static! {
     static ref NO_INTEREST: EpollEvent = {

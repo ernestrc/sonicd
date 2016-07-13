@@ -51,10 +51,10 @@ impl<F> Server<F>
             .unwrap()));
 
         try!(eagain!(bind, "bind", srvfd, &a));
-        debug!("bind: success fd {} to {}", srvfd, a);
+        info!("bind: success fd {} to {}", srvfd, a);
 
         try!(eagain!(listen, "listen", srvfd, max_conn));
-        debug!("listen: success fd {}: {}", srvfd, a);
+        info!("listen: success fd {}: {}", srvfd, a);
 
         // spawn one thread + epoll instance per
         // cpu, and leave one to take care of
@@ -62,7 +62,7 @@ impl<F> Server<F>
         let cpus = ::num_cpus::get();
         let io_cpus = cpus - 1;
 
-        debug!("detected {} (v)cpus", cpus);
+        info!("detected {} (v)cpus", cpus);
 
         let mut epfds: Vec<EpollFd> = Vec::with_capacity(io_cpus);
 
