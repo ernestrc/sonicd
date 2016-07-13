@@ -6,33 +6,29 @@ use model::protocol::*;
 use error::*;
 
 pub mod tcp;
+pub mod server;
 
 pub trait Handler {
-    fn id(&self) -> usize;
-    fn on_error(&mut self) -> Result<()>;
-    fn on_close(&mut self) -> Result<()>;
-    fn on_readable(&mut self) -> Result<()>;
-    fn on_writable(&mut self) -> Result<()>;
-}
 
-#[derive(PartialEq)]
-pub enum HandlerKind {
-    Echo,
-    Tcp,
-    // TODO Accept,
+    fn on_error(&mut self) -> Result<()>;
+
+    fn on_close(&mut self) -> Result<()>;
+
+    fn on_readable(&mut self) -> Result<()>;
+
+    fn on_writable(&mut self) -> Result<()>;
+
 }
 
 pub struct EchoHandler {
-    id: usize,
     fd: RawFd,
     done: bool,
     buf: Vec<SonicMessage>,
 }
 
 impl EchoHandler {
-    pub fn new(id: usize, fd: RawFd) -> EchoHandler {
+    pub fn new(fd: RawFd) -> EchoHandler {
         EchoHandler {
-            id: id,
             fd: fd,
             done: false,
             buf: Vec::new()
@@ -41,10 +37,6 @@ impl EchoHandler {
 }
 
 impl Handler for EchoHandler {
-
-    fn id(&self) -> usize {
-        self.id
-    }
 
     fn on_error(&mut self) -> Result<()> {
         error!("on_error() EchoHandler");
