@@ -28,11 +28,14 @@ use nix::sys::socket::*;
 use nix::sys::signalfd::*;
 use nix::sys::signal::{SIGINT, SIGTERM};
 use nix::unistd;
+use sonicd::io::poll::{Epoll, EpollFd};
+use sonicd::io::controller::sync::{SyncController, Action};
+use sonicd::io::handler::Handler;
 
 mod error;
+mod handler;
 
-use sonicd::io::poll::{Epoll, Action};
-use sonicd::io::handler::{HandlerKind, Handler};
+use handler::*;
 use error::*;
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -57,12 +60,21 @@ fn run() -> Result<RawFd> {
     let cpus = num_cpus::get();
     debug!("detected {} (v)cpus", cpus);
 
-    let mut epfds: Vec<RawFd> = Vec::with_capacity(cpus);
+    let mut epfds: Vec<EpollFd> = Vec::with_capacity(cpus);
 
     for _ in 1..cpus {
-        let epfd = try!(epoll_create());
-        epfds.push(epfd);
-        thread::spawn(move || Epoll::from_raw_fd(epfd).run());
+
+        let fd = try!(epoll_create());
+
+        epfds.push(EpollFd::new(fd));
+
+        thread::spawn(move || {
+            let mut epoll = Epoll::new(-1, |epfd| {
+                SyncController::new(epfd, TestFactory, 1000)
+            }).unwrap();
+
+            epoll.run()
+        });
     }
 
     debug!("created epoll instances: {:?}", epfds);
@@ -116,19 +128,20 @@ fn run() -> Result<RawFd> {
                             Ok(clifd) => {
                                 debug!("accept4: acceted new tcp client {}", &clifd);
 
-                                let info = EpollEvent {
-                                    events: EPOLLONESHOT | EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
-                                    data: Epoll::encode(Action::New(HandlerKind::Echo, clifd))
-                                };
 
                                 // round robin
                                 let next = (accepted % io_cpus as u64) as usize;
 
-                                let epfd: RawFd = *epfds.get(next).unwrap();
+                                let epfd: EpollFd = *epfds.get(next).unwrap();
+
+                                let info = EpollEvent {
+                                    events: EPOLLONESHOT | EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
+                                    data: Action::<TestFactory>::encode(Action::New(0, ::std::i32::MAX))
+                                };
 
                                 debug!("assigned client to next {} epoll instance {}", &next, &epfd);
 
-                                perror!("epoll_ctl", epoll_ctl(epfd, EpollOp::EpollCtlAdd, clifd, &info));
+                                perror!("epoll_ctl", epfd.register(clifd, &info));
 
                                 debug!("epoll_ctl: registered interests for {}", clifd);
 

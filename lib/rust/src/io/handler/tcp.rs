@@ -9,11 +9,66 @@ use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
 
 use model::protocol::SonicMessage;
 use error::*;
+//use {Handler, Factory, Action};
 use super::super::connection::Connection;
 use source::Source;
-use super::Handler;
 
 const MEGABYTE: usize = 1024 * 1024;
+
+/*
+#[derive(PartialEq)]
+pub enum Protocol {
+    Echo,
+    Sonic,
+}
+
+pub enum TcpAction {
+    New(Protocol, RawFd),
+    Notify(usize, RawFd),
+}
+
+impl Action for TcpAction {
+    fn encode(self) -> u64 {
+        match self {
+            TcpAction::Notify(id, fd) => ((fd as u64) << 31) | ((id as u64) << 15) | 0,
+            TcpAction::New(Protocol::Sonic, fd) => ((fd as u64) << 31) | (0 << 15) | 1,
+            TcpAction::New(Protocol::Echo, fd) => ((fd as u64) << 31) | (1 << 15) | 1,
+        }
+    }
+}
+
+impl<C: Write + Read> Factory<TcpHandler<C>, TcpAction> for Tcp {
+
+    fn process<F: FnOnce(usize) -> TcpHandler<C>>(&self, action: TcpAction) -> Result<Option<F>> {
+        unimplemented!()
+        // Action::New(kind, fd) => {
+        //
+        // let idm = self.handlers.insert_with(|id| {
+        // RefCell::new(match kind {
+        // HandlerKind::Echo => Box::new(EchoHandler::new(id, fd)),
+        // HandlerKind::Tcp => Box::new(TcpHandler::new(id, epfd, fd)),
+        // })
+        // });
+        //
+        // match idm {
+        // Some(id) => {
+        // respects set of events of the original caller
+        // but encodes Notify action in data
+        // let new = EpollEvent {
+        // events: ev.events | EPOLLET | EPOLLHUP | EPOLLRDHUP,
+        // data: Self::encode(Action::Notify(id, fd)),
+        // };
+        //
+        // perror!("reregister()", Self::reregister(epfd, fd, new));
+        // self.notify(fd, id, ev.events)
+        // }
+        // None => error!("epoll {} reached maximum number of handlers", epfd),
+        // }
+        // }
+        // Action::Notify(id, fd) => self.notify(fd, id, ev.events),
+        // }
+    }
+}
 
 // TODO close fds and unregister events from epoll
 // TODO implement flags to keep state for edge-triggered
@@ -71,6 +126,7 @@ impl<C: Write + Read> TcpHandler<C> {
 
 // TODO check for overflow
 impl<C: Write + Read> Handler for TcpHandler<C> {
+
     fn id(&self) -> usize {
         self.id
     }
@@ -141,4 +197,4 @@ impl<C: Write + Read> Handler for TcpHandler<C> {
         self.mut_buf = Some(buf.flip());
         Ok(())
     }
-}
+}*/

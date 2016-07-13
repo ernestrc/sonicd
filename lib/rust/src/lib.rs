@@ -15,20 +15,11 @@ mod model;
 mod api;
 mod source;
 #[macro_use] pub mod io;
-//pub mod client;
 
-//#[cfg(feature="websocket")]
-//pub mod ws;
 
-//#[cfg(any(target_os = "linux", target_os = "android"))]
-//mod linuxapi;
-//
-//#[cfg(any(target_os = "linux", target_os = "android"))]
-//mod api;
-
-//#[cfg(feature="websocket")]
-//extern crate ws as libws;
-
+pub use io::handler::Handler;
+pub use io::controller::{Controller};
+//pub use io::controller::sync::SyncController;
 
 pub use api::{run, stream, authenticate};
 pub use model::{Authenticate, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};

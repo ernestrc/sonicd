@@ -182,3 +182,4 @@ pub fn frame(msg: &SonicMessage) -> Result<Vec<u8>> {
 pub mod handler;
 pub mod connection;
 pub mod poll;
+pub mod controller;
