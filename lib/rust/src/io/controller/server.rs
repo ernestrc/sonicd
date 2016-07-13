@@ -66,6 +66,16 @@ impl<F> Server<F>
 
         let mut epfds: Vec<EpollFd> = Vec::with_capacity(io_cpus);
 
+        // build signal mask to share across threads
+        let mut mask = SigSet::empty();
+        mask.add(SIGINT).unwrap();
+        mask.add(SIGTERM).unwrap();
+        try!(mask.thread_set_mask());
+
+        // add the set of signals to the signal mask 
+        // of the main thread
+        mask.thread_block().unwrap();
+
         for _ in 0..io_cpus {
 
             let epfd = EpollFd::new(try!(epoll_create()));
@@ -73,6 +83,9 @@ impl<F> Server<F>
             epfds.push(epfd);
 
             thread::spawn(move || {
+                // add the set of signals to the signal mask for all threads
+                // otherwise signalfd will not work properly
+                mask.thread_block().unwrap();
                 let controller = SyncController::new(epfd, factory, max_conn);
                 let mut epoll = Epoll::from_fd(epfd, controller, -1);
                 perror!("loop()", epoll.run());
@@ -88,11 +101,6 @@ impl<F> Server<F>
 
         try!(cepfd.register(srvfd, &ceinfo));
 
-        let mut mask = SigSet::empty();
-        mask.add(SIGINT).unwrap();
-        mask.add(SIGTERM).unwrap();
-        mask.thread_block().unwrap();
-
         let signals = SignalFd::with_flags(&mask, SFD_NONBLOCK).unwrap();
         let sigfd = signals.as_raw_fd();
 
@@ -102,6 +110,8 @@ impl<F> Server<F>
         };
 
         try!(cepfd.register(sigfd, &siginfo));
+
+        debug!("registered signalfd {}", sigfd);
 
         Ok(Server {
             sockf: sockf,
@@ -158,12 +168,19 @@ impl<F: Factory> Controller for Server<F> {
             }
             _ => {
                 match self.signals.read_signal() {
+                    // close server socket as the mask registered
+                    // contains only SIGINT and SIGTERM
                     Ok(Some(sig)) => {
-                        warn!("received signal: {:?}", sig.ssi_signo);
+                        warn!("received signal {:?}. closing server socket..", sig.ssi_signo);
                         perror!("unistd::close", unistd::close(self.srvfd));
+                        ::std::process::exit(1);
                     }
-                    Ok(None) => (),
-                    Err(err) => (), // some error happend
+                    Ok(None) => {
+                        warn!("signal fd woke up epoll but not ready to read");
+                    },
+                    Err(err) => {
+                        error!("read_signal: {}", err);
+                    }, // some error happend
                 }
             }
         }
