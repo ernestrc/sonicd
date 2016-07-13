@@ -6,7 +6,6 @@ use model::protocol::*;
 use error::*;
 
 pub mod tcp;
-pub mod server;
 
 pub trait Handler {
 
@@ -50,6 +49,7 @@ impl Handler for EchoHandler {
             Ok(())
         }
     }
+
     fn on_readable(&mut self) -> Result<()> {
         trace!("on_readable()");
         let msg = try!(super::read_message(self.fd));

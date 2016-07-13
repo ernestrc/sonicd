@@ -33,7 +33,17 @@ pub struct Epoll<C: Controller> {
 }
 
 impl<C: Controller> Epoll<C> {
-    pub fn new<F>(loop_ms: isize, newctl: F) -> Result<Epoll<C>>
+
+    pub fn from_fd(epfd: EpollFd, controller: C, loop_ms: isize) -> Epoll<C> {
+        Epoll {
+            epfd: epfd,
+            loop_ms: loop_ms,
+            controller: controller,
+            buf: Vec::with_capacity(*EVENTS_N),
+        }
+    }
+
+    pub fn new_with<F>(loop_ms: isize, newctl: F) -> Result<Epoll<C>>
         where F: FnOnce(EpollFd) -> C
     {
 
@@ -47,10 +57,9 @@ impl<C: Controller> Epoll<C> {
             epfd: epfd,
             loop_ms: loop_ms,
             controller: controller,
-            buf: Vec::with_capacity(*EVENTS_N)
+            buf: Vec::with_capacity(*EVENTS_N),
         })
     }
-
 
     fn wait(&self, dst: &mut [EpollEvent]) -> Result<usize> {
         let cnt = try!(epoll_wait(self.epfd.fd, dst, self.loop_ms));
@@ -65,15 +74,16 @@ impl<C: Controller> Epoll<C> {
         unsafe { self.buf.set_len(cnt) }
 
         for ev in self.buf.iter() {
-            try!(self.controller.ready(&ev));
+            perror!("controller.ready()", self.controller.ready(&ev));
         }
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
-        loop {
-            try!(self.run_once());
+        while !self.controller.is_terminated() {
+            perror!("loop()", self.run_once());
         }
+        Ok(())
     }
 }
 
@@ -85,16 +95,14 @@ impl<C: Controller> Drop for Epoll<C> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct EpollFd {
-    fd: RawFd,
+    pub fd: RawFd,
 }
 
 unsafe impl Send for EpollFd {}
 
 impl EpollFd {
     pub fn new(fd: RawFd) -> EpollFd {
-        EpollFd {
-            fd: fd
-        }
+        EpollFd { fd: fd }
     }
     fn ctl(&self, op: EpollOp, interest: &EpollEvent, fd: RawFd) -> Result<()> {
         try!(epoll_ctl(self.fd, op, fd, interest));
@@ -143,9 +151,14 @@ mod tests {
     struct ChannelController {
         epfd: EpollFd,
         tx: Sender<EpollEvent>,
+        terminated: bool
     }
 
     impl Controller for ChannelController {
+
+        fn is_terminated(&self) -> bool {
+            self.terminated
+        }
 
         fn ready(&mut self, events: &EpollEvent) -> Result<()> {
             self.tx.send(*events).unwrap();
@@ -160,12 +173,14 @@ mod tests {
 
         let loop_ms = 10;
 
-        let mut poll = Epoll::new(loop_ms, |epfd| {
-            ChannelController {
-                epfd: epfd,
-                tx: tx,
-            }
-        }).unwrap();
+        let mut poll = Epoll::new_with(loop_ms, |epfd| {
+                ChannelController {
+                    epfd: epfd,
+                    tx: tx,
+                    terminated: false,
+                }
+            })
+            .unwrap();
 
         let (rfd, wfd) = unistd::pipe2(O_NONBLOCK | O_CLOEXEC).unwrap();
 
