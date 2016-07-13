@@ -1,3 +1,4 @@
+#![feature(split_off)]
 extern crate nix;
 extern crate env_logger;
 extern crate threadpool;
@@ -33,11 +34,10 @@ use sonicd::io::poll::{Epoll, EpollFd};
 use sonicd::io::controller::sync::{SyncController, Action};
 use sonicd::io::handler::{Handler};
 use sonicd::io::controller::server::*;
+use sonicd::io::handler::echo::*;
 
 mod error;
-mod handler;
 
-use handler::*;
 use error::*;
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -46,7 +46,7 @@ static COMMIT: Option<&'static str> = option_env!("SONICD_COMMIT");
 // TODO config module with defaults and overrides
 fn run() -> Result<()> {
     let addr = ("127.0.0.1",10003);
-    let max_conn = 1024;
+    let max_conn = 500_000;
     let loop_ms = -1;
 
     let sockf = SOCK_CLOEXEC | SOCK_NONBLOCK;

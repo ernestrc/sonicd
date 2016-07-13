@@ -21,12 +21,12 @@ impl Connection {
 }
 
 // TODO not sure if needed?
-impl Drop for Connection {
-    fn drop(&mut self) {
-        perror!("unisdtd::close", unistd::close(self.fd));
-        debug!("closed and unregistered {}", self);
-    }
-}
+//impl Drop for Connection {
+//    fn drop(&mut self) {
+//        perror!("unisdtd::close", unistd::close(self.fd));
+//        debug!("closed and unregistered {}", self);
+//    }
+//}
 
 impl Read for Connection {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {

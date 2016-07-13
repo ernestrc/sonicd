@@ -118,6 +118,8 @@ pub fn read(fd: RawFd, buf: &mut [u8]) -> Result<Option<usize>> {
 
     let b = try!(eintr!(unistd::read, "unistd::read", fd, buf));
 
+    trace!("unistd::read {:?} bytes", b);
+
     Ok(b)
 }
 
