@@ -4,11 +4,11 @@ use std::cell::RefCell;
 
 use nix::unistd;
 
-use io::controller::sync::Factory;
+use io::controller::sync::EpollProtocol;
 use model::protocol::*;
 use io::handler::Handler;
 use io::{read, write, read_message, frame};
-use error::{Result, Error};
+use error::Result;
 
 const BUF_CAP: usize = 1024 * 1024;
 
@@ -110,9 +110,9 @@ impl Handler for EchoHandler {
 }
 
 #[derive(Clone, Copy)]
-pub struct EchoFactory;
+pub struct EchoEpollProtocol;
 
-impl Factory for EchoFactory {
+impl EpollProtocol for EchoEpollProtocol {
     fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
         match p {
             0 => Box::new(EchoHandler::new(fd)),

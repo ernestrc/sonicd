@@ -31,7 +31,6 @@ pub struct Epoll<C: Controller> {
 }
 
 impl<C: Controller> Epoll<C> {
-
     pub fn from_fd(epfd: EpollFd, controller: C, loop_ms: isize) -> Epoll<C> {
         Epoll {
             epfd: epfd,
@@ -51,12 +50,7 @@ impl<C: Controller> Epoll<C> {
 
         let controller = newctl(epfd);
 
-        Ok(Epoll {
-            epfd: epfd,
-            loop_ms: loop_ms,
-            controller: controller,
-            buf: Vec::with_capacity(*EVENTS_N),
-        })
+        Ok(Self::from_fd(epfd, controller, loop_ms))
     }
 
     fn wait(&self, dst: &mut [EpollEvent]) -> Result<usize> {
@@ -78,9 +72,11 @@ impl<C: Controller> Epoll<C> {
     }
 
     pub fn run(&mut self) -> Result<()> {
+
         while !self.controller.is_terminated() {
             perror!("loop()", self.run_once());
         }
+
         Ok(())
     }
 }
@@ -149,11 +145,10 @@ mod tests {
     struct ChannelController {
         epfd: EpollFd,
         tx: Sender<EpollEvent>,
-        terminated: bool
+        terminated: bool,
     }
 
     impl Controller for ChannelController {
-
         fn is_terminated(&self) -> bool {
             self.terminated
         }
