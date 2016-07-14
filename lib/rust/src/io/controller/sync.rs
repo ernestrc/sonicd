@@ -11,19 +11,19 @@ use io::controller::*;
 use io::handler::*;
 use io::poll::*;
 
-pub struct SyncController<F: Factory> {
+pub struct SyncController<F: EpollProtocol> {
     epfd: EpollFd,
     handlers: Slab<RefCell<Box<Handler>>, usize>,
-    factory: F,
+    eproto: F,
     terminated: bool
 }
 
-impl<F: Factory> SyncController<F> {
-    pub fn new(epfd: EpollFd, factory: F, capacity: usize) -> SyncController<F> {
+impl<F: EpollProtocol> SyncController<F> {
+    pub fn new(epfd: EpollFd, eproto: F, max_handlers: usize) -> SyncController<F> {
         SyncController {
             epfd: epfd,
-            handlers: Slab::new(capacity),
-            factory: factory,
+            handlers: Slab::new(max_handlers),
+            eproto: eproto,
             terminated: false,
         }
     }
@@ -33,9 +33,6 @@ impl<F: Factory> SyncController<F> {
         if events.contains(EPOLLRDHUP) || events.contains(EPOLLHUP) {
 
             trace!("socket {}: EPOLLHUP", fd);
-            // droped when out of scope
-            // handler should take care of cleaning resources
-            // outside of interests on this epoll facility
             match self.handlers.remove(id) {
                 Some(handler) => perror!("on_close()", handler.borrow_mut().on_close()),
                 None => error!("on_close(): handler not found"),
@@ -48,7 +45,6 @@ impl<F: Factory> SyncController<F> {
 
             let handler = &mut self.handlers[id];
 
-            // TODO keep track and shutdown ?
             if events.contains(EPOLLERR) {
                 trace!("socket {}: EPOLERR", fd);
                 perror!("on_error()", handler.borrow_mut().on_error());
@@ -68,7 +64,7 @@ impl<F: Factory> SyncController<F> {
     }
 }
 
-impl<F: Factory> Controller for SyncController<F> {
+impl<F: EpollProtocol> Controller for SyncController<F> {
 
     fn is_terminated(&self) -> bool {
         self.terminated
@@ -76,18 +72,18 @@ impl<F: Factory> Controller for SyncController<F> {
 
     fn ready(&mut self, ev: &EpollEvent) -> Result<()> {
 
-        match self.factory.decode(ev.data) {
+        match self.eproto.decode(ev.data) {
 
             Action::New(proto, fd) => {
                 let id = try!(self.handlers
-                    .insert(RefCell::new(self.factory.new(proto, fd)))
+                    .insert(RefCell::new(self.eproto.new(proto, fd)))
                     .map_err(|_| "reached maximum number of handlers"));
 
                 let action: Action = Action::Notify(id, fd);
 
                 let interest = EpollEvent {
                     events: EPOLLIN | EPOLLOUT | EPOLLET | EPOLLHUP | EPOLLRDHUP,
-                    data: self.factory.encode(action),
+                    data: self.eproto.encode(action),
                 };
 
                 try!(self.epfd.reregister(fd, &interest));
@@ -111,7 +107,7 @@ pub enum Action {
     Notify(HandlerId, RawFd),
 }
 
-pub trait Factory
+pub trait EpollProtocol
     where Self: Sized + Send + Copy
 {
     //type Protocol: From<usize> + Into<usize>;
@@ -147,7 +143,7 @@ mod tests {
     use super::*;
     use nix::sys::epoll::*;
 
-    struct TestFactory;
+    struct TestEpollProtocol;
 
     const PROTO1: usize = 1;
 
@@ -181,7 +177,7 @@ mod tests {
         }
     }
 
-    impl Factory for TestFactory {
+    impl EpollProtocol for TestEpollProtocol {
         type Protocol = usize;
         fn new(&self, p: usize) -> Box<Handler> {
             Box::new(TestHandler {
@@ -196,7 +192,7 @@ mod tests {
 
     #[test]
     fn decode_encode_new_action() {
-        let test = TestFactory;
+        let test = TestEpollProtocol;
         let data = test.encode(Action::New(PROTO1, ::std::i32::MAX));
 
         if let Action::New(protocol, fd) = test.decode(data) {
@@ -209,8 +205,8 @@ mod tests {
 
     #[test]
     fn decode_encode_notify_action() {
-        let test = TestFactory;
-        let data = Action::<TestFactory>::encode(Action::Notify(10110, 0));
+        let test = TestEpollProtocol;
+        let data = Action::<TestEpollProtocol>::encode(Action::Notify(10110, 0));
 
         if let Action::Notify(id, fd) = test.decode(data) {
             assert!(id == 10110);

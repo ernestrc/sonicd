@@ -1,9 +1,4 @@
-use std::os::unix::io::RawFd;
-
-use nix::unistd;
-
-use model::protocol::*;
-use error::*;
+use error::Result;
 
 pub mod tcp;
 pub mod echo;

@@ -1,12 +1,9 @@
-use nix::sys::epoll::*;
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::{thread, fmt, net, marker, slice};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::os::raw::c_int;
 use std::os::unix::io::{RawFd, AsRawFd};
 use std::io::Write;
 
+use nix::sys::epoll::*;
 use nix::sys::socket::*;
 use nix::sys::signalfd::*;
 use nix::sys::signal::{SIGINT, SIGTERM};
@@ -17,89 +14,26 @@ use io::controller::*;
 use io::controller::sync::*;
 use io::poll::*;
 
-pub struct Server<F>
-    where F: Factory + Send
+/// Server facade
+pub struct Server<L>
+where L: ServerImpl
 {
-    epfds: Vec<EpollFd>,
-    srvfd: RawFd,
-    factory: F,
-    sockf: SockFlag,
-    cepfd: EpollFd,
+    im: L,
+    sigfd: RawFd,
     signals: SignalFd,
     terminated: bool,
-    io_cpus: usize,
-    accepted: u64,
 }
 
-impl<F> Server<F>
-    where F: Factory + Send + 'static
+impl<L> Server<L>
+where L: ServerImpl
 {
-    pub fn new<A: ToSocketAddrs>(cepfd: EpollFd,
-                             addr: A,
-                             factory: F,
-                             max_conn: usize,
-                             sockf: SockFlag,
-                             protocol: i32)
-                             -> Result<Server<F>> {
+    pub fn bind<A: ToSocketAddrs>(addr: A, im: L) -> Result<Server<L>> {
 
-        let srvfd: RawFd =
-            try!(socket(AddressFamily::Inet, SockType::Stream, sockf, protocol)) as i32;
+        let mask = try!(im.bind(addr));
 
-        let a = SockAddr::Inet(InetAddr::from_std(&addr.to_socket_addrs()
-            .unwrap()
-            .next()
-            .unwrap()));
-
-        try!(eagain!(bind, "bind", srvfd, &a));
-        info!("bind: success fd {} to {}", srvfd, a);
-
-        try!(eagain!(listen, "listen", srvfd, max_conn));
-        info!("listen: success fd {}: {}", srvfd, a);
-
-        // spawn one thread + epoll instance per
-        // cpu, and leave one to take care of
-        // connections
-        let cpus = ::num_cpus::get();
-        let io_cpus = cpus - 1;
-
-        info!("detected {} (v)cpus", cpus);
-
-        let mut epfds: Vec<EpollFd> = Vec::with_capacity(io_cpus);
-
-        // build signal mask to share across threads
-        let mut mask = SigSet::empty();
-        mask.add(SIGINT).unwrap();
-        mask.add(SIGTERM).unwrap();
-        try!(mask.thread_set_mask());
-
-        // add the set of signals to the signal mask 
+        // add the set of signals to the signal mask
         // of the main thread
         mask.thread_block().unwrap();
-
-        for _ in 0..io_cpus {
-
-            let epfd = EpollFd::new(try!(epoll_create()));
-
-            epfds.push(epfd);
-
-            thread::spawn(move || {
-                // add the set of signals to the signal mask for all threads
-                // otherwise signalfd will not work properly
-                mask.thread_block().unwrap();
-                let controller = SyncController::new(epfd, factory, max_conn);
-                let mut epoll = Epoll::from_fd(epfd, controller, -1);
-                perror!("loop()", epoll.run());
-            });
-        }
-
-        debug!("created epoll instances: {:?}", epfds);
-
-        let ceinfo = EpollEvent {
-            events: EPOLLET | EPOLLIN | EPOLLOUT | EPOLLERR,
-            data: srvfd as u64,
-        };
-
-        try!(cepfd.register(srvfd, &ceinfo));
 
         let signals = SignalFd::with_flags(&mask, SFD_NONBLOCK).unwrap();
         let sigfd = signals.as_raw_fd();
@@ -109,25 +43,30 @@ impl<F> Server<F>
             data: sigfd as u64,
         };
 
-        try!(cepfd.register(sigfd, &siginfo));
+        try!(im.cepfd.register(sigfd, &siginfo));
 
-        debug!("registered signalfd {}", sigfd);
+        debug!("registered to signalfd {}", sigfd);
 
         Ok(Server {
-            sockf: sockf,
-            srvfd: srvfd,
-            cepfd: cepfd,
-            factory: factory,
-            epfds: epfds,
-            io_cpus: io_cpus,
+            im: im,
+            sigfd: sigfd,
             signals: signals,
-            accepted: 0,
             terminated: false,
         })
     }
 }
 
-impl<F: Factory> Controller for Server<F> {
+impl<I> Drop for Server<I>
+where I: ServerImpl
+{
+    fn drop(&mut self) {
+        let _ = unistd::close(self.sigfd).unwrap();
+    }
+}
+
+impl<I> Controller for Server<I>
+where I: ServerImpl
+{
     fn is_terminated(&self) -> bool {
         self.terminated
     }
@@ -136,55 +75,180 @@ impl<F: Factory> Controller for Server<F> {
 
         match ev.data {
             fd if fd == self.srvfd as u64 => {
-                // TODO!!! Keep track of what fd is assigned to what epoll instance
-                // and register interests for closed connections to do better
-                // load balancing
-                match eagain!(accept4, "accept4", self.srvfd, self.sockf) {
-                    Ok(clifd) => {
-                        debug!("accept4: acceted new tcp client {}", &clifd);
-
-                        // round robin
-                        let next = (self.accepted % self.io_cpus as u64) as usize;
-
-                        let epfd: EpollFd = *self.epfds.get(next).unwrap();
-
-                        let info = EpollEvent {
-                            events: EPOLLONESHOT | EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
-                            // protocol is 0, as we are bound to one address only
-                            data: self.factory.encode(Action::New(0, clifd)),
-                        };
-
-                        debug!("assigned client {} to epoll instance {}", &clifd, &epfd);
-
-                        perror!("epoll_ctl", epfd.register(clifd, &info));
-
-                        debug!("epoll_ctl: registered interests for {}", clifd);
-
-                        self.accepted += 1;
-                    }
+                match eintr!(accept4, "accept4", self.srvfd, self.sockf) {
+                    Ok(Some(clifd)) => try!(self.im.on_accept(srvfd, clifd)),
+                    Ok(None) => debug!("accept4: socket not ready"),
                     Err(e) => error!("accept4: {}", e),
                 }
-
             }
             _ => {
                 match self.signals.read_signal() {
-                    // close server socket as the mask registered
-                    // contains only SIGINT and SIGTERM
                     Ok(Some(sig)) => {
-                        warn!("received signal {:?}. closing server socket..", sig.ssi_signo);
-                        perror!("unistd::close", unistd::close(self.srvfd));
-                        ::std::process::exit(1);
+                        self.terminated = try!(self.im.on_signal(sig));
                     }
-                    Ok(None) => {
-                        warn!("signal fd woke up epoll but not ready to read");
-                    },
-                    Err(err) => {
-                        error!("read_signal: {}", err);
-                    }, // some error happend
+                    Ok(None) => debug!("read_signal(): not ready to read"),
+                    Err(err) => error!("read_signal(): {}", err),
                 }
             }
         }
 
         Ok(())
+    }
+}
+
+
+pub trait ServerImpl 
+//FIXME
+where Self: Sized {
+
+//FIXME not sure how to design API
+//FIXME
+//FIXME
+//FIXME
+    /// In order for `Server` to perform its duties and
+    /// start spinning, we need to supply it an epoll instance.
+    fn get_epoll(&self) -> Epoll<Server<Self>>;
+
+    /// Bind to the specified address and return a set of signals
+    /// to be monitored
+    fn bind<A: ToSocketAddrs>(&self, addr: A) -> Result<SigSet>;
+
+    /// handle new accepted connection from socket `srvfd`
+    fn on_accept(&self, srvfd: RawFd, clifd: RawFd) -> Result<()>;
+
+    /// handle signal described by `sig`
+    fn on_signal(&self, sig: siginfo) -> Result<bool>;
+}
+
+/// Simple server implementation that creates one AF_INET/SOCK_STREAM socket and uses it to bind/listen
+/// at the specified address.
+///
+/// It creates one epoll instance to accept new connections and one instance per cpu left to perform I/O.
+///
+/// New connections are load balanced from the connections epoll to the rest in a round-robin fashion.
+pub struct SimpleMux<P: EpollProtocol> {
+    srvfd: RawFd,
+    cepfd: EpollFd,
+    eproto: P,
+    max_conn: usize,
+    io_threads: usize,
+    accepted: u64,
+    epfds: Vec<EpollFd>,
+}
+
+impl<P: EpollProtocol> SimpleMux<P> {
+    fn new(eproto: P, max_conn: usize) -> Result<SimpleMux<P>> {
+        let cpus = ::num_cpus::get();
+        debug!("machine has {} (v)cpus", cpus);
+
+        let io_threads = cpus - 1;
+
+        // connections epoll
+        let fd = try!(epoll_create());
+
+        let cepfd = EpollFd { fd: fd };
+
+        // create 1 server socket
+        let srvfd = try!(socket(AddressFamily::Inet, SockType::Stream, SOCK_NONBLOCK | SOCK_CLOEXEC, 0)) as i32;
+
+        SimpleMux {
+            eproto: eproto,
+            cepfd: cepfd,
+            srvfd: srvfd,
+            max_conn: max_conn,
+            io_threads: io_threads,
+            accepted: 0,
+            epfds: Vec::with_capacity(io_threads),
+        }
+    }
+}
+
+impl<P> ServerImpl for SimpleMux<P>
+where P: EpollProtocol + Send
+{
+    fn on_accept(&self, srvfd: RawFd, clifd: RawFd) -> Result<()> {
+
+        debug!("accept4: acceted new tcp client {}", &clifd);
+
+        // round robin
+        let next = (self.accepted % self.io_threads as u64) as usize;
+
+        let epfd: EpollFd = *self.epfds.get(next).unwrap();
+
+        let info = EpollEvent {
+            events: EPOLLONESHOT | EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
+            data: self.eproto.encode(Action::New(0, clifd)),
+        };
+
+        debug!("assigned client {} to epoll instance {}", &clifd, &epfd);
+
+        perror!("epoll_ctl", epfd.register(clifd, &info));
+
+        debug!("epoll_ctl: registered interests for {}", clifd);
+
+        self.accepted += 1;
+    }
+
+    fn bind<A: ToSocketAddrs>(&self, addr: A) -> Result<SigSet> {
+
+        let a =
+            SockAddr::Inet(InetAddr::from_std(&addr.to_socket_addrs().unwrap().next().unwrap()));
+
+        try!(eagain!(bind, "bind", self.srvfd, &a));
+        info!("bind: success fd {} to {}", self.srvfd, a);
+
+        try!(eagain!(listen, "listen", self.srvfd, self.max_conn));
+        info!("listen: success fd {}: {}", self.srvfd, a);
+
+        let ceinfo = EpollEvent {
+            events: EPOLLET | EPOLLIN | EPOLLOUT | EPOLLERR,
+            data: self.srvfd as u64,
+        };
+
+        try!(self.cepfd.register(self.srvfd, &ceinfo));
+
+        // signal mask to share across threads
+        let mut mask = SigSet::empty();
+        mask.add(SIGINT).unwrap();
+        mask.add(SIGTERM).unwrap();
+        try!(mask.thread_set_mask());
+
+        // max number of handlers (connections)
+        // per controller
+        let maxh = self.max_conn / self.io_threads;
+
+        for _ in 0..self.io_threads {
+
+            let epfd = EpollFd::new(try!(epoll_create()));
+
+            self.epfds.push(epfd);
+
+            thread::spawn(move || {
+                // add the set of signals to the signal mask for all threads
+                // otherwise signalfd will not work properlys
+                mask.thread_block().unwrap();
+                let controller = SyncController::new(epfd, self.eproto, maxh);
+                let mut epoll = Epoll::from_fd(epfd, controller, -1);
+                perror!("loop()", epoll.run());
+            });
+        }
+        debug!("created {} I/O epoll instances", self.io_threads);
+        Ok(mask)
+    }
+
+    fn on_signal(&self, sig: siginfo) -> Result<bool> {
+        // close server socket as the mask registered
+        // contains only SIGINT and SIGTERM
+        warn!("received signal {:?}. Shutting down..", sig.ssi_signo);
+        Ok(true)
+    }
+}
+
+
+impl<P> Drop for SimpleMux<P>
+where P: EpollProtocol
+{
+    fn drop(&mut self) {
+        let _ = unistd::close(self.srvfd).unwrap();
     }
 }

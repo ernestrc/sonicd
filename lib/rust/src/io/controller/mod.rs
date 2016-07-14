@@ -1,11 +1,6 @@
-use std::os::unix::io::RawFd;
-use std::marker::PhantomData;
-
-use slab::Slab;
 use nix::sys::epoll::*;
 
-use io::handler::Handler;
-use io::poll::{Epoll, EpollFd};
+use io::poll::EpollFd;
 use error::Result;
 
 pub mod sync;
