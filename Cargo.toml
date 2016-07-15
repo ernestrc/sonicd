@@ -46,6 +46,8 @@ num_cpus = "*"
 lazy_static = "0.1.*"
 bytes = "0.3.0"
 slab = "*"
+time = "*"
+pad = "*"
 
 # cli
 regex = "0.1.71"

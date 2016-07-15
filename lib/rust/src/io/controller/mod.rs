@@ -5,6 +5,7 @@ use error::Result;
 
 pub mod sync;
 pub mod server;
+pub mod logging;
 
 pub trait Controller where Self: Sized {
 

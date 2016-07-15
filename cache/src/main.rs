@@ -30,11 +30,8 @@ use nix::sys::signalfd::*;
 use nix::sys::signal::{SIGINT, SIGTERM};
 use nix::unistd;
 
-use sonicd::io::poll::{Epoll, EpollFd};
-use sonicd::io::controller::sync::{SyncController, Action};
-use sonicd::io::handler::{Handler};
-use sonicd::io::controller::server::*;
-use sonicd::io::handler::echo::*;
+use sonicd::io::*;
+use sonicd::io::handler::echo::EchoHandler;
 
 mod error;
 
@@ -43,51 +40,47 @@ use error::*;
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
 static COMMIT: Option<&'static str> = option_env!("SONICD_COMMIT");
 
-// TODO config module with defaults and overrides
-fn run() -> Result<()> {
-    let addr = ("127.0.0.1",10003);
-    let max_conn = 500_000;
-    let loop_ms = -1;
+#[derive(Clone, Copy)]
+struct EchoProtocol;
 
-    let sockf = SOCK_CLOEXEC | SOCK_NONBLOCK;
-    let protocol = 0;
-    // setsockopt(srvfd, SOL_SOCKET, &1).unwrap();
+impl EpollProtocol for EchoProtocol {
 
-    let mut srvp = try!(Epoll::new_with(loop_ms, |cepfd| {
-        Server::new(cepfd, addr, EchoFactory, max_conn, sockf, protocol).unwrap()
-    }));
+    type Protocol = usize;
 
-    try!(srvp.run());
-    Ok(())
+    fn new(&self, _: usize, fd: RawFd) -> Box<Handler> {
+        Box::new(EchoHandler::new(fd))
+    }
 }
 
-fn main() {
+struct EnvLogger;
 
-    env_logger::init().unwrap();
+impl LoggingBackend for EnvLogger {
+    
+    fn setup(&self, epfd: &EpollFd) -> ::sonicd::Result<()> {
+        env_logger::init().unwrap();
+        Ok(())
+    }
+}
+
+impl Controller for EnvLogger {
+
+    fn is_terminated(&self) -> bool {
+        false
+    }
+
+    fn ready(&mut self, events: &EpollEvent) -> ::sonicd::Result<()> {
+        unimplemented!()
+    }
+}
+
+// TODO config module with defaults and overrides
+fn main() {
 
     let c = COMMIT.unwrap_or_else(|| "dev");
     info!("starting sonicd cache v.{} ({})", VERSION, c);
 
-    run().unwrap();
+    let config = SimpleMuxConfig::new(("127.0.0.1", 10003)).unwrap();
+
+    Server::bind(SimpleMux::new(EchoProtocol, config).unwrap(), EnvLogger);
 
 }
-// ::ws::listen("127.0.0.1:9111", |out| WsHandler::new(out, count.clone())) .unwrap();
-// use threadpool::ThreadPool;
-
-// let n_workers = 4;
-// let n_jobs = 8;
-// let pool = ThreadPool::new(n_workers);
-
-// let (tx, rx) = channel();
-
-// for i in 0..n_jobs {
-//    let tx = tx.clone();
-
-//    pool.execute(move || {
-//        tx.send(i).unwrap();
-//    });
-// }
-
-// let count = Rc::new(Cell::new(0));
-
-// assert_eq!(rx.iter().take(n_jobs).fold(0, |a, b| a + b), 28);

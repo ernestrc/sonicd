@@ -1,5 +1,5 @@
 use model::protocol::SonicMessage;
-use error::{Result, Error, ErrorKind};
+use error::{Result, Error};
 use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use nix::unistd;
@@ -185,3 +185,10 @@ pub mod handler;
 pub mod connection;
 pub mod poll;
 pub mod controller;
+
+pub use self::handler::Handler;
+pub use self::poll::{Epoll, EpollFd};
+pub use self::controller::sync::{SyncController, EpollProtocol, Action};
+pub use self::controller::server::{Server, ServerImpl, SimpleMux, SimpleMuxConfig};
+pub use self::controller::logging::LoggingBackend;
+pub use self::controller::Controller;

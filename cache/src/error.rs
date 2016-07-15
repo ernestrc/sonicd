@@ -8,6 +8,7 @@ error_chain! {
     }
 
     foreign_links {
+        ::log::SetLoggerError, LoggerError, "loggin setup failed";
         ::nix::Error, NixError, "nix error";
         ::std::io::Error, IoError, "io error";
     }

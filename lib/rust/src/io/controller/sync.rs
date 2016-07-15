@@ -2,7 +2,6 @@ use std::os::unix::io::RawFd;
 use std::cell::RefCell;
 use std::boxed::Box;
 
-use nix::sys::epoll::*;
 use nix::unistd;
 use slab::Slab;
 
@@ -20,6 +19,7 @@ pub struct SyncController<F: EpollProtocol> {
 
 impl<F: EpollProtocol> SyncController<F> {
     pub fn new(epfd: EpollFd, eproto: F, max_handlers: usize) -> SyncController<F> {
+        trace!("new()");
         SyncController {
             epfd: epfd,
             handlers: Slab::new(max_handlers),
@@ -29,10 +29,11 @@ impl<F: EpollProtocol> SyncController<F> {
     }
 
     fn notify(&mut self, fd: RawFd, id: usize, events: EpollEventKind) -> Result<()> {
+        trace!("notify()");
 
         if events.contains(EPOLLRDHUP) || events.contains(EPOLLHUP) {
 
-            trace!("socket {}: EPOLLHUP", fd);
+            trace!("socket's fd {}: EPOLLHUP", fd);
             match self.handlers.remove(id) {
                 Some(handler) => perror!("on_close()", handler.borrow_mut().on_close()),
                 None => error!("on_close(): handler not found"),
@@ -46,17 +47,17 @@ impl<F: EpollProtocol> SyncController<F> {
             let handler = &mut self.handlers[id];
 
             if events.contains(EPOLLERR) {
-                trace!("socket {}: EPOLERR", fd);
+                trace!("socket's fd {}: EPOLERR", fd);
                 perror!("on_error()", handler.borrow_mut().on_error());
             }
 
             if events.contains(EPOLLIN) {
-                trace!("socket {}: EPOLLIN", fd);
+                trace!("socket's fd {}: EPOLLIN", fd);
                 perror!("on_readable()", handler.borrow_mut().on_readable());
             }
 
             if events.contains(EPOLLOUT) {
-                trace!("socket {}: EPOLLOUT", fd);
+                trace!("socket's fd {}: EPOLLOUT", fd);
                 perror!("on_writable()", handler.borrow_mut().on_writable());
             }
         }
@@ -71,6 +72,7 @@ impl<F: EpollProtocol> Controller for SyncController<F> {
     }
 
     fn ready(&mut self, ev: &EpollEvent) -> Result<()> {
+        trace!("ready()");
 
         match self.eproto.decode(ev.data) {
 
@@ -79,7 +81,7 @@ impl<F: EpollProtocol> Controller for SyncController<F> {
                     .insert(RefCell::new(self.eproto.new(proto, fd)))
                     .map_err(|_| "reached maximum number of handlers"));
 
-                let action: Action = Action::Notify(id, fd);
+                let action: Action<F> = Action::Notify(id, fd);
 
                 let interest = EpollEvent {
                     events: EPOLLIN | EPOLLOUT | EPOLLET | EPOLLHUP | EPOLLRDHUP,
@@ -100,21 +102,20 @@ impl<F: EpollProtocol> Controller for SyncController<F> {
 }
 
 pub type HandlerId = usize;
-pub type Protocol = usize;
 
-pub enum Action {
-    New(Protocol, RawFd),
+pub enum Action<P: EpollProtocol> {
+    New(P::Protocol, RawFd),
     Notify(HandlerId, RawFd),
 }
 
 pub trait EpollProtocol
     where Self: Sized + Send + Copy
 {
-    //type Protocol: From<usize> + Into<usize>;
+    type Protocol: From<usize> + Into<usize>;
 
-    fn new(&self, p: Protocol, fd: RawFd) -> Box<Handler>;
+    fn new(&self, p: Self::Protocol, fd: RawFd) -> Box<Handler>;
 
-    fn encode(&self, action: Action) -> u64 {
+    fn encode(&self, action: Action<Self>) -> u64 {
         match action {
             Action::Notify(id, fd) => ((fd as u64) << 31) | ((id as u64) << 15) | 0,
             Action::New(protocol, fd) => {
@@ -124,7 +125,7 @@ pub trait EpollProtocol
         }
     }
 
-    fn decode(&self, data: u64) -> Action {
+    fn decode(&self, data: u64) -> Action<Self> {
         let arg1 = ((data >> 15) & 0xffff) as usize;
         let fd = (data >> 31) as i32;
         match data & 0x7fff {
@@ -178,7 +179,6 @@ mod tests {
     }
 
     impl EpollProtocol for TestEpollProtocol {
-        type Protocol = usize;
         fn new(&self, p: usize) -> Box<Handler> {
             Box::new(TestHandler {
                 proto: p,
