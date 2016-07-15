@@ -1,16 +1,14 @@
 use std::os::unix::io::RawFd;
 use std::{slice, fmt};
-use std::boxed::Box;
-use std::cell::RefCell;
-use std::marker::PhantomData;
 
-use nix::sys::epoll::*;
+use nix::sys::epoll::{epoll_ctl, epoll_wait, EpollOp};
 use nix::unistd;
-use slab::Slab;
 
 use error::{Result, Error};
-use io::handler::Handler;
 use io::controller::Controller;
+
+pub use nix::sys::epoll::{epoll_create, EpollEvent, EpollEventKind, EPOLLIN, EPOLLOUT, EPOLLERR, EPOLLHUP,
+                          EPOLLET, EPOLLONESHOT, EPOLLRDHUP};
 
 static EVENTS_N: &'static usize = &1000;
 
@@ -54,6 +52,7 @@ impl<C: Controller> Epoll<C> {
     }
 
     fn wait(&self, dst: &mut [EpollEvent]) -> Result<usize> {
+        trace!("wait()");
         let cnt = try!(epoll_wait(self.epfd.fd, dst, self.loop_ms));
         Ok(cnt)
     }
@@ -72,6 +71,7 @@ impl<C: Controller> Epoll<C> {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        trace!("run()");
 
         while !self.controller.is_terminated() {
             perror!("loop()", self.run_once());
@@ -104,16 +104,19 @@ impl EpollFd {
     }
 
     pub fn reregister(&self, fd: RawFd, interest: &EpollEvent) -> Result<()> {
+        trace!("reregister()");
         try!(self.ctl(EpollOp::EpollCtlMod, interest, fd));
         Ok(())
     }
 
     pub fn register(&self, fd: RawFd, interest: &EpollEvent) -> Result<()> {
+        trace!("register()");
         try!(self.ctl(EpollOp::EpollCtlAdd, interest, fd));
         Ok(())
     }
 
     pub fn unregister(&self, fd: RawFd) -> Result<()> {
+        trace!("unregister()");
         try!(self.ctl(EpollOp::EpollCtlDel, &NO_INTEREST, fd));
         Ok(())
     }

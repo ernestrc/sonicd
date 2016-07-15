@@ -25,6 +25,7 @@ pub struct EchoHandler {
 
 impl EchoHandler {
     pub fn new(clifd: RawFd) -> EchoHandler {
+        trace!("new()");
         EchoHandler {
             clifd: clifd,
             sockw: false,
@@ -49,6 +50,7 @@ impl EchoHandler {
 
 impl Handler for EchoHandler {
     fn on_error(&mut self) -> Result<()> {
+        trace!("on_error()");
         panic!("bye!");
     }
 
@@ -58,7 +60,6 @@ impl Handler for EchoHandler {
     }
 
     fn on_readable(&mut self) -> Result<()> {
-
         trace!("on_readable()");
         {
             let mut buf = self.buf.borrow_mut();
@@ -113,7 +114,11 @@ impl Handler for EchoHandler {
 pub struct EchoEpollProtocol;
 
 impl EpollProtocol for EchoEpollProtocol {
+
+    type Protocol = usize;
+
     fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
+        trace!("new()");
         match p {
             0 => Box::new(EchoHandler::new(fd)),
             1 => Box::new(SonicEchoHandler::new(fd)),
@@ -151,6 +156,7 @@ impl Handler for SonicEchoHandler {
     }
 
     fn on_close(&mut self) -> Result<()> {
+        trace!("on_close()");
         if !self.done {
             Err("closed unexpectedly".into())
         } else {

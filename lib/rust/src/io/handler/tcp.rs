@@ -1,19 +1,19 @@
-use std::os::unix::io::RawFd;
-use std::io::{Cursor, Write, Read};
-use std::cell::RefCell;
-use std::marker::Sized;
-use std::rc::Rc;
-
-use byteorder::{BigEndian, ByteOrder};
-use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
-
-use model::protocol::SonicMessage;
-use error::*;
-//use {Handler, Factory, Action};
-use super::super::connection::Connection;
-use source::Source;
-
-const MEGABYTE: usize = 1024 * 1024;
+//use std::os::unix::io::RawFd;
+//use std::io::{Cursor, Write, Read};
+//use std::cell::RefCell;
+//use std::marker::Sized;
+//use std::rc::Rc;
+//
+//use byteorder::{BigEndian, ByteOrder};
+//use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
+//
+//use model::protocol::SonicMessage;
+//use error::*;
+////use {Handler, Factory, Action};
+//use super::super::connection::Connection;
+//use source::Source;
+//
+//const MEGABYTE: usize = 1024 * 1024;
 
 /*
 #[derive(PartialEq)]
