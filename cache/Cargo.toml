@@ -1,10 +1,10 @@
 [package]
-name = "sonicc"
+name = "sonicx"
 version = "0.1.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 
 [[bin]]
-name = "sonicc"
+name = "sonicx"
 path = "src/main.rs"
 
 [dependencies]

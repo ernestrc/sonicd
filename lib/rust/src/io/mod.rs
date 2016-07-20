@@ -6,6 +6,9 @@ use nix::unistd;
 use std::os::unix::io::RawFd;
 use nix::sys::epoll::{EpollEvent, EpollEventKind};
 
+const DEFAULT_BUF_SIZE: usize = 1024 * 1024;
+const MAX_MSG_SIZE: usize = 1024 * 1024;
+
 #[macro_export]
 macro_rules! eintr {
     ($syscall:expr, $name:expr, $($arg:expr),*) => {{
@@ -184,11 +187,12 @@ pub fn frame(msg: &SonicMessage) -> Result<Vec<u8>> {
 pub mod handler;
 pub mod connection;
 pub mod poll;
+pub mod buf;
 pub mod controller;
 
 pub use self::handler::Handler;
 pub use self::poll::{Epoll, EpollFd};
 pub use self::controller::sync::{SyncController, EpollProtocol, Action};
 pub use self::controller::server::{Server, ServerImpl, SimpleMux, SimpleMuxConfig};
-pub use self::controller::logging::LoggingBackend;
+pub use self::controller::logging::{LoggingBackend, SimpleLogging};
 pub use self::controller::Controller;

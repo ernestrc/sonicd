@@ -41,6 +41,7 @@ impl<F: EpollProtocol> SyncController<F> {
 
             perror!("unregister()", self.epfd.unregister(fd));
             perror!("close()", unistd::close(fd));
+            debug!("handlers: {:?}", self.handlers);
 
         } else {
 
@@ -142,8 +143,9 @@ mod tests {
     use io::poll::*;
     use io::handler::Handler;
     use super::*;
-    use nix::sys::epoll::*;
+    use std::os::unix::io::RawFd;
 
+    #[derive(Clone, Copy)]
     struct TestEpollProtocol;
 
     const PROTO1: usize = 1;
@@ -179,7 +181,9 @@ mod tests {
     }
 
     impl EpollProtocol for TestEpollProtocol {
-        fn new(&self, p: usize) -> Box<Handler> {
+        type Protocol = usize;
+
+        fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
             Box::new(TestHandler {
                 proto: p,
                 on_close: false,
@@ -206,7 +210,7 @@ mod tests {
     #[test]
     fn decode_encode_notify_action() {
         let test = TestEpollProtocol;
-        let data = Action::<TestEpollProtocol>::encode(Action::Notify(10110, 0));
+        let data = test.encode(Action::Notify(10110, 0));
 
         if let Action::Notify(id, fd) = test.decode(data) {
             assert!(id == 10110);
@@ -215,11 +219,4 @@ mod tests {
             panic!("action is not Action::Notify")
         }
     }
-
-    // TODO #[test]
-    // TODO fn notify_events() {
-    // TODO     let test = SyncController {
-
-    // TODO     }
-    // TODO }
 }

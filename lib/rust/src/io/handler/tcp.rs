@@ -1,200 +1,204 @@
-//use std::os::unix::io::RawFd;
-//use std::io::{Cursor, Write, Read};
-//use std::cell::RefCell;
-//use std::marker::Sized;
-//use std::rc::Rc;
-//
-//use byteorder::{BigEndian, ByteOrder};
-//use bytes::{MutBuf, MutByteBuf, ByteBuf, Buf};
-//
-//use model::protocol::SonicMessage;
-//use error::*;
-////use {Handler, Factory, Action};
-//use super::super::connection::Connection;
-//use source::Source;
-//
-//const MEGABYTE: usize = 1024 * 1024;
+use std::os::unix::io::RawFd;
+use std::slice;
+use std::cell::RefCell;
+use std::io::{Cursor, Read};
+use std::cmp;
 
-/*
-#[derive(PartialEq)]
-pub enum Protocol {
-    Echo,
-    Sonic,
-}
+use nix::unistd;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-pub enum TcpAction {
-    New(Protocol, RawFd),
-    Notify(usize, RawFd),
-}
+use model::protocol::*;
+use model::*;
+use model;
+use io::buf::ByteBuffer;
+use source::Source;
+use io::handler::Handler;
+use io::{read, write, frame, MAX_MSG_SIZE};
+use error::{Result, ErrorKind};
 
-impl Action for TcpAction {
-    fn encode(self) -> u64 {
-        match self {
-            TcpAction::Notify(id, fd) => ((fd as u64) << 31) | ((id as u64) << 15) | 0,
-            TcpAction::New(Protocol::Sonic, fd) => ((fd as u64) << 31) | (0 << 15) | 1,
-            TcpAction::New(Protocol::Echo, fd) => ((fd as u64) << 31) | (1 << 15) | 1,
-        }
-    }
-}
-
-impl<C: Write + Read> Factory<TcpHandler<C>, TcpAction> for Tcp {
-
-    fn process<F: FnOnce(usize) -> TcpHandler<C>>(&self, action: TcpAction) -> Result<Option<F>> {
-        unimplemented!()
-        // Action::New(kind, fd) => {
-        //
-        // let idm = self.handlers.insert_with(|id| {
-        // RefCell::new(match kind {
-        // HandlerKind::Echo => Box::new(EchoHandler::new(id, fd)),
-        // HandlerKind::Tcp => Box::new(TcpHandler::new(id, epfd, fd)),
-        // })
-        // });
-        //
-        // match idm {
-        // Some(id) => {
-        // respects set of events of the original caller
-        // but encodes Notify action in data
-        // let new = EpollEvent {
-        // events: ev.events | EPOLLET | EPOLLHUP | EPOLLRDHUP,
-        // data: Self::encode(Action::Notify(id, fd)),
-        // };
-        //
-        // perror!("reregister()", Self::reregister(epfd, fd, new));
-        // self.notify(fd, id, ev.events)
-        // }
-        // None => error!("epoll {} reached maximum number of handlers", epfd),
-        // }
-        // }
-        // Action::Notify(id, fd) => self.notify(fd, id, ev.events),
-        // }
-    }
-}
-
-// TODO close fds and unregister events from epoll
-// TODO implement flags to keep state for edge-triggered
-pub struct TcpHandler<C: Write + Read> {
-    // only one handler at a time can perform mut borrows
-    id: usize,
-    epfd: RawFd,
+#[derive(Debug)]
+pub struct TcpHandler {
     sockw: bool,
     sockr: bool,
-    conn: C,
-    source: Option<Box<Source>>,
-    buf: Option<ByteBuf>,
-    mut_buf: Option<MutByteBuf>,
-    mbuf: Vec<SonicMessage>,
+    clifd: RawFd,
+    ibuf: ByteBuffer,
+    obuf: ByteBuffer,
+    closing: bool,
+    source: Option<RefCell<Box<Source>>>,
 }
 
-impl TcpHandler<Connection> {
-    /// Instantiate a new I/O handler
-    pub fn new(id: usize, epfd: RawFd, clifd: RawFd) -> TcpHandler<Connection> {
-        let conn = Connection::new(epfd, clifd);
+impl TcpHandler {
+    pub fn new(clifd: RawFd) -> TcpHandler {
+        trace!("new()");
         TcpHandler {
-            id: id,
-            epfd: epfd,
+            clifd: clifd,
             sockw: false,
             sockr: false,
-            conn: conn,
+            ibuf: ByteBuffer::new(),
+            obuf: ByteBuffer::new(),
+            closing: false,
             source: None,
-            buf: Some(ByteBuf::none()),
-            mut_buf: Some(ByteBuf::mut_with_capacity(MEGABYTE)),
-            mbuf: Vec::new(),
         }
     }
 }
 
-impl<C: Write + Read> TcpHandler<C> {
-    pub fn try_into_buf(&mut self, buf: &[u8]) -> Result<usize> {
+impl TcpHandler {
+    fn fill_buf(&mut self) -> Result<usize> {
+        trace!("fill_buf()");
+        {
+            let read = try!(read(self.clifd, From::from(&mut self.ibuf)));
 
-        let mut read = 0;
-        let total = buf.len();
-
-        while total > 4 {
-
-            let length = BigEndian::read_u32(&buf[0..4]);
-
-            if total as u32 == (length + 4_u32) {
-                let bytes = &buf[4..length as usize];
-                let msg = try!(SonicMessage::from_slice(bytes));
-                self.mbuf.push(msg);
-                read += bytes.len();
+            match read {
+                Some(cnt) => {
+                    self.ibuf.extend(cnt);
+                    trace!("on_readable() bytes {}", cnt);
+                    Ok(cnt)
+                }
+                None => {
+                    trace!("on_readable() socket not ready");
+                    Ok(0)
+                }
             }
         }
-        Ok(read)
+    }
+
+    fn oflush(&mut self) -> Result<Option<usize>> {
+        if let Some(cnt) = try!(write(self.clifd, From::from(&self.obuf))) {
+            self.obuf.consume(cnt);
+            Ok(Some(cnt))
+        } else {
+            self.sockw = false;
+            Ok(None)
+        }
+    }
+
+    fn obuffer(&mut self, msg: SonicMessage) -> Result<()> {
+        let bytes = try!(msg.as_bytes());
+        try!(self.obuf.write(bytes.as_slice()));
+
+        if self.sockw {
+            try!(self.oflush());
+        }
+
+        Ok(())
+    }
+
+    fn done(&mut self, done: model::Done) -> Result<()> {
+        self.closing = true;
+        self.obuffer(done.into())
+    }
+
+    fn read_message(&mut self) -> Result<Option<SonicMessage>> {
+        trace!("read_message()");
+
+        let len_buf = &mut [0; 4];
+
+        // read length header bytes
+        try!(self.ibuf.read(len_buf));
+
+        let mut rdr = Cursor::new(len_buf);
+
+        // decode length header
+        let len = try!(rdr.read_i32::<BigEndian>()) as usize;
+        trace!("read_message(): len: {:?}", len);
+
+        if self.ibuf.len() >= len + 4 {
+            // result as intended
+            let msg = {
+                let buf: &[u8] = From::from(&self.ibuf);
+                try!(SonicMessage::from_slice(buf.split_at(4).1.split_at(len).0))
+            };
+
+            self.ibuf.consume(len);
+
+            trace!("read_message(): {:?}", &msg);
+            Ok(Some(msg))
+
+        } else {
+            trace!("read_message(): < {:?} bytes were available for read", &len);
+            Ok(None)
+        }
+    }
+
+    fn receive(&mut self, kind: MessageKind) -> Result<Option<SonicMessage>> {
+        if let Some(msg) = try!(self.read_message()) {
+            if msg.event_type == kind {
+                Ok(Some(msg))
+            } else {
+                let err = ErrorKind::Proto(format!("unexpected message kind {:?}", msg.event_type)
+                    .to_owned());
+                Err(err.into())
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn close(&self) -> Result<()> {
+        try!(unistd::close(self.clifd));
+        Ok(())
     }
 }
 
-// TODO check for overflow
-impl<C: Write + Read> Handler for TcpHandler<C> {
-
-    fn id(&self) -> usize {
-        self.id
-    }
-
+impl Handler for TcpHandler {
     fn on_error(&mut self) -> Result<()> {
-        unimplemented!()
+        error!("socket error: {:?}", self);
+        Ok(())
     }
 
     fn on_close(&mut self) -> Result<()> {
-        unimplemented!()
+        trace!("on_close()");
+        if !self.closing {
+            error!("client closed unexpectedly");
+        }
+        Ok(())
     }
 
     fn on_readable(&mut self) -> Result<()> {
-        self.sockr = true;
-
         trace!("on_readable()");
 
-        let mut buf: MutByteBuf = try!(self.mut_buf
-            .take()
-            .ok_or(ErrorKind::UnexpectedState("io handler not ready for on_readable()")));
+        // first msg from client
+        if self.source.is_none() {
 
-        self.sockr = false;
+            let cnt = try!(self.fill_buf());
 
-        let read = try!(self.conn.read(unsafe { buf.mut_bytes() }));
+            if cnt + self.ibuf.len() > 4 {
 
-        match read {
-            0 => {
-                trace!("on_readable() socket not ready");
-                self.mut_buf = Some(buf);
-                Ok(())
-            }
-            cnt => {
-                unsafe { buf.advance(cnt) };
-                trace!("on_readable() bytes {}", cnt);
-
-                let buf = buf.flip();
-
-                // FIXME here is where it should be handed into source
-                // let parsed = try!(self.try_into_buf((&buf).bytes()));
-                let parsed = 0;
-
-                if parsed == cnt {
-                    trace!("on_readable() complete");
-                    self.mut_buf = Some(buf.flip());
-                } else {
-                    trace!("on_readable() incomplete");
-                    self.mut_buf = Some(buf.resume());
+                if let Some(msg) = try!(self.receive(MessageKind::QueryKind)) {
+                    let query: Query = try!(msg.into());
+                    debug!("recv {:?}", query);
+                    unimplemented!()
                 }
-                Ok(())
             }
+
+            Ok(())
+
+        } else if self.closing {
+            let cnt = try!(self.fill_buf());
+
+            if cnt + self.ibuf.len() > 4 {
+                if try!(self.receive(MessageKind::AcknowledgeKind)).is_some() {
+                    try!(self.close());
+                }
+            }
+
+            Ok(())
+
+        } else {
+            let err: Result<()> = Err(ErrorKind::Proto("unexpected client message".to_owned())
+                .into());
+            self.done(model::Done::new(err))
         }
     }
 
     fn on_writable(&mut self) -> Result<()> {
         trace!("on_writable()");
-        self.sockw = true;
 
-        let mut buf: ByteBuf = try!(self.buf
-            .take()
-            .ok_or(ErrorKind::UnexpectedState("io handler not ready for on_writable()")));
-
-        let cnt = try!(self.conn.write((&buf).bytes()));
-
-        if cnt > 0 {
-            buf.advance(cnt)
+        if !self.obuf.is_empty() {
+            try!(self.oflush());
+        } else {
+            self.sockw = true;
         }
-
-        self.mut_buf = Some(buf.flip());
         Ok(())
     }
-}*/
+}

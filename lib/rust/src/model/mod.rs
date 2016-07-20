@@ -1,4 +1,8 @@
+use std::fmt::Write;
+
 use serde_json::Value;
+
+use error::{Result, Error};
 
 #[derive(Debug)]
 pub struct Acknowledge;
@@ -30,6 +34,31 @@ pub struct OutputChunk(pub Vec<Value>);
 /// is an error if there was one
 #[derive(Debug)]
 pub struct Done(pub Option<String>);
+
+impl Done {
+
+    pub fn error(e: Error) -> Done {
+        let mut buf = String::new();
+
+        buf.write_str(&format!("\nerror: {}", e)).unwrap();
+
+        for e in e.iter().skip(1) {
+            buf.write_str(&format!("\ncaused_by: {}", e)).unwrap();
+        }
+
+        buf.write_str(&format!("\nbacktrace:\n{:?}", e.backtrace())).unwrap();
+
+        Done(Some(buf))
+
+    }
+
+    pub fn new<T>(e: Result<T>) -> Self {
+        match e {
+            Ok(_) => Done(None),
+            Err(e) => Self::error(e),
+        }
+    }
+}
 
 
 /// Marker trait for messages sent from client to server

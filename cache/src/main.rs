@@ -31,7 +31,7 @@ use nix::sys::signal::{SIGINT, SIGTERM};
 use nix::unistd;
 
 use sonicd::io::*;
-use sonicd::io::handler::echo::EchoHandler;
+use sonicd::io::handler::tcp::TcpHandler;
 
 mod error;
 
@@ -48,28 +48,7 @@ impl EpollProtocol for EchoProtocol {
     type Protocol = usize;
 
     fn new(&self, _: usize, fd: RawFd) -> Box<Handler> {
-        Box::new(EchoHandler::new(fd))
-    }
-}
-
-struct EnvLogger;
-
-impl LoggingBackend for EnvLogger {
-    
-    fn setup(&self, epfd: &EpollFd) -> ::sonicd::Result<()> {
-        env_logger::init().unwrap();
-        Ok(())
-    }
-}
-
-impl Controller for EnvLogger {
-
-    fn is_terminated(&self) -> bool {
-        false
-    }
-
-    fn ready(&mut self, events: &EpollEvent) -> ::sonicd::Result<()> {
-        unimplemented!()
+        Box::new(TcpHandler::new(fd))
     }
 }
 
@@ -81,6 +60,8 @@ fn main() {
 
     let config = SimpleMuxConfig::new(("127.0.0.1", 10003)).unwrap();
 
-    Server::bind(SimpleMux::new(EchoProtocol, config).unwrap(), EnvLogger);
+    let logging = SimpleLogging::new(::log::LogLevel::Trace);
+
+    Server::bind(SimpleMux::new(EchoProtocol, config).unwrap(), logging).unwrap();
 
 }

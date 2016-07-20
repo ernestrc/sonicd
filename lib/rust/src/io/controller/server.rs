@@ -60,7 +60,12 @@ where L: LoggingBackend + Send {
         let mut epoll = try!(Epoll::new_with(loop_ms, |epfd| {
 
             //delegate logging registering to logging backend
-            lb.setup(&epfd).unwrap();
+            let log = lb.setup(&epfd).unwrap();
+
+            ::log::set_logger(|max_log_level| {
+                max_log_level.set(lb.level().to_log_level_filter());
+                log
+            }).unwrap();
 
             Server {
                 epfd: epfd,
@@ -98,7 +103,7 @@ impl <L: LoggingBackend> Controller for Server<L> {
     }
 
     fn ready(&mut self, ev: &EpollEvent) -> Result<()> {
-        trace!("ready()");
+        trace!("ready(): {:?}: {:?}", ev.data, ev.events);
         if ev.data == self._sigfd {
             match self.sigfd.read_signal() {
                 Ok(Some(sig)) => {
@@ -130,6 +135,8 @@ pub trait ServerImpl {
 /// Simple server implementation that creates one AF_INET/SOCK_STREAM socket and uses it to bind/listen
 /// at the specified address. It instantiates one epoll to accept new connections
 /// and one instance per cpu left to perform I/O.
+///
+/// Events are handled synchronously TODO explain
 ///
 /// New connections are load balanced from the connections epoll to the rest in a round-robin fashion.
 pub struct SimpleMux<P: EpollProtocol> {
