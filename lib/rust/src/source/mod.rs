@@ -1,5 +1,14 @@
-pub trait Source {}
+use std::fmt::Debug;
 
-pub struct EmptySource;
+use serde_json::Value;
 
-impl Source for EmptySource {}
+use error::Result;
+
+pub trait Source 
+where Self: Debug + Handler {
+}
+
+#[derive(Debug)]
+pub struct SyntheticSource;
+
+impl Source for SyntheticSource {}

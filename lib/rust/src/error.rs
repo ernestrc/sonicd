@@ -15,9 +15,10 @@ error_chain! {
     }
 
     errors {
-        UnexpectedState(state: &'static str) {
-            description("Unexpected handler state")
-                display("unexpected handler state: {} ", state)
+
+        BufferOverflowError(max: usize) {
+            description("Buffer overflow error")
+                display("Buffer exceeded max of {} bytes", max)
         }
 
         QueryError(msg: String) {

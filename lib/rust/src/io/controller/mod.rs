@@ -1,6 +1,4 @@
-use nix::sys::epoll::*;
-
-use io::poll::EpollFd;
+use io::poll::{EpollFd, EpollEvent};
 use error::Result;
 
 pub mod sync;

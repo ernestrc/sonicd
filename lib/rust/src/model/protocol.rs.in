@@ -3,7 +3,7 @@ use serde_json::Value;
 use error::{Result, ErrorKind};
 use super::*;
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq)]
 pub enum MessageKind {
     // client ~> server
     #[serde(rename="A")]
@@ -34,14 +34,6 @@ pub struct SonicMessage {
 }
 
 impl SonicMessage {
-    // DoneWithQueryExecution error
-    pub fn done<T>(e: Result<T>) -> SonicMessage {
-        let variation = match e {
-            Ok(_) => None,
-            Err(e) => Some(format!("{}", e).to_owned()),
-        };
-        Done(variation).into()
-    }
 
     pub fn into<T: SonicMessageLike<T>>(self) -> Result<T> {
         T::from(self)

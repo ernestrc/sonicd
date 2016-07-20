@@ -138,9 +138,7 @@ impl From<EpollFd> for i32 {
 #[cfg(test)]
 mod tests {
     use {Controller, Result, Error};
-    use io::*;
     use super::*;
-    use nix::sys::epoll::*;
     use ::std::sync::mpsc::*;
     use nix::fcntl::{O_NONBLOCK, O_CLOEXEC};
     use nix::unistd;
@@ -181,19 +179,19 @@ mod tests {
         let (rfd, wfd) = unistd::pipe2(O_NONBLOCK | O_CLOEXEC).unwrap();
 
         let interest = EpollEvent {
-            events: EPOLLOUT | EPOLLIN,
+            events: EPOLLONESHOT | EPOLLIN,
             data: rfd as u64,
         };
 
+        unistd::write(wfd, b"hello!").unwrap();
+
         poll.epfd.register(rfd, &interest).unwrap();
 
-        poll.run_once();
+        poll.run_once().unwrap();
 
         let ev = rx.recv().unwrap();
 
-        unistd::write(wfd, b"hello!").unwrap();
-
-        assert!(ev.events.contains(EPOLLOUT));
+        assert!(ev.events.contains(EPOLLIN));
         assert!(ev.data == rfd as u64);
     }
 }
