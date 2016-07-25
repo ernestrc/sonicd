@@ -65,8 +65,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val conf = new File("/tmp/application.conf")
   val conf2 = new File("/tmp/reference.conf")
 
-  lazy val confChannel = Files.newByteChannel(conf.toPath, StandardOpenOption.WRITE)
-  lazy val confChannel2 = Files.newByteChannel(conf2.toPath, StandardOpenOption.WRITE)
+  lazy val confChannel = Files.newByteChannel(conf.toPath, StandardOpenOption.WRITE, StandardOpenOption.SYNC, StandardOpenOption.DSYNC)
+  lazy val confChannel2 = Files.newByteChannel(conf2.toPath, StandardOpenOption.WRITE, StandardOpenOption.SYNC, StandardOpenOption.DSYNC)
 
   def this() = this(ActorSystem("LocalFileSourceSpec"))
 
