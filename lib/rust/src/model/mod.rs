@@ -73,6 +73,17 @@ pub struct Query {
     pub config: Value,
 }
 
+impl Query {
+    pub fn get_config<'a>(&'a self, key: &str) -> Result<&'a Value> {
+        let v = try!(self.config.search(key).ok_or(format!("missing key {} in query config", key)));
+        Ok(v)
+    }
+
+    pub fn get_opt<'a>(&'a self, key: &str) -> Option<&'a Value> {
+        self.config.search(key)
+    }
+}
+
 impl Command for Query {}
 
 #[derive(Debug)]
