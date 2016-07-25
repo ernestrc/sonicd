@@ -22,7 +22,7 @@ mod source;
 
 pub use io::handler::Handler;
 pub use io::controller::{Controller};
-//pub use io::controller::sync::SyncController;
+pub use source::{Source, SyntheticSource};
 
 pub use api::{run, stream, authenticate};
 pub use model::{Authenticate, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};

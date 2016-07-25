@@ -1,5 +1,5 @@
 use std::os::unix::io::RawFd;
-use std::cell::RefCell;
+use std::cell::{RefCell, Cell};
 use std::boxed::Box;
 
 use nix::unistd;
@@ -79,7 +79,7 @@ impl<F: EpollProtocol> Controller for SyncController<F> {
 
             Action::New(proto, fd) => {
                 let id = try!(self.handlers
-                    .insert(RefCell::new(self.eproto.new(proto, fd)))
+                    .insert(RefCell::new(self.eproto.new(proto, fd, self.epfd)))
                     .map_err(|_| "reached maximum number of handlers"));
 
                 let action: Action<F> = Action::Notify(id, fd);
@@ -114,7 +114,7 @@ pub trait EpollProtocol
 {
     type Protocol: From<usize> + Into<usize>;
 
-    fn new(&self, p: Self::Protocol, fd: RawFd) -> Box<Handler>;
+    fn new(&self, p: Self::Protocol, fd: RawFd, epfd: EpollFd) -> Box<Handler>;
 
     fn encode(&self, action: Action<Self>) -> u64 {
         match action {
@@ -183,7 +183,7 @@ mod tests {
     impl EpollProtocol for TestEpollProtocol {
         type Protocol = usize;
 
-        fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
+        fn new(&self, p: usize, fd: RawFd, _: EpollFd) -> Box<Handler> {
             Box::new(TestHandler {
                 proto: p,
                 on_close: false,

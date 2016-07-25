@@ -1,8 +1,6 @@
 use std::os::unix::io::RawFd;
-use std::slice;
 use std::cell::RefCell;
-use std::io::{Cursor, Read};
-use std::cmp;
+use std::io::Cursor;
 
 use nix::unistd;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -13,11 +11,12 @@ use model;
 use io::buf::ByteBuffer;
 use source::Source;
 use io::handler::Handler;
-use io::{read, write, frame, MAX_MSG_SIZE};
+use io::{read, write, frame, MAX_MSG_SIZE, EpollFd};
 use error::{Result, ErrorKind};
 
 #[derive(Debug)]
 pub struct TcpHandler {
+    epfd: EpollFd,
     sockw: bool,
     sockr: bool,
     clifd: RawFd,
@@ -28,9 +27,10 @@ pub struct TcpHandler {
 }
 
 impl TcpHandler {
-    pub fn new(clifd: RawFd) -> TcpHandler {
+    pub fn new(clifd: RawFd, epfd: EpollFd) -> TcpHandler {
         trace!("new()");
         TcpHandler {
+            epfd: epfd,
             clifd: clifd,
             sockw: false,
             sockr: false,
@@ -63,6 +63,7 @@ impl TcpHandler {
     }
 
     fn oflush(&mut self) -> Result<Option<usize>> {
+        trace!("oflush()");
         if let Some(cnt) = try!(write(self.clifd, From::from(&self.obuf))) {
             self.obuf.consume(cnt);
             Ok(Some(cnt))
@@ -72,20 +73,29 @@ impl TcpHandler {
         }
     }
 
-    fn obuffer(&mut self, msg: SonicMessage) -> Result<()> {
+    fn obuffer(&mut self, msg: &SonicMessage) -> Result<()> {
+        trace!("obuffer()");
+
         let bytes = try!(msg.as_bytes());
         try!(self.obuf.write(bytes.as_slice()));
 
-        if self.sockw {
-            try!(self.oflush());
+        Ok(())
+    }
+
+    fn ovbuffer(&mut self, msgs: Vec<SonicMessage>) -> Result<()> {
+        trace!("ovbuffer()");
+
+        for msg in msgs.iter() {
+            try!(self.obuffer(msg));
         }
 
         Ok(())
     }
 
     fn done(&mut self, done: model::Done) -> Result<()> {
+        trace!("done()");
         self.closing = true;
-        self.obuffer(done.into())
+        self.obuffer(&done.into())
     }
 
     fn read_message(&mut self) -> Result<Option<SonicMessage>> {
@@ -165,9 +175,15 @@ impl Handler for TcpHandler {
             if cnt + self.ibuf.len() > 4 {
 
                 if let Some(msg) = try!(self.receive(MessageKind::QueryKind)) {
+
                     let query: Query = try!(msg.into());
                     debug!("recv {:?}", query);
-                    unimplemented!()
+
+                    self.source = Some(RefCell::new(try!(Source::new(query, self.epfd))));
+
+                    if self.sockw {
+                        return self.on_writable();
+                    }
                 }
             }
 
@@ -194,11 +210,96 @@ impl Handler for TcpHandler {
     fn on_writable(&mut self) -> Result<()> {
         trace!("on_writable()");
 
-        if !self.obuf.is_empty() {
-            try!(self.oflush());
-        } else {
-            self.sockw = true;
+        match *&self.source {
+            Some(ref s) => {
+                let mut source = s.borrow_mut();
+
+                let mut res: Result<()> = Ok(());
+
+                // loop until EAGAIN, source exhausted or source is done
+                loop {
+                    // get next batch from source
+                    if let Some(msgs) = try!(source.next()) {
+                        // source exhausted
+                        if msgs.is_empty() {
+                            self.sockw = true;
+                            break;
+                        } else {
+                            try!(self.ovbuffer(msgs));
+
+                            if let Some(cnt) = try!(self.oflush()) {
+                                trace!("on_writable(): written {} bytes", cnt);
+                            } else {
+                                // would block
+                                self.sockw = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        res = self.done(Done(None));
+                        break;
+                    }
+                }
+
+                res
+            }
+
+            None => {
+
+                if !self.obuf.is_empty() {
+                    try!(self.oflush());
+                } else {
+                    self.sockw = true;
+                }
+
+                Ok(())
+
+            }
         }
-        Ok(())
+
+        // if self.source.is_some() {
+        //
+        // let s = &self.source.unwrap();
+        // let mut source = s.borrow_mut();
+        //
+        // let mut res: Result<()> = Ok(());
+        //
+        // loop until EAGAIN, source exhausted or source is done
+        // loop {
+        // get next batch from source
+        // if let Some(msgs) = try!(source.next()) {
+        // source exhausted
+        // if msgs.is_empty() {
+        // self.sockw = true;
+        // break;
+        // } else {
+        // try!(self.ovbuffer(msgs));
+        //
+        // if let Some(cnt) = try!(self.oflush()) {
+        // trace!("on_writable(): written {} bytes", cnt);
+        // } else {
+        // would block
+        // self.sockw = false;
+        // break;
+        // }
+        // }
+        // } else {
+        // res = self.done(Done(None));
+        // break;
+        // }
+        // }
+        //
+        // res
+        //
+        // } else {
+        //
+        // if !self.obuf.is_empty() {
+        // try!(self.oflush());
+        // } else {
+        // self.sockw = true;
+        // }
+        //
+        // Ok(())
+        // }
     }
 }

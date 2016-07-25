@@ -7,7 +7,7 @@ use nix::unistd;
 use io::controller::sync::EpollProtocol;
 use model::protocol::*;
 use io::handler::Handler;
-use io::{read, write, read_message, frame};
+use io::{read, write, read_message, frame, EpollFd};
 use error::Result;
 
 const BUF_CAP: usize = 1024 * 1024;
@@ -117,7 +117,7 @@ impl EpollProtocol for EchoEpollProtocol {
 
     type Protocol = usize;
 
-    fn new(&self, p: usize, fd: RawFd) -> Box<Handler> {
+    fn new(&self, p: usize, fd: RawFd, _: EpollFd) -> Box<Handler> {
         trace!("new()");
         match p {
             0 => Box::new(EchoHandler::new(fd)),
