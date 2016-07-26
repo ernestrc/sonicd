@@ -1,6 +1,5 @@
 extern crate serde_json;
 extern crate serde;
-extern crate pbr;
 extern crate regex;
 extern crate docopt;
 extern crate rustc_serialize;
@@ -14,6 +13,9 @@ extern crate log;
 extern crate sonicd;
 extern crate rpassword;
 
+#[cfg(feature = "pbr")]
+extern crate pbr;
+
 mod util {
     #[cfg(feature = "serde_macros")]
     include!("util.rs.in");
@@ -23,11 +25,13 @@ mod util {
 }
 
 use std::path::PathBuf;
-use pbr::ProgressBar;
 use util::*;
 use docopt::Docopt;
 use std::process;
 use std::io::{Write, Stderr, stderr, stdout};
+
+#[cfg(feature = "pbr")]
+use pbr::ProgressBar;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const USAGE: &'static str = "
@@ -102,34 +106,41 @@ error_chain! {
     }
 }
 
-fn hide(pb: &mut ProgressBar<Stderr>) {
-    pb.show_bar = false;
-    pb.show_speed = false;
-    pb.show_percent = false;
-    pb.show_counter = false;
-    pb.show_time_left = false;
-    pb.show_tick = false;
-    pb.show_message = false;
-}
+//#[cfg(feature = "pbr")]
+//fn hide(pb: &mut ProgressBar<Stderr>) {
+//    pb.show_bar = false;
+//    pb.show_speed = false;
+//    pb.show_percent = false;
+//    pb.show_counter = false;
+//    pb.show_time_left = false;
+//    pb.show_tick = false;
+//    pb.show_message = false;
+//}
+//
+//#[cfg(feature = "pbr")]
+//fn show(pb: &mut ProgressBar<Stderr>) {
+//    pb.show_bar = true;
+//    pb.show_speed = true;
+//    pb.show_percent = true;
+//    pb.show_counter = true;
+//    pb.show_time_left = true;
+//    pb.show_tick = true;
+//    pb.show_message = true;
+//}
+//#[cfg(feature = "pbr")]
+//fn stetupb() {
+//
+//}
 
-fn show(pb: &mut ProgressBar<Stderr>) {
-    pb.show_bar = true;
-    pb.show_speed = true;
-    pb.show_percent = true;
-    pb.show_counter = true;
-    pb.show_time_left = true;
-    pb.show_tick = true;
-    pb.show_message = true;
-}
 
 fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
 
-    let mut pb = ProgressBar::on(stderr(), 0);
-    pb.format("╢░░_╟");
-    pb.tick_format("▀▐▄▌");
-    if !silent {
-        show(&mut pb);
-    }
+//    let mut pb = ProgressBar::on(stderr(), 0);
+//    pb.format("╢░░_╟");
+//    pb.tick_format("▀▐▄▌");
+//    //if !silent {
+//    //    show(&mut pb);
+//    //}
 
     let res = {
         let fn_out = |msg: sonicd::OutputChunk| {
@@ -147,34 +158,37 @@ fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: b
             }
         };
 
+        //let fn_prog = |msg: sonicd::QueryProgress| {
+        //    if !silent {
+        //        let sonicd::QueryProgress { total, progress, status, .. } = msg;
+
+        //        pb.message(&format!("{:?} ", status));
+        //        debug!("{:?}: {:?}/{:?}", status, progress, total);
+
+        //        if let Some(total) = total {
+        //            pb.total = total as u64;
+        //        }
+
+        //        if progress >= 1.0 {
+        //            pb.add(progress as u64);
+        //        } else {
+        //            pb.tick();
+        //        };
+        //    }
+        //};
         let fn_prog = |msg: sonicd::QueryProgress| {
-            if !silent {
-                let sonicd::QueryProgress { total, progress, status, .. } = msg;
-
-                pb.message(&format!("{:?} ", status));
-                debug!("{:?}: {:?}/{:?}", status, progress, total);
-
-                if let Some(total) = total {
-                    pb.total = total as u64;
-                }
-
-                if progress >= 1.0 {
-                    pb.add(progress as u64);
-                } else {
-                    pb.tick();
-                };
-            }
+            ()
         };
 
         sonicd::stream(query, (host, *port), fn_out, fn_prog, fn_meta)
     };
 
     try!(res);
-    if !silent {
-        hide(&mut pb);
-        pb.finish();
-        stderr().flush().unwrap();
-    }
+    //if !silent {
+    //    hide(&mut pb);
+    //    pb.finish();
+    //    stderr().flush().unwrap();
+    //}
     stdout().flush().unwrap();
     Ok(())
 }

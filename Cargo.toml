@@ -19,6 +19,7 @@ build = "build.rs"
 [features]
 # cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
 websocket = ["ws"]
+progress = ["pbr"]
 default = ["serde_codegen"]
 nightly = ["serde_macros"]
 
@@ -51,7 +52,7 @@ rustc-serialize = "0.3.19"
 env_logger = "0.3.3"
 ansi_term = "0.7"
 ws = { version =  "0.5.0", optional = true }
-pbr = { git = "https://github.com/a8m/pb.git" }
+pbr = { git = "https://github.com/a8m/pb.git", optional = true }
 # pbr = { path = "../../dev/rust/pb" }
 
 
