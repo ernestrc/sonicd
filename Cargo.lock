@@ -9,7 +9,6 @@ dependencies = [
  "error-chain 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "pbr 0.2.1 (git+https://github.com/a8m/pb.git)",
  "regex 0.1.71 (registry+https://github.com/rust-lang/crates.io-index)",
  "rpassword 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -253,17 +252,6 @@ dependencies = [
 name = "num-traits"
 version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "pbr"
-version = "0.2.1"
-source = "git+https://github.com/a8m/pb.git#1e988965549d6f9d1a8192e5035e73ba10d0a0ec"
-dependencies = [
- "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
- "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
- "winapi 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
-]
 
 [[package]]
 name = "quasi"
