@@ -12,6 +12,7 @@ extern crate error_chain;
 extern crate log;
 #[macro_use]
 extern crate sonicd;
+extern crate rpassword;
 
 mod util {
     #[cfg(feature = "serde_macros")]

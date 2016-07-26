@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use ansi_term::Colour::{Red, Yellow};
 use super::{ChainErr, Error, Result, ErrorKind};
 
+use rpassword::read_password;
+
 static DEFAULT_EDITOR: &'static str = "vim";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -273,8 +275,7 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
     try!(io::stdout().write(b"Enter key: "));
     try!(io::stdout().flush());
 
-    let mut key = String::new();
-    try!(io::stdin().read_line(&mut key));
+    let key = try!(read_password());
 
     let token = try!(::sonicd::authenticate(user.to_owned(), key.trim().to_owned(), (host, *tcp_port), None));
     let path = get_config_path();
