@@ -35,6 +35,81 @@ impl ClientConfig {
     }
 }
 
+// pub fn run<A: ToSocketAddrs>(query: SonicMessage, addr: A) -> Result<Vec<Vec<Value>>> {
+//
+// let mut buf = Vec::new();
+//
+// {
+// let fn_buf = |msg| {
+// buf.push(msg);
+// };
+//
+// try!(stream(query, addr, fn_buf, |_| {}, |_| {}));
+// }
+//
+// Ok(buf)
+// }
+
+//pub fn authenticate<A: ToSocketAddrs>(user: String,
+//                                      key: String,
+//                                      addr: A,
+//                                      trace_id: Option<String>,
+//                                      tx: Sender<Result<SonicMessage>>)
+//-> Result<()> {
+//
+//    thread::spawn(move || {
+//
+//        let tx = tx.clone();
+//
+//        let cmd = SonicMessage::Authenticate {
+//            key: key,
+//            user: user,
+//            trace_id: trace_id,
+//        };
+//
+//        match command(addr, cmd) {
+//            Ok(stream) => {
+//
+//                let fd = stream.as_raw_fd();
+//
+//                loop {
+//                    match net::read_message(&fd) {
+//                        o @ Ok(_) => tx.send(o).unwrap(),
+//                        e @ Err(_) => {
+//                            tx.send(e).unwrap();
+//                            break;
+//                        }
+//                    }
+//                }
+//            }
+//            Err(e) => {
+//                tx.send(Err(e)).unwrap();
+//            }
+//        }
+//
+//        {
+//            let fn_buf = |msg| {
+//                buf.push(msg);
+//            };
+//
+//            try!(command(auth, addr, fn_buf, |_| {}, |_| {}));
+//        }
+//
+//        let SonicMessage::OutputChunk(data) = try!(buf.into_iter()
+//                                                   .next()
+//                                                   .ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
+//
+//        let x = try!(data.into_iter()
+//                     .next()
+//                     .ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
+//        let s = try!(x.as_str()
+//                     .ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
+//        Ok(s.to_owned())
+//    });
+//
+//    Ok(())
+//}
+
 
 fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
     debug!("overwriting or creating new configuration file with {:?}",
@@ -229,7 +304,7 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
 }
 
 pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
-             auth: Option<String>, raw_query: String) -> Result<::sonicd::Query> {
+             auth: Option<String>, raw_query: String) -> Result<::sonicd::SonicMessage> {
 
     let clean = sources.remove(&alias);
 
@@ -241,7 +316,7 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
         },
     };
 
-    let query = ::sonicd::Query {
+    let query = ::sonicd::SonicMessage::Query {
         id: None,
         trace_id: None,
         auth: auth,
@@ -268,6 +343,7 @@ pub fn report_error(e: &Error, show_backtrace: bool) {
     handle.flush().unwrap();
 }
 
+/*
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     let user = option_env!("USER").unwrap_or_else(|| "unknown user");
@@ -287,4 +363,4 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     println!("OK");
     Ok(())
-}
+}*/

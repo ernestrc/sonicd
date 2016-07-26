@@ -12,8 +12,6 @@ extern crate log;
 #[macro_use]
 extern crate sonicd;
 extern crate rpassword;
-
-#[cfg(feature = "pbr")]
 extern crate pbr;
 
 mod util {
@@ -28,10 +26,10 @@ use std::path::PathBuf;
 use util::*;
 use docopt::Docopt;
 use std::process;
-use std::io::{Write, Stderr, stderr, stdout};
-
-#[cfg(feature = "pbr")]
+use std::io::{Write, stderr, stdout};
+use std::cell::RefCell;
 use pbr::ProgressBar;
+use sonicd::SonicMessage;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const USAGE: &'static str = "
@@ -96,6 +94,7 @@ error_chain! {
     foreign_links {
         ::std::io::Error, IoError, "I/O operation failed";
         ::serde_json::Error, Json, "JSON serialization/deserialization error";
+        ::std::sync::mpsc::RecvError, RecvError, "Channel receive error";
     }
 
     errors {
@@ -106,107 +105,120 @@ error_chain! {
     }
 }
 
-//#[cfg(feature = "pbr")]
-//fn hide(pb: &mut ProgressBar<Stderr>) {
-//    pb.show_bar = false;
-//    pb.show_speed = false;
-//    pb.show_percent = false;
-//    pb.show_counter = false;
-//    pb.show_time_left = false;
-//    pb.show_tick = false;
-//    pb.show_message = false;
-//}
-//
-//#[cfg(feature = "pbr")]
-//fn show(pb: &mut ProgressBar<Stderr>) {
-//    pb.show_bar = true;
-//    pb.show_speed = true;
-//    pb.show_percent = true;
-//    pb.show_counter = true;
-//    pb.show_time_left = true;
-//    pb.show_tick = true;
-//    pb.show_message = true;
-//}
-//#[cfg(feature = "pbr")]
-//fn stetupb() {
-//
-//}
+fn show<T: Write>(pb: &mut ProgressBar<T>) {
+    pb.show_bar = true;
+    pb.show_speed = false;
+    pb.show_percent = true;
+    pb.show_counter = true;
+    pb.show_time_left = true;
+    pb.show_tick = true;
+    pb.show_message = true;
+}
 
+fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bool) -> Result<()> {
 
-fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
+    let out = RefCell::new(stdout());
+    let mut buf: Vec<SonicMessage> = Vec::new();
+    let mut pb = ProgressBar::on(stderr(), 100);
+    pb.format("╢░░_╟");
+    pb.tick_format("▀▐▄▌");
+    show(&mut pb);
 
-//    let mut pb = ProgressBar::on(stderr(), 0);
-//    pb.format("╢░░_╟");
-//    pb.tick_format("▀▐▄▌");
-//    //if !silent {
-//    //    show(&mut pb);
-//    //}
+    let (tx, rx) = ::std::sync::mpsc::channel();
 
-    let res = {
-        let fn_out = |msg: sonicd::OutputChunk| {
-            let cols = msg.0.iter().fold(String::new(), |acc, x| format!("{}{:?}\t", acc, x));
+    try!(sonicd::stream((host, *port), query, tx));
+
+    let draw = |b: &mut Vec<SonicMessage>| {
+        let len = b.len();
+        for msg in b.drain(..len) {
+            let cols = match msg {
+                SonicMessage::OutputChunk(data) => {
+                    data.iter().fold(String::new(), |acc, val| format!("{}{:?}\t", acc, val))
+                }
+                SonicMessage::TypeMetadata(data) => {
+                    data.iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0))
+                }
+                _ => panic!("not possible!"),
+            };
             let row = format!("{}\n", cols.trim_right());
-            stdout().write_all(row.as_bytes()).unwrap();
-        };
-
-        let fn_meta = |msg: sonicd::TypeMetadata| {
-            debug!("received type metadata: {:?}", msg);
-            if !rows_only {
-                let cols = msg.0 .iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0));
-                let row = format!("{}\n", cols.trim_right());
-                stdout().write_all(row.as_bytes()).unwrap();
-            }
-        };
-
-        //let fn_prog = |msg: sonicd::QueryProgress| {
-        //    if !silent {
-        //        let sonicd::QueryProgress { total, progress, status, .. } = msg;
-
-        //        pb.message(&format!("{:?} ", status));
-        //        debug!("{:?}: {:?}/{:?}", status, progress, total);
-
-        //        if let Some(total) = total {
-        //            pb.total = total as u64;
-        //        }
-
-        //        if progress >= 1.0 {
-        //            pb.add(progress as u64);
-        //        } else {
-        //            pb.tick();
-        //        };
-        //    }
-        //};
-        let fn_prog = |msg: sonicd::QueryProgress| {
-            ()
-        };
-
-        sonicd::stream(query, (host, *port), fn_out, fn_prog, fn_meta)
+            let mut bout = out.borrow_mut();
+            bout.write_all(row.as_bytes()).unwrap();
+            bout.flush().unwrap();
+        }
     };
 
-    try!(res);
-    //if !silent {
-    //    hide(&mut pb);
-    //    pb.finish();
-    //    stderr().flush().unwrap();
-    //}
-    stdout().flush().unwrap();
-    Ok(())
+    let res: Result<()>;
+
+    loop {
+        match try!(rx.recv()) {
+            Ok(msg @ SonicMessage::TypeMetadata(_)) => {
+                if !rows_only {
+                    buf.push(msg);
+                }
+            }
+            Ok(msg @ SonicMessage::OutputChunk(_)) => {
+                buf.push(msg);
+                if !silent && !pb.is_finish {
+                    //tick format breaks suffix length
+                    //so we need to disable it before finishing bar
+                    pb.show_tick = false;
+                    pb.tick();
+                    pb.finish();
+                }
+                draw(&mut buf);
+            }
+            Ok(SonicMessage::QueryProgress { status, progress, total, .. }) => {
+                if !silent && !pb.is_finish {
+
+                    pb.message(&format!("{:?} ", status));
+                    debug!("{:?}: {:?}/{:?}", status, progress, total);
+
+                    if let Some(total) = total {
+                        pb.total = total as u64;
+                    }
+
+                    if progress >= 1.0 {
+                        pb.add(progress as u64);
+                    } else {
+                        pb.tick();
+                    };
+                }
+            }
+            Ok(SonicMessage::Done(None)) => {
+                res = Ok(());
+                break;
+            }
+            Ok(SonicMessage::Done(Some(e))) => {
+                res = Err(e.into());
+                break;
+            }
+            Err(e) => {
+                res = Err(e.into());
+                break;
+            }
+            Ok(a) => debug!("ignoring msg {:?}", a),
+        }
+    }
+
+    draw(&mut buf);
+
+    res
 }
 
 fn _main(args: Args) -> Result<()> {
 
     let Args { arg_file,
-    arg_query,
-    flag_silent,
-    flag_rows_only,
-    flag_d,
-    flag_file,
-    flag_c,
-    arg_source,
-    cmd_login,
-    flag_execute,
-    flag_version,
-    .. } = args;
+               arg_query,
+               flag_silent,
+               flag_rows_only,
+               flag_d,
+               flag_file,
+               flag_c,
+               arg_source,
+               cmd_login,
+               flag_execute,
+               flag_version,
+               .. } = args;
 
     let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
@@ -233,13 +245,14 @@ fn _main(args: Args) -> Result<()> {
 
     } else if cmd_login {
 
-        login(&sonicd, &tcp_port)
+        unimplemented!()
+        // login(&sonicd, &tcp_port)
 
     } else if flag_version {
 
         println!("Sonic CLI version {} ({})",
-        VERSION,
-        COMMIT.unwrap_or_else(|| "dev"));
+                 VERSION,
+                 COMMIT.unwrap_or_else(|| "dev"));
 
         Ok(())
 

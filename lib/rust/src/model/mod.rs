@@ -1,10 +1,5 @@
 use serde_json::Value;
-
-#[derive(Debug)]
-pub struct Acknowledge;
-
-#[derive(Debug)]
-pub struct TypeMetadata(pub Vec<(String, Value)>);
+use error::Result;
 
 #[derive(Debug)]
 pub enum QueryStatus {
@@ -16,47 +11,69 @@ pub enum QueryStatus {
 }
 
 #[derive(Debug)]
-pub struct QueryProgress {
-    pub status: QueryStatus,
-    pub progress: f64,
-    pub total: Option<f64>,
-    pub units: Option<String>,
+pub enum SonicMessage {
+    // client ~> server
+    Acknowledge,
+
+    Query {
+        id: Option<String>,
+        query: String,
+        trace_id: Option<String>,
+        auth: Option<String>,
+        config: Value,
+    },
+
+    Authenticate {
+        user: String,
+        key: String,
+        trace_id: Option<String>,
+    },
+
+    // client <~ server
+    TypeMetadata(Vec<(String, Value)>),
+
+    QueryProgress {
+        status: QueryStatus,
+        progress: f64,
+        total: Option<f64>,
+        units: Option<String>,
+    },
+
+    OutputChunk(Vec<Value>),
+
+    Done(Option<String>),
 }
 
-#[derive(Debug)]
-pub struct Log(pub String);
+impl SonicMessage {
+    // DoneWithQueryExecution error
+    pub fn done<T>(e: Result<T>) -> SonicMessage {
+        let variation = match e {
+            Ok(_) => None,
+            Err(e) => Some(format!("{}", e).to_owned()),
+        };
+        SonicMessage::Done(variation).into()
+    }
 
-#[derive(Debug)]
-pub struct OutputChunk(pub Vec<Value>);
+    pub fn into_json(self) -> Value {
+        let msg: protocol::ProtoSonicMessage = From::from(self);
 
-/// Signals when a stream is done. Inner option
-/// is an error if there was one
-#[derive(Debug)]
-pub struct Done(pub Option<String>);
+        ::serde_json::to_value(&msg)
+    }
 
+    pub fn from_slice(slice: &[u8]) -> Result<SonicMessage> {
+        let msg = try!(::serde_json::from_slice::<protocol::ProtoSonicMessage>(slice));
+        msg.into_msg()
+    }
 
-/// Marker trait for messages that client can send to server
-pub trait Command {}
+    pub fn from_bytes(buf: Vec<u8>) -> Result<SonicMessage> {
+        Self::from_slice(buf.as_slice())
+    }
 
-#[derive(Debug)]
-pub struct Query {
-    pub id: Option<String>,
-    pub query: String,
-    pub trace_id: Option<String>,
-    pub auth: Option<String>,
-    pub config: Value,
+    pub fn into_bytes(self) -> Result<Vec<u8>> {
+        let s = try!(::serde_json::to_string(&self.into_json()));
+        Ok(s.into_bytes())
+    }
 }
-
-impl Command for Query {}
-
-#[derive(Debug)]
-pub struct Authenticate {
-    pub user: String,
-    pub key: String,
-    pub trace_id: Option<String>,
-}
-
-impl Command for Authenticate {}
 
 pub mod protocol {
     #[cfg(feature = "serde_macros")]

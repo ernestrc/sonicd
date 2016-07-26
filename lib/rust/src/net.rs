@@ -1,8 +1,8 @@
-use model::protocol::SonicMessage;
 use error::{ErrorKind, Result};
 use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use io::read_next;
+use model::SonicMessage;
 
 pub fn read_message(fd: &i32) -> Result<SonicMessage> {
 

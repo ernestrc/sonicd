@@ -19,9 +19,8 @@ pub mod net;
 #[cfg(feature="websocket")]
 pub mod ws;
 
-pub use api::{run, stream, authenticate};
-pub use model::{Authenticate, Log, Acknowledge, Query, TypeMetadata, Done, OutputChunk, QueryProgress};
-pub use model::protocol::SonicMessage;
+pub use api::stream;
+pub use model::{SonicMessage, QueryStatus};
 pub use error::{Result, Error, ErrorKind};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");

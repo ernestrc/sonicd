@@ -1,39 +1,31 @@
-use model::*;
-use model::protocol::{SonicMessage, MessageKind};
-use error::{ErrorKind, Result};
-use net;
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 use std::io::Write;
-use std::fmt::Debug;
+use std::sync::mpsc::Sender;
+use std::thread;
 use std::net::ToSocketAddrs;
 
-pub fn run<A: ToSocketAddrs>(query: Query, addr: A) -> Result<Vec<OutputChunk>> {
+use model::SonicMessage;
+use error::Result;
+use net;
 
-    let mut buf = Vec::new();
+fn send_cmd(stream: &mut TcpStream, cmd: SonicMessage) -> Result<()> {
 
-    {
-        let fn_buf = |msg| {
-            buf.push(msg);
-        };
+    debug!("framing command {:?}", &cmd);
 
-        try!(stream(query, addr, fn_buf, |_| {}, |_| {}));
-    }
+    // frame command
+    let fbytes = try!(net::frame(cmd.into()));
 
-    Ok(buf)
+    debug!("framed command into {} bytes", fbytes.len());
+
+    // send query
+    try!(stream.write(&fbytes.as_slice()));
+
+    Ok(())
 }
 
-pub fn stream<C, O, P, M, A>(command: C,
-                             addr: A,
-                             mut output: O,
-                             mut progress: P,
-                             mut metadata: M)
-                             -> Result<()>
-    where O: FnMut(OutputChunk) -> (),
-          P: FnMut(QueryProgress) -> (),
-          M: FnMut(TypeMetadata) -> (),
-          C: Command + Debug + Into<SonicMessage>,
-          A: ToSocketAddrs
+pub fn stream<A>(addr: A, cmd: SonicMessage, tx: Sender<Result<SonicMessage>>) -> Result<()>
+    where A: ToSocketAddrs
 {
 
     let mut stream = try!(TcpStream::connect(addr));
@@ -41,76 +33,31 @@ pub fn stream<C, O, P, M, A>(command: C,
     // set timeout 10s
     try!(stream.set_read_timeout(Some(::std::time::Duration::new(10, 0))));
 
-    debug!("framing command {:?}", &command);
+    // FIXME when librux I/O layer is ready
+    thread::spawn(move || {
 
-    // frame command
-    let fbytes = try!(net::frame(command.into()));
+        let tx = tx.clone();
 
-    debug!("framed command into {} bytes", fbytes.len());
+        match send_cmd(&mut stream, cmd) {
+            Ok(_) => {
 
-    // send query
-    try!(stream.write(&fbytes.as_slice()));
+                let fd = stream.as_raw_fd();
 
-    let fd = stream.as_raw_fd();
-
-    let res: Result<()>;
-
-    loop {
-        let msg = try!(net::read_message(&fd));
-        match msg.event_type {
-            MessageKind::OutputKind => output(try!(msg.into())),
-            MessageKind::ProgressKind => progress(try!(msg.into())),
-            MessageKind::TypeMetadataKind => metadata(try!(msg.into())),
-            MessageKind::DoneKind => {
-                let d: Done = try!(msg.into());
-                if let Some(error) = d.0 {
-                    res = Err(ErrorKind::QueryError(error).into())
-                } else {
-                    res = Ok(());
-                };
-                let msg: SonicMessage = Acknowledge.into();
-                let fbytes = try!(net::frame(msg));
-                // send ack
-                try!(stream.write(&fbytes.as_slice()));
-                debug!("disconnected");
-                break;
+                loop {
+                    match net::read_message(&fd) {
+                        o @ Ok(_) => tx.send(o).unwrap(),
+                        e @ Err(_) => {
+                            tx.send(e).unwrap();
+                            break;
+                        }
+                    }
+                }
             }
-            MessageKind::QueryKind |
-            MessageKind::AuthKind |
-            MessageKind::AcknowledgeKind => {}
+            Err(e) => {
+                tx.send(Err(e)).unwrap();
+            }
         }
-    }
+    });
 
-    return res;
-}
-
-pub fn authenticate<A: ToSocketAddrs>(user: String,
-                                      key: String,
-                                      addr: A,
-                                      trace_id: Option<String>)
-                                      -> Result<String> {
-
-    let auth = Authenticate {
-        key: key,
-        user: user,
-        trace_id: trace_id,
-    };
-    let mut buf: Vec<OutputChunk> = Vec::new();
-
-    {
-        let fn_buf = |msg| {
-            buf.push(msg);
-        };
-
-        try!(stream(auth, addr, fn_buf, |_| {}, |_| {}));
-    }
-
-    let OutputChunk(data) = try!(buf.into_iter()
-        .next()
-        .ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
-
-    let x =
-        try!(data.into_iter().next().ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
-    let s = try!(x.as_str().ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
-    Ok(s.to_owned())
+    Ok(())
 }
