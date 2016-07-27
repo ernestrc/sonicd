@@ -6,13 +6,14 @@ use std::str::FromStr;
 use std::string::ToString;
 use std::env;
 use std::path::PathBuf;
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 use regex::Regex;
-use std::collections::BTreeMap;
 use ansi_term::Colour::{Red, Yellow};
-use super::{ChainErr, Error, Result, ErrorKind};
+use sonicd::SonicMessage;
 
-use rpassword::read_password;
+use super::{ChainErr, Error, Result, ErrorKind};
 
 static DEFAULT_EDITOR: &'static str = "vim";
 
@@ -35,83 +36,20 @@ impl ClientConfig {
     }
 }
 
-// pub fn run<A: ToSocketAddrs>(query: SonicMessage, addr: A) -> Result<Vec<Vec<Value>>> {
-//
-// let mut buf = Vec::new();
-//
-// {
-// let fn_buf = |msg| {
-// buf.push(msg);
-// };
-//
-// try!(stream(query, addr, fn_buf, |_| {}, |_| {}));
-// }
-//
-// Ok(buf)
-// }
+pub fn parse_token(data: Vec<Value>) -> Result<String> {
 
-//pub fn authenticate<A: ToSocketAddrs>(user: String,
-//                                      key: String,
-//                                      addr: A,
-//                                      trace_id: Option<String>,
-//                                      tx: Sender<Result<SonicMessage>>)
-//-> Result<()> {
-//
-//    thread::spawn(move || {
-//
-//        let tx = tx.clone();
-//
-//        let cmd = SonicMessage::Authenticate {
-//            key: key,
-//            user: user,
-//            trace_id: trace_id,
-//        };
-//
-//        match command(addr, cmd) {
-//            Ok(stream) => {
-//
-//                let fd = stream.as_raw_fd();
-//
-//                loop {
-//                    match net::read_message(&fd) {
-//                        o @ Ok(_) => tx.send(o).unwrap(),
-//                        e @ Err(_) => {
-//                            tx.send(e).unwrap();
-//                            break;
-//                        }
-//                    }
-//                }
-//            }
-//            Err(e) => {
-//                tx.send(Err(e)).unwrap();
-//            }
-//        }
-//
-//        {
-//            let fn_buf = |msg| {
-//                buf.push(msg);
-//            };
-//
-//            try!(command(auth, addr, fn_buf, |_| {}, |_| {}));
-//        }
-//
-//        let SonicMessage::OutputChunk(data) = try!(buf.into_iter()
-//                                                   .next()
-//                                                   .ok_or_else(|| ErrorKind::Proto("no messages returned".to_owned())));
-//
-//        let x = try!(data.into_iter()
-//                     .next()
-//                     .ok_or_else(|| ErrorKind::Proto("output is empty".to_owned())));
-//        let s = try!(x.as_str()
-//                     .ok_or_else(|| ErrorKind::Proto("token is not a string".to_owned())));
-//        Ok(s.to_owned())
-//    });
-//
-//    Ok(())
-//}
+    let x = try!(data.into_iter()
+                 .next()
+                 .ok_or_else(|| "output is empty".to_owned()));
+
+    let s = try!(x.as_str()
+                 .ok_or_else(|| "token is not a string".to_owned()));
+
+    Ok(s.to_owned())
+}
 
 
-fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
+pub fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
     debug!("overwriting or creating new configuration file with {:?}",
            config);
     let mut f = try!(OpenOptions::new().truncate(true).create(true).write(true).open(path));
@@ -125,13 +63,13 @@ fn write_config(config: &ClientConfig, path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn get_config_path() -> PathBuf {
+pub fn get_config_path() -> PathBuf {
     let mut sonicrc = env::home_dir().expect("can't find your home folder");
     sonicrc.push(".sonicrc");
     sonicrc
 }
 
-fn edit_file(path: &PathBuf) -> Result<String> {
+pub fn edit_file(path: &PathBuf) -> Result<String> {
 
     let editor = option_env!("EDITOR").unwrap_or_else(|| DEFAULT_EDITOR);
 
@@ -304,7 +242,7 @@ pub fn inject_vars(template: &str, vars: &Vec<(String, String)>) -> Result<Strin
 }
 
 pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
-             auth: Option<String>, raw_query: String) -> Result<::sonicd::SonicMessage> {
+             auth: Option<String>, raw_query: String) -> Result<SonicMessage> {
 
     let clean = sources.remove(&alias);
 
@@ -316,7 +254,7 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
         },
     };
 
-    let query = ::sonicd::SonicMessage::Query {
+    let query = SonicMessage::Query {
         id: None,
         trace_id: None,
         auth: auth,
@@ -342,25 +280,3 @@ pub fn report_error(e: &Error, show_backtrace: bool) {
 
     handle.flush().unwrap();
 }
-
-/*
-pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
-
-    let user = option_env!("USER").unwrap_or_else(|| "unknown user");
-
-    try!(io::stdout().write(b"Enter key: "));
-    try!(io::stdout().flush());
-
-    let key = try!(read_password());
-
-    let token = try!(::sonicd::authenticate(user.to_owned(), key.trim().to_owned(), (host, *tcp_port), None));
-    let path = get_config_path();
-    let config = try!(read_config(&path));
-
-    let new_config = ClientConfig { auth: Some(token), ..config };
-
-    try!(write_config(&new_config, &path));
-
-    println!("OK");
-    Ok(())
-}*/

@@ -23,13 +23,14 @@ mod util {
 }
 
 use std::path::PathBuf;
-use util::*;
-use docopt::Docopt;
 use std::process;
 use std::io::{Write, stderr, stdout};
 use std::cell::RefCell;
+
+use docopt::Docopt;
 use pbr::ProgressBar;
 use sonicd::SonicMessage;
+use rpassword::read_password;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const USAGE: &'static str = "
@@ -57,7 +58,7 @@ Options:
   -d <foo=bar>          Replace variable in query in the form of `${foo}` with value `var`
   -r, --rows-only       Skip printing column names
   -S, --silent          Skip printing query progress bar
-  -V, --verbose         Enable debug mode
+  -V, --verbose         Enable debug logging
   -h, --help            Print this message
   -v, --version         Print version
 ";
@@ -105,6 +106,16 @@ error_chain! {
     }
 }
 
+fn hide<T: Write>(pb: &mut ProgressBar<T>) {
+    pb.show_bar = false;
+    pb.show_speed = false;
+    pb.show_percent = false;
+    pb.show_counter = false;
+    pb.show_time_left = false;
+    pb.show_tick = false;
+    pb.show_message = false;
+}
+
 fn show<T: Write>(pb: &mut ProgressBar<T>) {
     pb.show_bar = true;
     pb.show_speed = false;
@@ -119,7 +130,7 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
 
     let out = RefCell::new(stdout());
     let mut buf: Vec<SonicMessage> = Vec::new();
-    let mut pb = ProgressBar::on(stderr(), 100);
+    let mut pb = ProgressBar::on(stderr(), 0);
     pb.format("╢░░_╟");
     pb.tick_format("▀▐▄▌");
     show(&mut pb);
@@ -159,9 +170,9 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
             Ok(msg @ SonicMessage::OutputChunk(_)) => {
                 buf.push(msg);
                 if !silent && !pb.is_finish {
-                    //tick format breaks suffix length
-                    //so we need to disable it before finishing bar
-                    pb.show_tick = false;
+                    // tick format breaks suffix length
+                    // so we need to disable it before finishing bar
+                    hide(&mut pb);
                     pb.tick();
                     pb.finish();
                 }
@@ -205,6 +216,51 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
     res
 }
 
+pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
+
+    let user = option_env!("USER").unwrap_or_else(|| "unknown user");
+
+    try!(stdout().write(b"Enter key: "));
+    try!(stdout().flush());
+
+    let key = try!(read_password());
+
+    let (tx, rx) = ::std::sync::mpsc::channel();
+
+    let cmd = SonicMessage::Authenticate {
+        key: key,
+        user: user.to_owned(),
+        trace_id: None,
+    };
+
+    try!(sonicd::stream((host, *tcp_port), cmd, tx));
+
+    let token: String;
+
+    loop {
+        match try!(rx.recv()) {
+            Ok(SonicMessage::OutputChunk(data)) => {
+                token = try!(util::parse_token(data));
+                break;
+            }
+            Ok(_) => {},
+            Err(e) => {
+                return Err(e.into())
+            }
+        };
+    }
+
+    let path = util::get_config_path();
+    let config = try!(util::read_config(&path));
+
+    let new_config = util::ClientConfig { auth: Some(token), ..config };
+
+    try!(util::write_config(&new_config, &path));
+
+    println!("OK");
+    Ok(())
+}
+
 fn _main(args: Args) -> Result<()> {
 
     let Args { arg_file,
@@ -220,33 +276,32 @@ fn _main(args: Args) -> Result<()> {
                flag_version,
                .. } = args;
 
-    let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
+    let util::ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
-        try!(read_config(&PathBuf::from(flag_c)))
+        try!(util::read_config(&PathBuf::from(flag_c)))
     } else {
         debug!("sourcing default config in path '$HOME/.sonicrc'");
-        try!(get_default_config())
+        try!(util::get_default_config())
     };
 
     if flag_file {
 
-        let query_str = try!(read_file_contents(&PathBuf::from(&arg_file)));
-        let split = try!(split_key_value(&flag_d));
-        let injected = try!(inject_vars(&query_str, &split));
-        let query = try!(build(arg_source, sources, auth, injected));
+        let query_str = try!(util::read_file_contents(&PathBuf::from(&arg_file)));
+        let split = try!(util::split_key_value(&flag_d));
+        let injected = try!(util::inject_vars(&query_str, &split));
+        let query = try!(util::build(arg_source, sources, auth, injected));
 
         exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
     } else if flag_execute {
 
-        let query = try!(build(arg_source, sources, auth, arg_query));
+        let query = try!(util::build(arg_source, sources, auth, arg_query));
 
         exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
     } else if cmd_login {
 
-        unimplemented!()
-        // login(&sonicd, &tcp_port)
+        login(&sonicd, &tcp_port)
 
     } else if flag_version {
 
@@ -282,7 +337,7 @@ fn main() {
     match _main(args) {
         Ok(_) => {}
         Err(e) => {
-            report_error(&e, verbose);
+            util::report_error(&e, verbose);
             process::exit(1)
         }
     }

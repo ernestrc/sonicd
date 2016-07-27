@@ -35,7 +35,7 @@ pub struct ProtoSonicMessage {
 impl From<SonicMessage> for ProtoSonicMessage {
     fn from(msg: SonicMessage) -> Self {
         match msg {
-            SonicMessage::Query{ id, config, query, auth, trace_id } => {
+            SonicMessage::Query{ config, query, auth, trace_id, .. /* ID is used only internally */ } => {
                 let mut payload = BTreeMap::new();
 
                 payload.insert("config".to_owned(), config);
