@@ -12,7 +12,7 @@ use io::buf::ByteBuffer;
 use source::Source;
 use io::handler::Handler;
 use io::{read, write, frame, MAX_MSG_SIZE, EpollFd};
-use error::{Result, ErrorKind};
+use error::{Result, ErrorKind, Error};
 
 #[derive(Debug)]
 pub struct TcpHandler {
@@ -92,10 +92,10 @@ impl TcpHandler {
         Ok(())
     }
 
-    fn done(&mut self, done: model::Done) -> Result<()> {
+    fn done(&mut self, err: Option<Error>) -> Result<()> {
         trace!("done()");
         self.closing = true;
-        self.obuffer(&done.into())
+        self.obuffer(&SonicMessage::Done(err.map(|e| format!("{:?}", e))).into())
     }
 
     fn read_message(&mut self) -> Result<Option<SonicMessage>> {
@@ -131,16 +131,17 @@ impl TcpHandler {
     }
 
     fn receive(&mut self, kind: MessageKind) -> Result<Option<SonicMessage>> {
-        if let Some(msg) = try!(self.read_message()) {
-            if msg.event_type == kind {
-                Ok(Some(msg))
-            } else {
-                let err = ErrorKind::Proto(format!("unexpected message kind {:?}", msg.event_type)
-                    .to_owned());
-                Err(err.into())
+        match try!(self.read_message()) {
+            Some(msg) => {
+                if msg.kind() == kind {
+                    Ok(Some(msg))
+                } else {
+                    let err = ErrorKind::Proto(format!("unexpected message kind {:?}", msg)
+                        .to_owned());
+                    Err(err.into())
+                }
             }
-        } else {
-            Ok(None)
+            None => Ok(None),
         }
     }
 
@@ -176,13 +177,20 @@ impl Handler for TcpHandler {
 
                 if let Some(msg) = try!(self.receive(MessageKind::QueryKind)) {
 
-                    let query: Query = try!(msg.into());
-                    debug!("recv {:?}", query);
+                    match msg {
+                        SonicMessage::QueryMsg(query) => {
 
-                    self.source = Some(RefCell::new(try!(Source::new(query, self.epfd))));
+                            self.source = Some(RefCell::new(try!(Source::new(query, self.epfd))));
 
-                    if self.sockw {
-                        return self.on_writable();
+                            if self.sockw {
+                                return self.on_writable();
+                            }
+
+                        }
+                        SonicMessage::AuthenticateMsg(auth) => {
+                            try!(self.done(Some("not implemented!".into())))
+                        }
+                        cmd => try!(self.done(Some(format!("unexpected cmd: {:?}", cmd)))),
                     }
                 }
             }
@@ -201,9 +209,7 @@ impl Handler for TcpHandler {
             Ok(())
 
         } else {
-            let err: Result<()> = Err(ErrorKind::Proto("unexpected client message".to_owned())
-                .into());
-            self.done(model::Done::new(err))
+            self.done(Some(ErrorKind::Proto("unexpected client message".to_owned()).into()))
         }
     }
 
@@ -236,7 +242,7 @@ impl Handler for TcpHandler {
                             }
                         }
                     } else {
-                        res = self.done(Done(None));
+                        res = self.done(SonicMessage::Done(None));
                         break;
                     }
                 }
@@ -256,50 +262,5 @@ impl Handler for TcpHandler {
 
             }
         }
-
-        // if self.source.is_some() {
-        //
-        // let s = &self.source.unwrap();
-        // let mut source = s.borrow_mut();
-        //
-        // let mut res: Result<()> = Ok(());
-        //
-        // loop until EAGAIN, source exhausted or source is done
-        // loop {
-        // get next batch from source
-        // if let Some(msgs) = try!(source.next()) {
-        // source exhausted
-        // if msgs.is_empty() {
-        // self.sockw = true;
-        // break;
-        // } else {
-        // try!(self.ovbuffer(msgs));
-        //
-        // if let Some(cnt) = try!(self.oflush()) {
-        // trace!("on_writable(): written {} bytes", cnt);
-        // } else {
-        // would block
-        // self.sockw = false;
-        // break;
-        // }
-        // }
-        // } else {
-        // res = self.done(Done(None));
-        // break;
-        // }
-        // }
-        //
-        // res
-        //
-        // } else {
-        //
-        // if !self.obuf.is_empty() {
-        // try!(self.oflush());
-        // } else {
-        // self.sockw = true;
-        // }
-        //
-        // Ok(())
-        // }
     }
 }

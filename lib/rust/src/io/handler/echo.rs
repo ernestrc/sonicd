@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use nix::unistd;
 
 use io::controller::sync::EpollProtocol;
+use model::*;
 use model::protocol::*;
 use io::handler::Handler;
 use io::{read, write, read_message, frame, EpollFd};

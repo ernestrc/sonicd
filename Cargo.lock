@@ -13,7 +13,7 @@ dependencies = [
  "nix 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num_cpus 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "pad 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "pbr 0.2.1 (git+https://github.com/ernestrc/pb.git)",
+ "pbr 0.2.1 (git+https://github.com/a8m/pb.git)",
  "regex 0.1.71 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 0.7.13 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -283,7 +283,7 @@ dependencies = [
 [[package]]
 name = "pbr"
 version = "0.2.1"
-source = "git+https://github.com/ernestrc/pb.git#22ddb8bd8eeee582a2a0a1461ef2e6ea01b4b2cf"
+source = "git+https://github.com/a8m/pb.git#1e988965549d6f9d1a8192e5035e73ba10d0a0ec"
 dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",

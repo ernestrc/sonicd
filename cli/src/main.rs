@@ -1,6 +1,5 @@
 extern crate serde_json;
 extern crate serde;
-extern crate pbr;
 extern crate regex;
 extern crate docopt;
 extern crate rustc_serialize;
@@ -12,6 +11,8 @@ extern crate error_chain;
 extern crate log;
 #[macro_use]
 extern crate sonicd;
+extern crate rpassword;
+extern crate pbr;
 
 mod util {
     #[cfg(feature = "serde_macros")]
@@ -22,11 +23,14 @@ mod util {
 }
 
 use std::path::PathBuf;
-use pbr::ProgressBar;
-use util::*;
-use docopt::Docopt;
 use std::process;
-use std::io::{Write, Stderr, stderr, stdout};
+use std::io::{Write, stderr, stdout};
+use std::cell::RefCell;
+
+use docopt::Docopt;
+use pbr::ProgressBar;
+use sonicd::SonicMessage;
+use rpassword::read_password;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const USAGE: &'static str = "
@@ -54,7 +58,7 @@ Options:
   -d <foo=bar>          Replace variable in query in the form of `${foo}` with value `var`
   -r, --rows-only       Skip printing column names
   -S, --silent          Skip printing query progress bar
-  -V, --verbose         Enable debug mode
+  -V, --verbose         Enable debug logging
   -h, --help            Print this message
   -v, --version         Print version
 ";
@@ -91,6 +95,7 @@ error_chain! {
     foreign_links {
         ::std::io::Error, IoError, "I/O operation failed";
         ::serde_json::Error, Json, "JSON serialization/deserialization error";
+        ::std::sync::mpsc::RecvError, RecvError, "Channel receive error";
     }
 
     errors {
@@ -101,7 +106,7 @@ error_chain! {
     }
 }
 
-fn hide(pb: &mut ProgressBar<Stderr>) {
+fn hide<T: Write>(pb: &mut ProgressBar<T>) {
     pb.show_bar = false;
     pb.show_speed = false;
     pb.show_percent = false;
@@ -111,9 +116,9 @@ fn hide(pb: &mut ProgressBar<Stderr>) {
     pb.show_message = false;
 }
 
-fn show(pb: &mut ProgressBar<Stderr>) {
+fn show<T: Write>(pb: &mut ProgressBar<T>) {
     pb.show_bar = true;
-    pb.show_speed = true;
+    pb.show_speed = false;
     pb.show_percent = true;
     pb.show_counter = true;
     pb.show_time_left = true;
@@ -121,98 +126,176 @@ fn show(pb: &mut ProgressBar<Stderr>) {
     pb.show_message = true;
 }
 
-fn exec(host: &str, port: &u16, query: sonicd::Query, rows_only: bool, silent: bool) -> Result<()> {
+fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bool) -> Result<()> {
 
+    let out = RefCell::new(stdout());
+    let mut buf: Vec<SonicMessage> = Vec::new();
     let mut pb = ProgressBar::on(stderr(), 0);
     pb.format("╢░░_╟");
     pb.tick_format("▀▐▄▌");
-    if !silent {
-        show(&mut pb);
-    }
+    show(&mut pb);
 
-    let res = {
-        let fn_out = |msg: sonicd::OutputChunk| {
-            let cols = msg.0.iter().fold(String::new(), |acc, x| format!("{}{:?}\t", acc, x));
-            let row = format!("{}\n", cols.trim_right());
-            stdout().write_all(row.as_bytes()).unwrap();
-        };
+    let (tx, rx) = ::std::sync::mpsc::channel();
 
-        let fn_meta = |msg: sonicd::TypeMetadata| {
-            debug!("received type metadata: {:?}", msg);
-            if !rows_only {
-                let cols = msg.0 .iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0));
-                let row = format!("{}\n", cols.trim_right());
-                stdout().write_all(row.as_bytes()).unwrap();
-            }
-        };
+    try!(sonicd::stream((host, *port), query, tx));
 
-        let fn_prog = |msg: sonicd::QueryProgress| {
-            if !silent {
-                let sonicd::QueryProgress { total, progress, status, .. } = msg;
-
-                pb.message(&format!("{:?} ", status));
-                debug!("{:?}: {:?}/{:?}", status, progress, total);
-
-                if let Some(total) = total {
-                    pb.total = total as u64;
+    let draw = |b: &mut Vec<SonicMessage>| {
+        let len = b.len();
+        for msg in b.drain(..len) {
+            let cols = match msg {
+                SonicMessage::OutputChunk(data) => {
+                    data.iter().fold(String::new(), |acc, val| format!("{}{:?}\t", acc, val))
                 }
-
-                if progress >= 1.0 {
-                    pb.add(progress as u64);
-                } else {
-                    pb.tick();
-                };
-            }
-        };
-
-        sonicd::stream(query, (host, *port), fn_out, fn_prog, fn_meta)
+                SonicMessage::TypeMetadata(data) => {
+                    data.iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0))
+                }
+                _ => panic!("not possible!"),
+            };
+            let row = format!("{}\n", cols.trim_right());
+            let mut bout = out.borrow_mut();
+            bout.write_all(row.as_bytes()).unwrap();
+            bout.flush().unwrap();
+        }
     };
 
-    try!(res);
-    if !silent {
-        hide(&mut pb);
-        pb.finish();
-        stderr().flush().unwrap();
+    let res: Result<()>;
+
+    loop {
+        match try!(rx.recv()) {
+            Ok(msg @ SonicMessage::TypeMetadata(_)) => {
+                if !rows_only {
+                    buf.push(msg);
+                }
+            }
+            Ok(msg @ SonicMessage::OutputChunk(_)) => {
+                buf.push(msg);
+                if !silent && !pb.is_finish {
+                    // tick format breaks suffix length
+                    // so we need to disable it before finishing bar
+                    hide(&mut pb);
+                    pb.tick();
+                    pb.finish();
+                }
+                draw(&mut buf);
+            }
+            Ok(SonicMessage::QueryProgress { status, progress, total, .. }) => {
+                if !silent && !pb.is_finish {
+
+                    pb.message(&format!("{:?} ", status));
+                    debug!("{:?}: {:?}/{:?}", status, progress, total);
+
+                    if let Some(total) = total {
+                        pb.total = total as u64;
+                    }
+
+                    if progress >= 1.0 {
+                        pb.add(progress as u64);
+                    } else {
+                        pb.tick();
+                    };
+                }
+            }
+            Ok(SonicMessage::Done(None)) => {
+                res = Ok(());
+                break;
+            }
+            Ok(SonicMessage::Done(Some(e))) => {
+                res = Err(e.into());
+                break;
+            }
+            Err(e) => {
+                res = Err(e.into());
+                break;
+            }
+            Ok(a) => debug!("ignoring msg {:?}", a),
+        }
     }
-    stdout().flush().unwrap();
+
+    draw(&mut buf);
+
+    res
+}
+
+pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
+
+    let user = option_env!("USER").unwrap_or_else(|| "unknown user");
+
+    try!(stdout().write(b"Enter key: "));
+    try!(stdout().flush());
+
+    let key = try!(read_password());
+
+    let (tx, rx) = ::std::sync::mpsc::channel();
+
+    let cmd = SonicMessage::Authenticate {
+        key: key,
+        user: user.to_owned(),
+        trace_id: None,
+    };
+
+    try!(sonicd::stream((host, *tcp_port), cmd, tx));
+
+    let token: String;
+
+    loop {
+        match try!(rx.recv()) {
+            Ok(SonicMessage::OutputChunk(data)) => {
+                token = try!(util::parse_token(data));
+                break;
+            }
+            Ok(_) => {},
+            Err(e) => {
+                return Err(e.into())
+            }
+        };
+    }
+
+    let path = util::get_config_path();
+    let config = try!(util::read_config(&path));
+
+    let new_config = util::ClientConfig { auth: Some(token), ..config };
+
+    try!(util::write_config(&new_config, &path));
+
+    println!("OK");
     Ok(())
 }
 
 fn _main(args: Args) -> Result<()> {
 
     let Args { arg_file,
-    arg_query,
-    flag_silent,
-    flag_rows_only,
-    flag_d,
-    flag_file,
-    flag_c,
-    arg_source,
-    cmd_login,
-    flag_execute,
-    flag_version,
-    .. } = args;
+               arg_query,
+               flag_silent,
+               flag_rows_only,
+               flag_d,
+               flag_file,
+               flag_c,
+               arg_source,
+               cmd_login,
+               flag_execute,
+               flag_version,
+               .. } = args;
 
-    let ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
+    let util::ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
-        try!(read_config(&PathBuf::from(flag_c)))
+        try!(util::read_config(&PathBuf::from(flag_c)))
     } else {
         debug!("sourcing default config in path '$HOME/.sonicrc'");
-        try!(get_default_config())
+        try!(util::get_default_config())
     };
 
     if flag_file {
 
-        let query_str = try!(read_file_contents(&PathBuf::from(&arg_file)));
-        let split = try!(split_key_value(&flag_d));
-        let injected = try!(inject_vars(&query_str, &split));
-        let query = try!(build(arg_source, sources, auth, injected));
+        let query_str = try!(util::read_file_contents(&PathBuf::from(&arg_file)));
+        let split = try!(util::split_key_value(&flag_d));
+        let injected = try!(util::inject_vars(&query_str, &split));
+        let query = try!(util::build(arg_source, sources, auth, injected));
 
         exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
     } else if flag_execute {
 
-        let query = try!(build(arg_source, sources, auth, arg_query));
+        let query = try!(util::build(arg_source, sources, auth, arg_query));
 
         exec(&sonicd, &tcp_port, query, flag_rows_only, flag_silent)
 
@@ -223,8 +306,8 @@ fn _main(args: Args) -> Result<()> {
     } else if flag_version {
 
         println!("Sonic CLI version {} ({})",
-        VERSION,
-        COMMIT.unwrap_or_else(|| "dev"));
+                 VERSION,
+                 COMMIT.unwrap_or_else(|| "dev"));
 
         Ok(())
 
@@ -254,7 +337,7 @@ fn main() {
     match _main(args) {
         Ok(_) => {}
         Err(e) => {
-            report_error(&e, verbose);
+            util::report_error(&e, verbose);
             process::exit(1)
         }
     }

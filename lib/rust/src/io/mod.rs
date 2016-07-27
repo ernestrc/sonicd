@@ -1,4 +1,4 @@
-use model::protocol::SonicMessage;
+use model::SonicMessage;
 use error::{Result, Error};
 use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -173,7 +173,7 @@ pub fn read_message(fd: RawFd) -> Result<SonicMessage> {
 }
 
 pub fn frame(msg: &SonicMessage) -> Result<Vec<u8>> {
-    let qbytes = try!(msg.as_bytes());
+    let qbytes = try!(msg.into_bytes());
 
     let qlen = qbytes.len() as i32;
     let mut fbytes = Vec::new();

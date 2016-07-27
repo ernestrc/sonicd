@@ -2,8 +2,7 @@ use std::fmt::Debug;
 
 use error::Result;
 use io::poll::EpollFd;
-use model::Query;
-use model::protocol::SonicMessage;
+use model::{SonicMessage, Query};
 
 pub trait Source where Self: Debug {
     fn next(&mut self) -> Result<Option<Vec<SonicMessage>>>;
