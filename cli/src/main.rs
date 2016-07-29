@@ -244,6 +244,12 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
                 token = try!(util::parse_token(data));
                 break;
             }
+            Ok(SonicMessage::Done(None)) => {
+                return Err("protocol error: no data returned from the server".into());
+            },
+            Ok(SonicMessage::Done(Some(e))) => {
+                return Err(e.into());
+            },
             Ok(_) => {},
             Err(e) => {
                 return Err(e.into())
