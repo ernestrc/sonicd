@@ -49,7 +49,7 @@ Usage:
   sonic <source> [-d <foo=bar>...] [options] -f <file>
   sonic login [options]
   sonic -h | --help
-  sonic -v | --version
+  sonic --version
 
 Options:
   -e, --execute         Run command literal
@@ -58,9 +58,9 @@ Options:
   -d <foo=bar>          Replace variable in query in the form of `${foo}` with value `var`
   -r, --rows-only       Skip printing column names
   -S, --silent          Skip printing query progress bar
-  -V, --verbose         Enable debug logging
+  -v, --verbose         Enable debug logging
   -h, --help            Print this message
-  -v, --version         Print version
+  --version             Print version
 ";
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -218,7 +218,8 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
 
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
-    let user = option_env!("USER").unwrap_or_else(|| "unknown user");
+    let user = std::env::var("USER")
+        .unwrap_or("unknown".to_owned());
 
     try!(stdout().write(b"Enter key: "));
     try!(stdout().flush());
@@ -243,12 +244,20 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
                 token = try!(util::parse_token(data));
                 break;
             }
+            Ok(SonicMessage::Done(None)) => {
+                return Err("protocol error: no data returned from the server".into());
+            },
+            Ok(SonicMessage::Done(Some(e))) => {
+                return Err(e.into());
+            },
             Ok(_) => {},
             Err(e) => {
                 return Err(e.into())
             }
         };
     }
+
+    debug!("generated token for user {:?}: {:?}", &user, &token);
 
     let path = util::get_config_path();
     let config = try!(util::read_config(&path));
