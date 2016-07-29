@@ -48,10 +48,12 @@ class PrestoSourceSpec(_system: ActorSystem)
       withDispatcher(CallingThreadDispatcher.Id))
 
   def newPublisher(q: String, context: RequestContext = testCtx, watermark: Int = -1,
-                   maxRetries: Int = 0, retryIn: FiniteDuration = 1.second): TestActorRef[PrestoPublisher] = {
+                   maxRetries: Int = 0, retryIn: FiniteDuration = 1.second, retryMultiplier: Int = 1,
+                   dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[PrestoPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
-    val src = new PrestoSource(watermark, maxRetries, retryIn, self, query, controller.underlyingActor.context, context)
-    val ref = TestActorRef[PrestoPublisher](src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
+    val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier,
+      self, query, controller.underlyingActor.context, context)
+    val ref = TestActorRef[PrestoPublisher](src.handlerProps.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -387,8 +389,8 @@ class PrestoSourceSpec(_system: ActorSystem)
 }
 
 //override supervisor
-class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, implicitSender: ActorRef,
-                   query: Query, actorContext: ActorContext, context: RequestContext)
+class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, retryMultiplier: Int,
+                   implicitSender: ActorRef, query: Query, actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.PrestoSource(query, actorContext, context) {
 
   override def getSupervisor(name: String): ActorRef = implicitSender
@@ -397,6 +399,6 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, imp
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 
-    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark, maxRetries, retryIn, context)
+    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark, maxRetries, retryIn, retryMultiplier, context)
   }
 }

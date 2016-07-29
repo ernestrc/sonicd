@@ -57,6 +57,7 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
   val PRESTO_CONNECTION_POOL_SETTINGS = config.getConfig("sonicd.presto")
   val PRESTO_RETRYIN: FiniteDuration = FiniteDuration(config.getDuration("sonicd.presto.retry-in").getSeconds, TimeUnit.SECONDS)
+  val PRESTO_RETRY_MULTIPLIER: Int = config.getInt("sonicd.presto.retry-multiplier")
   val PRESTO_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.presto.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
   val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
   val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
