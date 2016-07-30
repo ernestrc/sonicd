@@ -54,6 +54,7 @@ class FileWatcherSpec(_system: ActorSystem)
   "FileWatcher" should {
     "subscribe subscribers to new events and send events from workers" in {
       val watcher = newWatcher
+      watch(watcher)
       val proxy1 = newProxy
       val proxy2 = newProxy
       expectMsg(FileWatcherWorker.DoWatch)
@@ -64,18 +65,17 @@ class FileWatcherSpec(_system: ActorSystem)
       watcher.tell(Watch(None, Fixture.testCtx), proxy2)
 
       watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
-      expectMsg(pathEventModify)
-      expectMsg(pathEventModify)
-      expectMsg(pathEventModify)
-      expectMsg(FileWatcherWorker.DoWatch)
+      val msgs = receiveN(4)
+      msgs.count(_ == FileWatcherWorker.DoWatch) shouldBe 1
+      msgs.count(_ == pathEventModify) shouldBe 3
 
       proxy1 ! PoisonPill
       Thread.sleep(1000) //calling thread dispatcher is awesome but not enough
 
       watcher ! FileWatcher.WatchResults(MODIFY :: Nil)
-      expectMsg(pathEventModify)
-      expectMsg(pathEventModify)
-      expectMsg(FileWatcherWorker.DoWatch)
+      val msgs2 = receiveN(3)
+      msgs2.count(_ == FileWatcherWorker.DoWatch) shouldBe 1
+      msgs2.count(_ == pathEventModify) shouldBe 2
 
       proxy2 ! PoisonPill
       Thread.sleep(1000)
@@ -84,6 +84,7 @@ class FileWatcherSpec(_system: ActorSystem)
       expectMsgAllOf(pathEventModify, FileWatcherWorker.DoWatch)
       expectNoMsg()
       watcher ! PoisonPill
+      expectTerminated(watcher)
     }
 
     "filter events that subscribers" in {

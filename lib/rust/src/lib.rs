@@ -14,9 +14,9 @@ extern crate time;
 #[macro_use] extern crate log;
 
 mod error;
-mod model;
 mod api;
 mod source;
+mod model;
 #[macro_use] pub mod io;
 
 
@@ -25,7 +25,7 @@ pub use io::controller::{Controller};
 pub use source::{Source, SyntheticSource};
 
 pub use api::stream;
-pub use model::{SonicMessage, QueryStatus};
+pub use model::{SonicMessage, QueryStatus, Query, Authenticate};
 pub use error::{Result, Error, ErrorKind};
 
 static VERSION: &'static str = env!("CARGO_PKG_VERSION");

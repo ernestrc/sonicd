@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use regex::Regex;
 use ansi_term::Colour::{Red, Yellow};
-use sonicd::SonicMessage;
+use sonicd::{SonicMessage, Query};
 
 use super::{ChainErr, Error, Result, ErrorKind};
 
@@ -254,13 +254,7 @@ pub fn build(alias: String, mut sources: BTreeMap<String, Value>,
         },
     };
 
-    let query = SonicMessage::Query {
-        id: None,
-        trace_id: None,
-        auth: auth,
-        query: raw_query,
-        config: source_config,
-    };
+    let query = SonicMessage::QueryMsg(Query::new(raw_query, None, auth, source_config));
 
     Ok(query)
 }

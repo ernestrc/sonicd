@@ -29,7 +29,7 @@ use std::cell::RefCell;
 
 use docopt::Docopt;
 use pbr::ProgressBar;
-use sonicd::SonicMessage;
+use sonicd::{SonicMessage, Authenticate};
 use rpassword::read_password;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -228,11 +228,7 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     let (tx, rx) = ::std::sync::mpsc::channel();
 
-    let cmd = SonicMessage::Authenticate {
-        key: key,
-        user: user.to_owned(),
-        trace_id: None,
-    };
+    let cmd = SonicMessage::AuthenticateMsg(Authenticate::new(key, user.to_owned(), None));
 
     try!(sonicd::stream((host, *tcp_port), cmd, tx));
 

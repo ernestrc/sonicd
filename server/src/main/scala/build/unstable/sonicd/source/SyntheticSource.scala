@@ -38,13 +38,26 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
 
   var streamed = 0L
   val preTarget = 101 //+100 of progress +1 metadata
+  val _query = Try(query.trim().toInt)
   val target =
-    Try(query.trim().toInt)
+    _query
       .recoverWith {
         case e: Exception ⇒
           log.warning("could not parse query to determine test target size")
           Try(size.get)
       }.toOption.map(_ + preTarget)
+
+  // to test source unexpected exceptions
+  // pass query negative integer
+  if (_query.isSuccess) {
+    assert(_query.get > 0)
+  }
+
+  // to test expected exception
+  // pass query or size '28'
+  val shouldThrowExpectedException = _query.isSuccess && _query.get == 28
+
+  if (shouldThrowExpectedException) log.warning("this source will throw an expected exception")
 
   @tailrec
   private def stream(demand: Long): Unit = {
@@ -73,6 +86,11 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
   }
 
   def receive: Receive = {
+
+    //on the 10th message, if shouldThrowControlledException
+    case Request(n) if shouldThrowExpectedException && streamed == 111L ⇒
+      onNext(DoneWithQueryExecution.error(new Exception("controlled exception test")))
+      onCompleteThenStop()
 
     case Request(n) if streamed == 0L ⇒
       log.info(s"starting synthetic stream with target of '$target'")

@@ -73,19 +73,20 @@ impl TcpHandler {
         }
     }
 
-    fn obuffer(&mut self, msg: &SonicMessage) -> Result<()> {
+    fn obuffer(&mut self, msg: SonicMessage) -> Result<()> {
         trace!("obuffer()");
 
-        let bytes = try!(msg.as_bytes());
+        let bytes = try!(msg.into_bytes());
         try!(self.obuf.write(bytes.as_slice()));
 
         Ok(())
     }
 
-    fn ovbuffer(&mut self, msgs: Vec<SonicMessage>) -> Result<()> {
+    fn ovbuffer(&mut self, mut msgs: Vec<SonicMessage>) -> Result<()> {
         trace!("ovbuffer()");
 
-        for msg in msgs.iter() {
+        let len = msgs.len();
+        for msg in msgs.drain(..len) {
             try!(self.obuffer(msg));
         }
 
@@ -95,7 +96,7 @@ impl TcpHandler {
     fn done(&mut self, err: Option<Error>) -> Result<()> {
         trace!("done()");
         self.closing = true;
-        self.obuffer(&SonicMessage::Done(err.map(|e| format!("{:?}", e))).into())
+        self.obuffer(SonicMessage::Done(err.map(|e| format!("{:?}", e))).into())
     }
 
     fn read_message(&mut self) -> Result<Option<SonicMessage>> {
@@ -130,21 +131,6 @@ impl TcpHandler {
         }
     }
 
-    fn receive(&mut self, kind: MessageKind) -> Result<Option<SonicMessage>> {
-        match try!(self.read_message()) {
-            Some(msg) => {
-                if msg.kind() == kind {
-                    Ok(Some(msg))
-                } else {
-                    let err = ErrorKind::Proto(format!("unexpected message kind {:?}", msg)
-                        .to_owned());
-                    Err(err.into())
-                }
-            }
-            None => Ok(None),
-        }
-    }
-
     fn close(&self) -> Result<()> {
         try!(unistd::close(self.clifd));
         Ok(())
@@ -175,7 +161,7 @@ impl Handler for TcpHandler {
 
             if cnt + self.ibuf.len() > 4 {
 
-                if let Some(msg) = try!(self.receive(MessageKind::QueryKind)) {
+                if let Some(msg) = try!(self.read_message()) {
 
                     match msg {
                         SonicMessage::QueryMsg(query) => {
@@ -186,11 +172,13 @@ impl Handler for TcpHandler {
                                 return self.on_writable();
                             }
 
-                        }
+                        },
+
                         SonicMessage::AuthenticateMsg(auth) => {
                             try!(self.done(Some("not implemented!".into())))
-                        }
-                        cmd => try!(self.done(Some(format!("unexpected cmd: {:?}", cmd)))),
+                        },
+
+                        cmd => try!(self.done(Some(format!("unexpected cmd: {:?}", cmd).into()))),
                     }
                 }
             }
@@ -201,8 +189,10 @@ impl Handler for TcpHandler {
             let cnt = try!(self.fill_buf());
 
             if cnt + self.ibuf.len() > 4 {
-                if try!(self.receive(MessageKind::AcknowledgeKind)).is_some() {
-                    try!(self.close());
+                match try!(self.read_message()) {
+                    Some(SonicMessage::Acknowledge) => try!(self.close()),
+                    Some(m) => try!(self.done(Some(format!("protocol error: expected ack but {:?} found", m).into()))),
+                    None => {},
                 }
             }
 
@@ -216,38 +206,38 @@ impl Handler for TcpHandler {
     fn on_writable(&mut self) -> Result<()> {
         trace!("on_writable()");
 
-        match *&self.source {
-            Some(ref s) => {
-                let mut source = s.borrow_mut();
+        let source = match self.source.take() {
+            Some(s) => {
+                {
+                    let mut source = s.borrow_mut();
 
-                let mut res: Result<()> = Ok(());
-
-                // loop until EAGAIN, source exhausted or source is done
-                loop {
-                    // get next batch from source
-                    if let Some(msgs) = try!(source.next()) {
-                        // source exhausted
-                        if msgs.is_empty() {
-                            self.sockw = true;
-                            break;
-                        } else {
-                            try!(self.ovbuffer(msgs));
-
-                            if let Some(cnt) = try!(self.oflush()) {
-                                trace!("on_writable(): written {} bytes", cnt);
-                            } else {
-                                // would block
-                                self.sockw = false;
+                    // loop until EAGAIN, source exhausted or source is done
+                    loop {
+                        // get next batch from source
+                        if let Some(msgs) = try!(source.next()) {
+                            // source exhausted
+                            if msgs.is_empty() {
+                                self.sockw = true;
                                 break;
+                            } else {
+                                try!(self.ovbuffer(msgs));
+
+                                if let Some(cnt) = try!(self.oflush()) {
+                                    trace!("on_writable(): written {} bytes", cnt);
+                                } else {
+                                    // would block
+                                    self.sockw = false;
+                                    break;
+                                }
                             }
+                        } else {
+                            try!(self.done(None));
+                            break;
                         }
-                    } else {
-                        res = self.done(SonicMessage::Done(None));
-                        break;
                     }
                 }
 
-                res
+                Some(s)
             }
 
             None => {
@@ -258,9 +248,12 @@ impl Handler for TcpHandler {
                     self.sockw = true;
                 }
 
-                Ok(())
-
+                None
             }
-        }
+        };
+
+        self.source = source;
+
+        Ok(())
     }
 }

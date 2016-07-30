@@ -168,8 +168,8 @@ impl Handler for SonicEchoHandler {
         trace!("on_readable()");
         let msg = try!(read_message(self.fd));
         debug!("read_message: {:?}", msg);
-        match msg.event_type {
-            MessageKind::AcknowledgeKind => {
+        match msg {
+            SonicMessage::Acknowledge => {
                 try!(unistd::close(self.fd));
             },
             _ => {
@@ -184,14 +184,12 @@ impl Handler for SonicEchoHandler {
         while !self.buf.is_empty() {
 
             let msg = self.buf.remove(0);
-            let event_type = msg.event_type;
-            let framed = try!(frame(&msg));
+            let framed = try!(frame(msg.clone()));
 
             match try!(write(self.fd, framed.as_slice())) {
                 Some(_) => {
-                    debug!("write message: {:?}", &msg);
-                    match event_type {
-                        MessageKind::DoneKind => {
+                    match msg {
+                        SonicMessage::Done(_) => {
                             self.done = true
                         },
                         _ => {}

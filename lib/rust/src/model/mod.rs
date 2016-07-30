@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use serde_json::Value;
 
 use error::Result;
@@ -7,7 +5,7 @@ use error::Result;
 // marker trait for messages that client can initiate connection with
 pub trait Command {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Query {
     id: Option<String>,
     query: String,
@@ -16,7 +14,7 @@ pub struct Query {
     config: Value,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Authenticate {
     user: String,
     key: String,
@@ -24,6 +22,20 @@ pub struct Authenticate {
 }
 
 impl Query {
+    pub fn new(query: String,
+               trace_id: Option<String>,
+               auth: Option<String>,
+               config: Value)
+               -> Query {
+        Query {
+            id: None,
+            query: query,
+            trace_id: trace_id,
+            auth: auth,
+            config: config,
+        }
+    }
+
     pub fn get_config<'a>(&'a self, key: &str) -> Result<&'a Value> {
         let v = try!(self.config.search(key).ok_or(format!("missing key {} in query config", key)));
         Ok(v)
@@ -34,10 +46,20 @@ impl Query {
     }
 }
 
+impl Authenticate {
+    pub fn new(user: String, key: String, trace_id: Option<String>) -> Authenticate {
+        Authenticate {
+            user: user,
+            key: key,
+            trace_id: trace_id,
+        }
+    }
+}
+
 impl Command for Authenticate {}
 impl Command for Query {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum QueryStatus {
     Queued,
     Started,
@@ -47,7 +69,7 @@ pub enum QueryStatus {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SonicMessage {
     // client ~> server
     Acknowledge,
@@ -79,26 +101,6 @@ impl SonicMessage {
             Err(e) => Some(format!("{}", e).to_owned()),
         };
         SonicMessage::Done(variation).into()
-    }
-
-    pub fn kind(&self) -> protocol::MessageKind {
-        match *self {
-            Acknowledge => protocol::MessageKind::AcknowledgeKind,
-
-            QueryMsg(_) => protocol::MessageKind::QueryKind,
-
-            AuthenticateMsg(_) => protocol::MessageKind::AuthKind,
-
-            // client <~ server
-            &TypeMetadata(_) => MessageKind::TypeMetadataKind,
-
-            &QueryProgress{ .. } => MessageKind::ProgressKind,
-
-            &OutputChunk(_) => MessageKind::OutputKind,
-
-            &Done(_) => MessageKind::DoneKind,
-
-        }
     }
 
     pub fn into_json(self) -> Value {

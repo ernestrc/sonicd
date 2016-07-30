@@ -172,7 +172,7 @@ pub fn read_message(fd: RawFd) -> Result<SonicMessage> {
     SonicMessage::from_slice(buf.as_slice())
 }
 
-pub fn frame(msg: &SonicMessage) -> Result<Vec<u8>> {
+pub fn frame(msg: SonicMessage) -> Result<Vec<u8>> {
     let qbytes = try!(msg.into_bytes());
 
     let qlen = qbytes.len() as i32;

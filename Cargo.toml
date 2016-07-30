@@ -52,6 +52,7 @@ pad = "*"
 # cli
 regex = "0.1.71"
 docopt = "0.6.81"
+rpassword = "*"
 rustc-serialize = "0.3.19"
 env_logger = "0.3.3"
 ansi_term = "0.7"

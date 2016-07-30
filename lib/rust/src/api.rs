@@ -14,7 +14,7 @@ fn send_cmd(stream: &mut TcpStream, cmd: SonicMessage) -> Result<()> {
     debug!("framing command {:?}", &cmd);
 
     // frame command
-    let fbytes = try!(frame(&cmd));
+    let fbytes = try!(frame(cmd));
 
     debug!("framed command into {} bytes", fbytes.len());
 

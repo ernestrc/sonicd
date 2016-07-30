@@ -154,7 +154,7 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
       SonicdConfig.PRESTO_WATERMARK, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN, context)
+      SonicdConfig.PRESTO_RETRYIN, SonicdConfig.PRESTO_RETRY_MULTIPLIER, context)
   }
 }
 
@@ -180,7 +180,9 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
 class PrestoPublisher(traceId: String, query: String,
                       supervisor: ActorRef,
                       watermark: Int,
-                      maxRetries: Int, retryIn: FiniteDuration,
+                      maxRetries: Int,
+                      retryIn: FiniteDuration,
+                      retryMultiplier: Int,
                       ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
@@ -324,7 +326,7 @@ class PrestoPublisher(traceId: String, query: String,
               retried += 1
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
-                .scheduleOnce(retryIn, supervisor,
+                .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn, supervisor,
                   runStatement(callType, queryCommand)))
             case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
           }
