@@ -1,19 +1,16 @@
 package build.unstable.sonicd.system.actor
 
 import java.net.InetAddress
-import java.nio.charset.Charset
 
 import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message}
 import akka.pattern._
-import akka.util.{ByteString, Timeout}
+import akka.util.Timeout
 import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
 
-import scala.collection.mutable
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -41,7 +38,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
   def prepareMaterialization(handler: ActorRef, q: Query,
                              user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {
-      handled += 1
+      handled += 1L
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
       val source = query.getSourceClass.getConstructors()(0)
@@ -50,8 +47,6 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       debug(log, "successfully instantiated source {} for query with id '{}'", source, queryId)
 
       if (isAuthorized(user, source.securityLevel, clientAddress)) {
-        context watch handler
-        handlers.update(queryId, handler.path)
         handler ! source.handlerProps
       } else handler ! DoneWithQueryExecution.error(new UnauthorizedException(user, clientAddress))
     } catch {
@@ -74,8 +69,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   /* STATE */
 
-  val handlers = mutable.Map.empty[Long, ActorPath]
-  var handled: Long = 0
+  var handled: Long = 0L
 
   case class TokenValidationResult(user: Try[ApiUser], query: Query,
                                    handler: ActorRef, clientAddress: Option[InetAddress])
@@ -83,14 +77,6 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
   /* BEHAVIOUR */
 
   override def receive: Receive = {
-
-    //handler terminated
-    case Terminated(ref) ⇒ handlers.find(_._2 == ref.path) match {
-      case Some((id, path)) ⇒
-        handlers.remove(id)
-      case None ⇒ warning(log, "could not clean queryId of actor in {}", ref.path)
-    }
-      log.debug("handler terminated. living handlers: {}", handlers)
 
     case TokenValidationResult(Failure(e), _, handler, _) ⇒
       handler ! DoneWithQueryExecution.error(e)
