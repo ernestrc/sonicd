@@ -9,7 +9,7 @@ use model::protocol::*;
 use model::*;
 use model;
 use io::buf::ByteBuffer;
-use source::Source;
+use source::{Source, StreamOut};
 use io::handler::Handler;
 use io::{read, write, frame, MAX_MSG_SIZE, EpollFd};
 use error::{Result, ErrorKind, Error};
@@ -65,6 +65,7 @@ impl TcpHandler {
     fn oflush(&mut self) -> Result<Option<usize>> {
         trace!("oflush()");
         if let Some(cnt) = try!(write(self.clifd, From::from(&self.obuf))) {
+            trace!("oflush(): {:?} bytes", &cnt);
             self.obuf.consume(cnt);
             Ok(Some(cnt))
         } else {
@@ -76,7 +77,7 @@ impl TcpHandler {
     fn obuffer(&mut self, msg: SonicMessage) -> Result<()> {
         trace!("obuffer()");
 
-        let bytes = try!(msg.into_bytes());
+        let bytes = try!(frame(msg));
         try!(self.obuf.write(bytes.as_slice()));
 
         Ok(())
@@ -174,7 +175,7 @@ impl Handler for TcpHandler {
 
                         },
 
-                        SonicMessage::AuthenticateMsg(auth) => {
+                        SonicMessage::AuthenticateMsg(_) => {
                             try!(self.done(Some("not implemented!".into())))
                         },
 
@@ -211,28 +212,24 @@ impl Handler for TcpHandler {
                 {
                     let mut source = s.borrow_mut();
 
-                    // loop until EAGAIN, source exhausted or source is done
-                    loop {
-                        // get next batch from source
-                        if let Some(msgs) = try!(source.next()) {
-                            // source exhausted
-                            if msgs.is_empty() {
-                                self.sockw = true;
-                                break;
-                            } else {
-                                try!(self.ovbuffer(msgs));
+                    // get next batch from source
+                    match try!(source.next()) {
+                        StreamOut::Message(msg) => {
+                            try!(self.obuffer(msg));
 
-                                if let Some(cnt) = try!(self.oflush()) {
-                                    trace!("on_writable(): written {} bytes", cnt);
-                                } else {
-                                    // would block
-                                    self.sockw = false;
-                                    break;
-                                }
+                            if let Some(cnt) = try!(self.oflush()) {
+                                trace!("on_writable(): written {} bytes", cnt);
+                            } else {
+                                // would block
+                                self.sockw = false;
                             }
-                        } else {
+                        },
+                        StreamOut::Idle => {
+                            self.sockw = true;
+                        },
+                        StreamOut::Completed => {
                             try!(self.done(None));
-                            break;
+                            try!(self.oflush());
                         }
                     }
                 }

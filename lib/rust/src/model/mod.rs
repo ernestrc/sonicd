@@ -36,6 +36,10 @@ impl Query {
         }
     }
 
+    pub fn get_raw<'a>(&'a self) -> &'a str {
+        &(self.query)
+    }
+
     pub fn get_config<'a>(&'a self, key: &str) -> Result<&'a Value> {
         let v = try!(self.config.search(key).ok_or(format!("missing key {} in query config", key)));
         Ok(v)

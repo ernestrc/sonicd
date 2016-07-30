@@ -47,8 +47,8 @@ impl EpollProtocol for EchoProtocol {
 
     type Protocol = usize;
 
-    fn new(&self, _: usize, fd: RawFd) -> Box<Handler> {
-        Box::new(TcpHandler::new(fd))
+    fn new(&self, _: usize, fd: RawFd, epfd: EpollFd) -> Box<Handler> {
+        Box::new(TcpHandler::new(fd, epfd))
     }
 }
 
@@ -58,7 +58,10 @@ fn main() {
     let c = COMMIT.unwrap_or_else(|| "dev");
     info!("starting sonicd cache v.{} ({})", VERSION, c);
 
-    let config = SimpleMuxConfig::new(("127.0.0.1", 10003)).unwrap();
+    let config = SimpleMuxConfig::new(("127.0.0.1", 10003))
+        .unwrap()
+        .io_threads(2);
+
 
     let logging = SimpleLogging::new(::log::LogLevel::Trace);
 
