@@ -140,7 +140,7 @@ impl TcpHandler {
 
 impl Handler for TcpHandler {
     fn on_error(&mut self) -> Result<()> {
-        error!("socket error: {:?}", self);
+        error!("socket error on: {:?}", self.clifd);
         Ok(())
     }
 

@@ -196,10 +196,12 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
                 }
             }
             Ok(SonicMessage::Done(None)) => {
+                debug!("stream completed successfully");
                 res = Ok(());
                 break;
             }
             Ok(SonicMessage::Done(Some(e))) => {
+                debug!("stream completed with error {:?}", &e);
                 res = Err(e.into());
                 break;
             }

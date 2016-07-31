@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::os::unix::io::RawFd;
 
-//use nix::fcntl::{self, O_CLOEXEC, O_NONBLOCK};
+// use nix::fcntl::{self, O_CLOEXEC, O_NONBLOCK};
 use serde_json::Value;
 
 use error::Result;
@@ -17,7 +17,7 @@ pub trait Source
 pub enum StreamOut {
     Idle,
     Message(SonicMessage),
-    Completed
+    Completed,
 }
 
 impl Source {
@@ -45,7 +45,8 @@ impl Source {
 pub struct SyntheticSource {
     size: i64,
     indexed: bool,
-    streamed: i64, // gen: RawFd,
+    gen: Vec<SonicMessage>,
+    done: bool,
 }
 
 impl SyntheticSource {
@@ -66,24 +67,33 @@ impl SyntheticSource {
             .and_then(|i| i.as_bool())
             .unwrap_or_else(|| true);
 
-        // let gen = try!(fcntl::open("/dev/urandom", O_NONBLOCK, O_CLOEXEC));
+        let vec = (0..size)
+            .map(|i| {
+                let msg = vec![Value::I64(i)];
+                SonicMessage::OutputChunk(msg)
+            })
+            .collect();
 
         Ok(SyntheticSource {
             size: size,
             indexed: indexed,
-            streamed: 0, //   gen: gen
+            gen: vec,
+            done: false,
         })
     }
 }
 
 impl Source for SyntheticSource {
     fn next(&mut self) -> Result<StreamOut> {
-        if self.streamed == self.size {
-            Ok(StreamOut::Completed)
+        if self.gen.is_empty() {
+            if !self.done {
+                self.done = true;
+                Ok(StreamOut::Message(SonicMessage::Done(None)))
+            } else {
+                Ok(StreamOut::Completed)
+            }
         } else {
-            let msg = vec!(Value::I64(self.streamed));
-            self.streamed += 1;
-            Ok(StreamOut::Message(SonicMessage::OutputChunk(msg)))
+            Ok(StreamOut::Message(self.gen.swap_remove(0)))
         }
     }
 }

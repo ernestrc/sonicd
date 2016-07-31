@@ -8,6 +8,8 @@ import build.unstable.sonicd.model.{DataSource, Query, RequestContext, SonicMess
 import spray.json.{JsArray, JsNumber, JsString}
 
 import scala.annotation.tailrec
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
 
@@ -47,6 +49,10 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
           Try(size.get)
       }.toOption.map(_ + preTarget)
 
+  val data = target.map(t ⇒ (0 until t).map(i ⇒
+    if (indexed) OutputChunk(JsArray(JsString(streamed.toString), JsNumber(i)))
+    else OutputChunk(Vector(i))).to[mutable.Queue])
+
   // to test source unexpected exceptions
   // pass query negative integer
   if (_query.isSuccess) {
@@ -62,10 +68,14 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
   @tailrec
   private def stream(demand: Long): Unit = {
     if (totalDemand > 0) {
-      val nextNumber = streamed
-      if (indexed) {
-        onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(nextNumber))))
-      } else onNext(OutputChunk(Vector(nextNumber)))
+      if (data.isDefined) {
+        onNext(data.get.dequeue())
+      } else {
+        val nextNumber = streamed
+        if (indexed) {
+          onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(nextNumber))))
+        } else onNext(OutputChunk(Vector(nextNumber)))
+      }
       streamed += 1
       stream(demand - 1L)
     }

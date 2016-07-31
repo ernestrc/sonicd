@@ -1,14 +1,16 @@
-#![feature(split_off)]
+#![feature(split_off, alloc_system)]
 extern crate nix;
 extern crate env_logger;
 extern crate threadpool;
 extern crate byteorder;
 extern crate num_cpus;
 extern crate bytes;
+extern crate alloc_system;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 #[macro_use] extern crate sonicd;
+
 
 use std::sync::mpsc::channel;
 use std::option::Option;
@@ -63,7 +65,7 @@ fn main() {
         .io_threads(2);
 
 
-    let logging = SimpleLogging::new(::log::LogLevel::Trace);
+    let logging = SimpleLogging::new(::log::LogLevel::Info);
 
     Server::bind(SimpleMux::new(EchoProtocol, config).unwrap(), logging).unwrap();
 
