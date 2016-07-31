@@ -169,10 +169,6 @@ impl Handler for TcpHandler {
 
                             self.source = Some(RefCell::new(try!(Source::new(query, self.epfd))));
 
-                            if self.sockw {
-                                return self.on_writable();
-                            }
-
                         },
 
                         SonicMessage::AuthenticateMsg(_) => {
@@ -219,14 +215,9 @@ impl Handler for TcpHandler {
 
                             if let Some(cnt) = try!(self.oflush()) {
                                 trace!("on_writable(): written {} bytes", cnt);
-                            } else {
-                                // would block
-                                self.sockw = false;
                             }
                         },
-                        StreamOut::Idle => {
-                            self.sockw = true;
-                        },
+                        StreamOut::Idle => {},
                         StreamOut::Completed => {
                             try!(self.done(None));
                             try!(self.oflush());
@@ -241,8 +232,6 @@ impl Handler for TcpHandler {
 
                 if !self.obuf.is_empty() {
                     try!(self.oflush());
-                } else {
-                    self.sockw = true;
                 }
 
                 None

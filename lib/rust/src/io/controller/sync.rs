@@ -10,6 +10,7 @@ use io::controller::*;
 use io::handler::*;
 use io::poll::*;
 
+// should take whether epoll mode is ET or LT
 pub struct SyncController<F: EpollProtocol> {
     epfd: EpollFd,
     handlers: Slab<RefCell<Box<Handler>>, usize>,
@@ -85,7 +86,7 @@ impl<F: EpollProtocol> Controller for SyncController<F> {
                 let action: Action<F> = Action::Notify(id, fd);
 
                 let interest = EpollEvent {
-                    events: EPOLLIN | EPOLLOUT | EPOLLET | EPOLLHUP | EPOLLRDHUP,
+                    events: EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLRDHUP,
                     data: self.eproto.encode(action),
                 };
 

@@ -62,9 +62,10 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
   @tailrec
   private def stream(demand: Long): Unit = {
     if (totalDemand > 0) {
+      val nextNumber = streamed
       if (indexed) {
-        onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(rdm.nextInt()))))
-      } else onNext(OutputChunk(Vector(rdm.nextInt())))
+        onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(nextNumber))))
+      } else onNext(OutputChunk(Vector(nextNumber)))
       streamed += 1
       stream(demand - 1L)
     }

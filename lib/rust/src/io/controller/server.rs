@@ -185,6 +185,10 @@ impl SimpleMuxConfig {
     pub fn io_threads(self, io_threads: usize) -> SimpleMuxConfig {
         SimpleMuxConfig { io_threads: io_threads, ..self }
     }
+
+    pub fn loop_ms(self, loop_ms: isize) -> SimpleMuxConfig {
+        SimpleMuxConfig { loop_ms: loop_ms, ..self }
+    }
 }
 
 impl<P: EpollProtocol> SimpleMux<P> {
@@ -273,7 +277,7 @@ where P: EpollProtocol + Sync + 'static
         info!("listen: fd {} with max connections: {}", self.srvfd, self.max_conn);
 
         let ceinfo = EpollEvent {
-            events: EPOLLET | EPOLLIN | EPOLLOUT | EPOLLERR,
+            events: EPOLLIN | EPOLLOUT | EPOLLERR,
             data: self.srvfd as u64,
         };
 
