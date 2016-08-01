@@ -289,22 +289,22 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
         Future.successful(response)
       case (Success(response), _) ⇒
         log.debug("http query {} failed", queryId)
-        val parsed = response.entity.toStrict(10.seconds)
-        parsed.recoverWith {
-          case e: Exception ⇒
-            val error = new IOException(s"request failed with status ${response.status}")
-            log.error(error, s"unsuccessful response from server")
+        response.entity.toStrict(SonicdConfig.ZUORA_HTTP_ENTITY_TIMEOUT)
+          .flatMap { en ⇒
+            val entity = (XhtmlParser(scala.io.Source.fromString(en.data.utf8String)) \\ "FaultMessage").text
+            val error = new IOException(s"request failed with status ${response.status} and error: $entity")
+            log.error(error, s"unsuccessful response from server: $entity")
+            if (entity == "invalid session") {
+              self ! VoidSession(auth)
+            }
             Future.failed(error)
-        }
-        parsed.flatMap { en ⇒
-          val entity = (XhtmlParser(scala.io.Source.fromString(en.data.utf8String)) \\ "FaultMessage").text
-          val error = new IOException(s"request failed with status ${response.status} and error: $entity")
-          log.error(error, s"unsuccessful response from server: $entity")
-          if (entity == "invalid session") {
-            self ! VoidSession(auth)
+          }.recoverWith {
+            case e: Exception ⇒
+              log.warning(s"failed to parse/download error message: $e")
+              val error = new IOException(s"request failed with status ${response.status}")
+              log.error(error, s"unsuccessful response from server")
+              Future.failed(error)
           }
-          Future.failed(error)
-        }
       case (Failure(e), _) ⇒ Future.failed(e)
     }
   }
