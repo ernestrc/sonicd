@@ -5,10 +5,11 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{DataSource, Query, RequestContext, SonicMessage}
-import spray.json.{JsArray, JsNumber, JsString}
+import spray.json._
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
+import scala.math.BigDecimal
 import scala.util.{Random, Try}
 
 class SyntheticSource(query: Query, actorContext: ActorContext, context: RequestContext)
@@ -20,13 +21,16 @@ class SyntheticSource(query: Query, actorContext: ActorContext, context: Request
     val progress = getOption[Int]("progress-delay").getOrElse(10)
     val indexed = getOption[Boolean]("indexed").getOrElse(false)
 
+    //user pre-defined schema
+    val schema = getOption[JsObject]("schema")
+
     Props(classOf[SyntheticPublisher], query.id.get, seed, size,
-      progress, query.query, indexed, context)
+      progress, query.query, indexed, schema, context)
   }
 }
 
 class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWait: Int,
-                         query: String, indexed: Boolean, ctx: RequestContext)
+                         query: String, indexed: Boolean, schema: Option[JsObject], ctx: RequestContext)
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
   import build.unstable.sonicd.model._
@@ -37,7 +41,8 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
   val rdm = new Random(seed)
 
   var streamed = 0L
-  val preTarget = 101 //+100 of progress +1 metadata
+  val preTarget = 101
+  //+100 of progress +1 metadata
   val _query = Try(query.trim().toInt)
   val target =
     _query
@@ -59,10 +64,32 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
 
   if (shouldThrowExpectedException) log.warning("this source will throw an expected exception")
 
+  def genRandom(value: JsValue): JsValue = value match {
+    // if string is empty, value is 0 or bool is true, randomize values
+    // otherwise use the value provided in the schema
+    case JsString("") ⇒ JsString(rdm.nextString(10))
+    case JsBoolean(true) ⇒ JsBoolean(rdm.nextBoolean())
+    case j@JsNumber(i) if j.value.doubleValue() == 0d ⇒ JsNumber(rdm.nextInt())
+    case JsNull ⇒ JsNull
+
+    case JsString(str) ⇒ JsString(str)
+    case JsBoolean(bo) ⇒ JsBoolean(bo)
+    case JsNumber(nu) ⇒ JsNumber(nu)
+    case JsObject(f) ⇒ JsObject(randomFromSchema(f))
+    case JsArray(v) ⇒ JsArray(v.map(p ⇒ genRandom(p)))
+  }
+
+  def randomFromSchema(fields: Map[String, JsValue]): Map[String, JsValue] = {
+    fields.map(kv ⇒ kv._1 → genRandom(kv._2))
+  }
+
   @tailrec
   private def stream(demand: Long): Unit = {
     if (totalDemand > 0) {
-      if (indexed) {
+      if (schema.isDefined) {
+        val payload = randomFromSchema(schema.get.fields)
+        onNext(OutputChunk(JsArray(payload.values.toVector)))
+      } else if (indexed) {
         onNext(OutputChunk(JsArray(JsString(streamed.toString), JsNumber(rdm.nextInt()))))
       } else onNext(OutputChunk(Vector(rdm.nextInt())))
       streamed += 1
@@ -94,8 +121,15 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
 
     case Request(n) if streamed == 0L ⇒
       log.info(s"starting synthetic stream with target of '$target'")
-      val m = TypeMetadata(Vector("data" → JsNumber(0)))
-      onNext(if (indexed) m.copy(typesHint = Vector("index" → JsNumber(0)) ++ m.typesHint) else m)
+      lazy val m = TypeMetadata(Vector("data" → JsNumber(0)))
+
+      if (schema.isDefined) {
+        onNext(TypeMetadata(schema.get.fields.toVector))
+      } else if (indexed) {
+        onNext(m.copy(typesHint = Vector("index" → JsNumber(0)) ++ m.typesHint))
+      } else {
+        onNext(m)
+      }
       streamed += 1
       progress(n)
 
