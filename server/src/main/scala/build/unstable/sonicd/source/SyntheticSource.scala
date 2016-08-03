@@ -9,14 +9,13 @@ import spray.json._
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
-import scala.math.BigDecimal
 import scala.util.{Random, Try}
 
 class SyntheticSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
   val handlerProps: Props = {
-    val seed = getOption[Int]("seed").getOrElse(1000)
+    val seed = getOption[Int]("seed")
     val size = getOption[Int]("size")
     val progress = getOption[Int]("progress-delay").getOrElse(10)
     val indexed = getOption[Boolean]("indexed").getOrElse(false)
@@ -29,7 +28,7 @@ class SyntheticSource(query: Query, actorContext: ActorContext, context: Request
   }
 }
 
-class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWait: Int,
+class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], progressWait: Int,
                          query: String, indexed: Boolean, schema: Option[JsObject], ctx: RequestContext)
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
@@ -38,7 +37,7 @@ class SyntheticPublisher(queryId: Long, seed: Int, size: Option[Int], progressWa
   //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 10.seconds
 
-  val rdm = new Random(seed)
+  val rdm = seed.map(s ⇒ new Random(s)).getOrElse(new Random())
 
   var streamed = 0L
   val preTarget = 101
