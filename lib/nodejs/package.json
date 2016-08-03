@@ -1,6 +1,6 @@
 {
   "name": "sonicd",
-  "version": "0.5.1c",
+  "version": "0.5.2",
   "description": "Client library for Sonicd",
   "main": "lib.js",
   "author": "ernest@unstable.build",
