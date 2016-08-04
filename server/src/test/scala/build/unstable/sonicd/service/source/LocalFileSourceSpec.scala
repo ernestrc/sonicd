@@ -102,6 +102,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
 
 
   "LocalFileSourceSpec" should {
+  /*
     "tail files" in {
       val pub = newPublisher("{}", tailConfig)
       pub ! ActorPublisherMessage.Request(1)
@@ -167,6 +168,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
         expectDone(pub)
       }
     }
+    */
   }
 }
 
