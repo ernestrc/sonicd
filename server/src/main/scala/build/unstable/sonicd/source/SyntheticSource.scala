@@ -33,6 +33,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
   import build.unstable.sonicd.model._
+  import SyntheticPublisher._
 
   //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 10.seconds
@@ -60,13 +61,17 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   // to test expected exception
   // pass query or size '28'
   val shouldThrowExpectedException = _query.isSuccess && _query.get == 28
+  val enumSign = '|'
 
   if (shouldThrowExpectedException) log.warning("this source will throw an expected exception")
 
+  // if string is empty, value is 0 or bool is true, randomize values
+  // otherwise use the value provided in the schema
   def genRandom(value: JsValue): JsValue = value match {
-    // if string is empty, value is 0 or bool is true, randomize values
-    // otherwise use the value provided in the schema
-    case JsString("") ⇒ JsString(rdm.nextString(10))
+    case JsString(str) if str.contains(enumSign) ⇒
+      val enum = str.split(enumSign)
+      JsString(enum(rdm.nextInt(enum.length)))
+    case JsString("") ⇒ JsString(LOREM.takeRight(rdm.nextInt(LOREM.length)).take(10).replace(" ", ""))
     case JsBoolean(true) ⇒ JsBoolean(rdm.nextBoolean())
     case j@JsNumber(i) if j.value.doubleValue() == 0d ⇒ JsNumber(rdm.nextInt())
     case JsNull ⇒ JsNull
@@ -145,4 +150,9 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
       log.debug("client canceled")
       onCompleteThenStop()
   }
+}
+
+object SyntheticPublisher {
+
+  val LOREM = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 }
