@@ -245,7 +245,7 @@ describe('Sonicd ws', function() {
         }
       };
 
-      expectError(client, query, done);
+      expectError(authenticated, query, done);
     });
 
     it('should return error if an authenticated and authorized user from not a whitelisted IP tries to run a query on a secured source', function(done) {
@@ -259,7 +259,8 @@ describe('Sonicd ws', function() {
 
       doAuthenticate(authenticated, done, 'only_from_ip'); // check server's reference.conf
 
-      expectError(client, query, done);
+      expectError(authenticated, query, done);
+      authenticated.close();
     });
   });
 });
