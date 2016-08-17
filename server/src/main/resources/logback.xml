@@ -35,6 +35,8 @@
     </appender>
 
     <logger name="akka" level="INFO"/>
+    <logger name="com.twitter" level="DEBUG"/>
+    <logger name="twitter" level="DEBUG"/>
 
     <root level="TRACE">
         <appender-ref ref="STDOUT"/>

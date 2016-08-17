@@ -10,7 +10,6 @@ import build.unstable.sonicd.source.HiveThriftService.Command
 import build.unstable.tylog.Variation
 import com.twitter.finagle.Thrift
 import com.twitter.scrooge.ThriftStruct
-import com.twitter.util.{Timer, Future}
 import org.apache.hive.service.cli.thrift._
 
 import scala.concurrent.duration._

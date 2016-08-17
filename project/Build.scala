@@ -63,13 +63,13 @@ object Build extends sbt.Build {
   val hive: Project = Project("sonicd-hive", file("server/hive"))
     .settings(commonSettings: _*)
     .settings(
-      //scroogeBuildOptions in Compile := Seq("--finagle"), //no finagle
       assemblyStrategy,
       libraryDependencies ++= {
         Seq(
           "org.apache.thrift" % "libthrift" % "0.8.0",
           "com.twitter" %% "scrooge-core" % "4.8.0",
-          "com.twitter" %% "finagle-thrift" % "6.36.0"
+          "com.twitter" %% "finagle-thrift" % "6.36.0",
+          "com.twitter" %% "finagle-core" % "6.36.0"
         )
       }).dependsOn(core)
 
