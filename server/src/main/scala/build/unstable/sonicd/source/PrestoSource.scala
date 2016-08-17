@@ -14,7 +14,6 @@ import build.unstable.tylog.Variation
 import spray.json._
 
 import scala.collection.immutable.Seq
-import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, _}
 
 object Presto {
@@ -322,7 +321,7 @@ class PrestoPublisher(traceId: String, query: String,
             "query status is FAILED: {}", r.error.get)
           error.errorCode match {
             // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
-            case 65540 /* PAGE_TRANSPORT_TIMEOUT */ if retried < maxRetries ⇒
+            case 65540 | 65542 /* PAGE_TRANSPORT_TIMEOUT | REMOTE_TASK_ERROR */ if retried < maxRetries ⇒
               retried += 1
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
@@ -344,7 +343,7 @@ class PrestoPublisher(traceId: String, query: String,
       context.become(terminating(DoneWithQueryExecution.error(e)))
   }
 
-  def runStatement(callType: CallType, post: HttpRequestCommand) = Future {
+  def runStatement(callType: CallType, post: HttpRequestCommand) = {
     trace(log, traceId, callType, Variation.Attempt,
       "send query to supervisor in path {}", supervisor.path)
     supervisor ! post
