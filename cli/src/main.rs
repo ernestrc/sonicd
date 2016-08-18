@@ -230,7 +230,7 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     let (tx, rx) = ::std::sync::mpsc::channel();
 
-    let cmd = SonicMessage::AuthenticateMsg(Authenticate::new(key, user.to_owned(), None));
+    let cmd = SonicMessage::AuthenticateMsg(Authenticate::new(user.to_owned(), key, None));
 
     try!(sonicd::stream((host, *tcp_port), cmd, tx));
 
