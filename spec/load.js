@@ -13,7 +13,7 @@ describe('ws sonicd', function() {
 
   it('should be able to handle multiple concurrent queries', function(done) {
 
-    var connections = 1000;
+    var connections = parseInt(process.env.LOAD_TEST_CONN || '1000');
     var checkWait = 1000; //1 second
     var messages = 1;
     var errs = [];
