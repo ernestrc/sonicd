@@ -321,7 +321,8 @@ class PrestoPublisher(traceId: String, query: String,
             "query status is FAILED: {}", r.error.get)
           error.errorCode match {
             // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
-            case 65540 | 65542 /* PAGE_TRANSPORT_TIMEOUT | REMOTE_TASK_ERROR */ if retried < maxRetries ⇒
+            // PAGE_TRANSPORT_TIMEOUT | REMOTE_TASK_ERROR | REMOTE_TASK_MISMATCH
+            case 65540 | 65542 | 65544 if retried < maxRetries ⇒
               retried += 1
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
