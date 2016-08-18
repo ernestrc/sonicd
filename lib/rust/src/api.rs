@@ -7,14 +7,14 @@ use std::net::ToSocketAddrs;
 
 use model::SonicMessage;
 use error::Result;
-use net;
+use io;
 
 fn send_cmd(stream: &mut TcpStream, cmd: SonicMessage) -> Result<()> {
 
     debug!("framing command {:?}", &cmd);
 
     // frame command
-    let fbytes = try!(net::frame(cmd.into()));
+    let fbytes = try!(io::frame(cmd.into()));
 
     debug!("framed command into {} bytes", fbytes.len());
 
@@ -44,7 +44,7 @@ pub fn stream<A>(addr: A, cmd: SonicMessage, tx: Sender<Result<SonicMessage>>) -
                 let fd = stream.as_raw_fd();
 
                 loop {
-                    match net::read_message(&fd) {
+                    match io::read_message(&fd) {
                         o @ Ok(_) => tx.send(o).unwrap(),
                         e @ Err(_) => {
                             tx.send(e).unwrap();

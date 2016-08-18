@@ -11,15 +11,11 @@ include = [
   "lib/rust/**/*.rs*",
   "cli/**/*.rs*",
   "Cargo.toml",
-  "build.rs",
-  "Cargo.lock"
+  "build.rs"
 ]
 build = "build.rs"
 
 [features]
-# cache = ["threadpool", "num_cpus", "ws", "lazy_static", "env_logger"]
-websocket = ["ws"]
-# progress = ["pbr"]
 default = ["serde_codegen"]
 nightly = ["serde_macros"]
 
@@ -36,10 +32,10 @@ serde_codegen = { version = "*", optional = true }
 syntex = "*"
 
 [dependencies]
-serde = "0.7.11"
-error-chain = "0.1.12"
-serde_json = { git = "https://github.com/serde-rs/json.git" }
-serde_macros = { version = "0.7.11", optional = true }
+serde = "0.8.1"
+serde_json = "0.8.1"
+serde_macros = { version = "0.8.1", optional = true }
+error-chain = "0.5.0"
 byteorder = "0.5.3"
 nix = "0.6.0"
 log = "0.3.6"
@@ -54,16 +50,3 @@ ansi_term = "0.7"
 ws = { version =  "0.5.0", optional = true }
 pbr = { git = "https://github.com/a8m/pb.git" }
 # pbr = { path = "../../dev/rust/pb" }
-
-
-# FIXME cache for now separate toml until
-# https://github.com/rust-lang/cargo/pull/2325
-# otherwise on non-linux os project does not compile
-# threadpool = { version = "*", optional = true }
-# num_cpus = { version = "0.2", optional = true }
-# lazy_static = { version =  "0.1.*", optional = true }
-#
-# [[bin]]
-# name = "sonicc"
-# path = "cache/src/main.rs"
-# features = ["cache"]

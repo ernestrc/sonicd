@@ -13,11 +13,7 @@ extern crate ws as libws;
 mod api;
 mod error;
 mod model;
-pub mod net;
 #[macro_use] pub mod io;
-
-#[cfg(feature="websocket")]
-pub mod ws;
 
 pub use api::stream;
 pub use model::{SonicMessage, QueryStatus};
