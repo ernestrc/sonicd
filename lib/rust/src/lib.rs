@@ -4,25 +4,14 @@ extern crate serde;
 extern crate serde_json;
 extern crate nix;
 extern crate byteorder;
-extern crate bytes;
-extern crate slab;
-extern crate num_cpus;
-extern crate pad;
-extern crate time;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate log;
 
 mod error;
 mod api;
-mod source;
 mod model;
 #[macro_use] pub mod io;
-
-
-pub use io::handler::Handler;
-pub use io::controller::{Controller};
-pub use source::{Source, SyntheticSource};
 
 pub use api::stream;
 pub use model::{SonicMessage, QueryStatus, Query, Authenticate};

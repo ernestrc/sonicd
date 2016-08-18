@@ -93,9 +93,9 @@ error_chain! {
     }
 
     foreign_links {
-        ::std::io::Error, IoError, "I/O operation failed";
-        ::serde_json::Error, Json, "JSON serialization/deserialization error";
-        ::std::sync::mpsc::RecvError, RecvError, "Channel receive error";
+        ::std::io::Error, IoError;
+        ::serde_json::Error, Json;
+        ::std::sync::mpsc::RecvError, RecvError;
     }
 
     errors {
