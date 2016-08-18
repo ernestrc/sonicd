@@ -39,7 +39,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       expectMsgType[Props]
 
       c.underlyingActor.handled shouldBe 1
-      c.underlyingActor.handlers(1) shouldBe self.path
+      // feature removed: c.underlyingActor.handlers(1) shouldBe self.path
 
     }
 
@@ -81,7 +81,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
-        assert(c.underlyingActor.handlers.isEmpty)
+        // feature removed: assert(c.underlyingActor.handlers.isEmpty)
       }
 
       {
@@ -96,7 +96,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
-        assert(c.underlyingActor.handlers.isEmpty)
+        // feature removed: assert(c.underlyingActor.handlers.isEmpty)
       }
     }
 
@@ -119,7 +119,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
       c.underlyingActor.handled shouldBe 1
-      assert(c.underlyingActor.handlers.isEmpty)
+      // feature removed: assert(c.underlyingActor.handlers.isEmpty)
     }
 
     "accept queries on sources with ip-blocking enabled from clients that are whitelisted" in {

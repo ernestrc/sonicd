@@ -1,7 +1,7 @@
 {
   "main": "ws.js",
   "scripts": {
-    "test": "node_modules/mocha/bin/mocha -r chai ws.js"
+    "test": "node_modules/mocha/bin/mocha -r chai ws.js && node_modules/mocha/bin/mocha -r chai load.js"
   },
   "author": "ernest@unstable.build",
   "license": "MIT",
