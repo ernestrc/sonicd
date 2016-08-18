@@ -22,7 +22,9 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
 
   val API_VERSION = "v1"
 
-  val JDBC_FETCHSIZE = Try(config.getInt("sonicd.jdbc.fetch-size")).getOrElse(1000)
+  val JDBC_FETCHSIZE = config.getInt("sonicd.jdbc.fetch-size")
+
+  val CONTROLLERS: Int = config.getInt("sonicd.controllers")
 
   val AUTH_WORKERS: Int = config.getInt("sonicd.auth-workers")
   val AUTH_SECRET: String = config.getString("sonicd.auth-secret")

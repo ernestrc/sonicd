@@ -46,8 +46,9 @@ trait AkkaService extends Service {
 
   val tcpIoService: ActorRef = IO(Tcp)
 
-  val controllerService: ActorRef = system.actorOf(Props(classOf[SonicController],
-    authenticationService, SonicdConfig.ACTOR_TIMEOUT), "controller")
+  val controllerService: ActorRef = system.actorOf(
+    RoundRobinPool(SonicdConfig.CONTROLLERS)
+      .props(Props(classOf[SonicController], authenticationService, SonicdConfig.ACTOR_TIMEOUT)), "controller")
 
   val tcpService = system.actorOf(Props(classOf[TcpSupervisor], controllerService, authenticationService), "tcpSupervisor")
 

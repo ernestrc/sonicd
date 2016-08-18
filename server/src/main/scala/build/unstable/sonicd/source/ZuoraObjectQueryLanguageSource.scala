@@ -275,7 +275,7 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
       h
     })
 
-  def xmlRequest(payload: scala.xml.Node, queryId: String, pool: ConnectionPool, auth: ZuoraAuth): Future[HttpResponse] = Future {
+  def xmlRequest(payload: scala.xml.Node, traceId: String, pool: ConnectionPool, auth: ZuoraAuth): Future[HttpResponse] = Future {
     val data = payload.buildString(true)
     HttpRequest(
       method = HttpMethods.POST,
@@ -283,12 +283,12 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
       entity = HttpEntity.Strict(ContentTypes.`text/xml(UTF-8)`, ByteString.fromString(data))
     )
   }.flatMap { request ⇒
-    Source.single(request → queryId).via(pool).runWith(Sink.head).flatMap {
+    Source.single(request → traceId).via(pool).runWith(Sink.head).flatMap {
       case (Success(response), _) if response.status.isSuccess() =>
-        log.debug("http req query {} is successful", queryId)
+        log.debug("http req query {} is successful", traceId)
         Future.successful(response)
       case (Success(response), _) ⇒
-        log.debug("http query {} failed", queryId)
+        log.debug("http query {} failed", traceId)
         response.entity.toStrict(SonicdConfig.ZUORA_HTTP_ENTITY_TIMEOUT)
           .flatMap { en ⇒
             val entity = (XhtmlParser(scala.io.Source.fromString(en.data.utf8String)) \\ "FaultMessage").text
@@ -320,17 +320,17 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
 
   def runQueryMore(qMore: QueryMore, auth: ZuoraAuth, batchSize: Int)(sessionHeader: Session): Future[QueryResult] = {
     val xml = qMore.xml(batchSize, sessionHeader.id)
-    xmlRequest(xml, qMore.queryId, connectionPool, auth)
+    xmlRequest(xml, qMore.traceId, connectionPool, auth)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
-  def runQuery(queryId: String, zoql: String, batchSize: Int, auth: ZuoraAuth)(sessionHeader: Session): Future[QueryResult] = {
-    log.debug("running query '{}': {}", queryId, zoql)
+  def runQuery(traceId: String, zoql: String, batchSize: Int, auth: ZuoraAuth)(sessionHeader: Session): Future[QueryResult] = {
+    log.debug("running query '{}': {}", traceId, zoql)
 
-    val q = FirstQuery(zoql, queryId)
+    val q = FirstQuery(zoql, traceId)
     val xml = q.xml(batchSize, sessionHeader.id)
 
-    xmlRequest(xml, q.queryId, connectionPool, auth)
+    xmlRequest(xml, q.traceId, connectionPool, auth)
       .flatMap(r ⇒ QueryResult.fromHttpEntity(r.entity))
   }
 
@@ -347,9 +347,9 @@ class ZuoraService(implicit connectionPool: ConnectionPool, materializer: ActorM
           case e: Exception ⇒ QueryFailed(e)
         } pipeTo sender()
 
-    case RunZOQLQuery(queryId, zoql, batchSize, auth) ⇒
+    case RunZOQLQuery(traceId, zoql, batchSize, auth) ⇒
       memoizedSession(auth)
-        .flatMap(runQuery(queryId, zoql, batchSize, auth))
+        .flatMap(runQuery(traceId, zoql, batchSize, auth))
         .recover {
           case e: Exception ⇒ QueryFailed(e)
         } pipeTo sender()
@@ -395,13 +395,13 @@ object ZuoraService {
   }
 
   trait Query {
-    val queryId: String
+    val traceId: String
     val zoql: String
 
     def xml(batchSize: Int, session: String): scala.xml.Node
   }
 
-  case class FirstQuery(zoql: String, queryId: String) extends Query {
+  case class FirstQuery(zoql: String, traceId: String) extends Query {
     def xml(batchSize: Int, session: String): scala.xml.Node = {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Header>
@@ -421,7 +421,7 @@ object ZuoraService {
     }
   }
 
-  case class QueryMore(zoql: String, queryLocator: String, queryId: String) extends Query {
+  case class QueryMore(zoql: String, queryLocator: String, traceId: String) extends Query {
     def xml(batchSize: Int, session: String): scala.xml.Node = {
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="http://object.api.zuora.com/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns1="http://api.zuora.com/">
         <SOAP-ENV:Header>
