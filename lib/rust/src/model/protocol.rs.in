@@ -39,12 +39,12 @@ impl From<SonicMessage> for ProtoSonicMessage {
                 let mut payload = BTreeMap::new();
 
                 payload.insert("config".to_owned(), config);
-                payload.insert("auth".to_owned(),
-                auth.map(|s| Value::String(s))
-                .unwrap_or_else(|| Value::Null));
-                payload.insert("trace_id".to_owned(),
-                trace_id.map(|s| Value::String(s))
-                .unwrap_or_else(|| Value::Null));
+
+                payload.insert("auth".to_owned(), auth.map(|s| Value::String(s))
+                               .unwrap_or_else(|| Value::Null));
+
+                payload.insert("trace_id".to_owned(), trace_id.map(|s| Value::String(s))
+                               .unwrap_or_else(|| Value::Null));
 
                 ProtoSonicMessage {
                     event_type: MessageKind::QueryKind,
@@ -64,6 +64,9 @@ impl From<SonicMessage> for ProtoSonicMessage {
 
                 payload.insert("user".to_owned(), Value::String(user));
 
+                payload.insert("trace_id".to_owned(), trace_id.map(|s| Value::String(s))
+                               .unwrap_or_else(|| Value::Null));
+
                 ProtoSonicMessage {
                     event_type: MessageKind::AuthKind,
                     variation: Some(key),
@@ -77,7 +80,7 @@ impl From<SonicMessage> for ProtoSonicMessage {
                     payload: Some(::serde_json::to_value(&meta)),
                 }
             },
-            SonicMessage::QueryProgress{ status, progress, total, units } => {
+            SonicMessage::QueryProgress{ progress, total, units, .. } => {
                 let mut payload = BTreeMap::new();
 
                 payload.insert("p".to_owned(), Value::F64(progress));

@@ -28,8 +28,8 @@ name = "sonic"
 path = "cli/src/main.rs"
 
 [build-dependencies]
-serde_codegen = { version = "*", optional = true }
-syntex = "*"
+serde_codegen = { version = "0.8.2", optional = true }
+syntex = "0.41.0"
 
 [dependencies]
 serde = "0.8.1"
@@ -39,16 +39,12 @@ error-chain = "0.5.0"
 byteorder = "0.5.3"
 nix = { version = "0.6.0", features = ["signalfd"] }
 log = "0.3.6"
-num_cpus = "*"
-lazy_static = "0.1.*"
-slab = "*"
-time = "*"
-pad = "*"
+lazy_static = "0.1.16"
 
 # cli
 regex = "0.1.71"
 docopt = "0.6.81"
-rpassword = "*"
+rpassword = "0.2.3"
 rustc-serialize = "0.3.19"
 env_logger = "0.3.3"
 ansi_term = "0.7"
