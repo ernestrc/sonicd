@@ -1,6 +1,6 @@
 [package]
 name = "sonicd"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 description = "client library for Sonicd, a data streaming gateway"
 license-file = "LICENSE"
@@ -53,5 +53,4 @@ rustc-serialize = "0.3.19"
 env_logger = "0.3.3"
 ansi_term = "0.7"
 ws = { version =  "0.5.0", optional = true }
-pbr = { git = "https://github.com/a8m/pb.git" }
-# pbr = { path = "../../dev/rust/pb" }
+pbr = "0.3.0"
