@@ -318,17 +318,20 @@ class PrestoPublisher(traceId: String, query: String,
           val error = r.error.get
           val e = new Exception(error.message)
           trace(log, traceId, callType, Variation.Failure(e),
-            "query status is FAILED: {}", r.error.get)
+            "query status is FAILED: {}", error)
           error.errorCode match {
             // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
             // PAGE_TRANSPORT_TIMEOUT | REMOTE_TASK_ERROR | REMOTE_TASK_MISMATCH
             case 65540 | 65542 | 65544 if retried < maxRetries ⇒
+              debug(log, "error code is {}. retrying..", error.errorCode)
               retried += 1
               callType = RetryStatement(retried)
               retryScheduled = Some(context.system.scheduler
-                .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn, supervisor,
-                  runStatement(callType, queryCommand)))
-            case _ ⇒ context.become(terminating(DoneWithQueryExecution.error(e)))
+                .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn,
+                  new Runnable { override def run(): Unit = runStatement(callType, queryCommand) }))
+            case _ ⇒
+              debug(log, "error code is {}, skipping retry", error.errorCode)
+              context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
         case state ⇒
@@ -344,7 +347,7 @@ class PrestoPublisher(traceId: String, query: String,
       context.become(terminating(DoneWithQueryExecution.error(e)))
   }
 
-  def runStatement(callType: CallType, post: HttpRequestCommand) = {
+  def runStatement(callType: CallType, post: HttpRequestCommand) {
     trace(log, traceId, callType, Variation.Attempt,
       "send query to supervisor in path {}", supervisor.path)
     supervisor ! post

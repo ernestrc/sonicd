@@ -197,7 +197,7 @@ class Query(val id: Option[Long],
             val traceId: Option[String],
             val auth: Option[String],
             val query: String,
-            val _config: JsValue)
+            _config: JsValue)
   extends SonicCommand {
 
   override def setTraceId(trace_id: String): SonicCommand =
