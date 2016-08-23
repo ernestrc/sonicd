@@ -1,12 +1,12 @@
 # Sonicd [![Build Status](https://travis-ci.org/xarxa6/sonicd.svg)](https://travis-ci.org/xarxa6/sonicd)
 
 # The problem
-- If you're using Akka Streams for stream processing instead of other data streaming frameworks (like Storm), you'll be probably missing a data sourcing component (like Spout).
-- Programatic big data access it's highly dominated by the JVM and it tipically requires a lot of configuration on the client side that makes it hard or sometimes impossible to use from other a non JVM environment (browser, nodejs, etc)
-- Java CLI's suck. Waiting 5s for the JVM every time you want to run `hive -e "show tables"` it's a complete waste of time.
+- Implementing data analytics APIs against multiple underlying data sources often results in code bloat and tight coupling.
+- If you're using Akka Streams for stream processing, you are probably missing a data sourcing component (like Storm's Spouts).
+- ODBC/JDBC are antiquated and not designed for streaming large datasets.
 
 # The solution
-Sonicd is a data streaming gateway that abstracts over data source connectors and provides a unified api/protocol to stream data over WebSockets or over TCP (using one of the client libs). It also provides a CLI to run ad hoc queries.
+Sonicd is a data streaming gateway that abstracts over data source connectors and provides a modern protocol to stream data over WebSockets or over plain TCP.
 
 # Supported Sources
 - **PrestoSource**: non-blocking streaming connector for [Facebook's Presto](https://prestodb.io/).
@@ -23,7 +23,7 @@ docker run -d -p 9111:9111 -p 10001:10001 -v ${CONFIG_DIR}:/etc/sonicd/ -v ${JDB
 ```
 
 # Install CLI
-If you have the rust toolchain installed already, then simply `cargo install sonicd`, otherwise install rustup first with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/).
+Sonicd also provides a CLI to run ad hoc queries. If you have the rust toolchain installed already, then simply `cargo install sonicd`, otherwise install rustup first with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/).
 
 # Examples
 Check [examples](examples) folder. For an example in Rust check the [cli](cli).
