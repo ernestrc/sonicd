@@ -5,6 +5,7 @@ scala:
 branches:
   only:
     - dev
+    - master
 services:
   - docker
 notifications:
