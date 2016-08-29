@@ -16,118 +16,6 @@ import spray.json._
 import scala.collection.immutable.Seq
 import scala.concurrent.duration.{Duration, _}
 
-object Presto {
-  def getSupervisorName(masterUrl: String): String = s"presto_$masterUrl"
-
-  object Headers {
-    private def mkHeader(name: String, value: String): HttpHeader =
-      HttpHeader.parse(name, value).asInstanceOf[ParsingResult.Ok].header
-
-    val USER = mkHeader("X-Presto-User", _: String)
-    val SOURCE = mkHeader("X-Presto-Source", "sonicd/" + BuildInfo.version + "/" + BuildInfo.commit)
-    val CATALOG = mkHeader("X-Presto-Catalog", _: String)
-    val SCHEMA = mkHeader("X-Presto-Schema", _: String)
-    val TZONE = mkHeader("X-Presto-Time-Zone", _: String)
-    val LANG = mkHeader("X-Presto-Language", _: String)
-    val SESSION = mkHeader("X-Presto-Session", _: String)
-    val SETSESSION = mkHeader("X-Presto-Set-Session", _: String)
-    val CLEARSESSION = mkHeader("X-Presto-Clear-Session", _: String)
-    val TID = mkHeader("X-Presto-Transaction-Id", _: String)
-    val STARTEDTID = mkHeader("X-Presto-Started-Transaction-Id", _: String)
-    val CLEARTID = mkHeader("X-Presto-Clear-Transaction-Id", _: String)
-    val STATE = mkHeader("X-Presto-Current-State", _: String)
-    val MAXW = mkHeader("X-Presto-Max-Wait", _: String)
-    val MAXS = mkHeader("X-Presto-Max-Size", _: String)
-    val TAID = mkHeader("X-Presto-Task-Instance-Id", _: String)
-    val PID = mkHeader("X-Presto-Page-Sequence-Id", _: String)
-    val PAGENEXT = mkHeader("X-Presto-Page-End-Sequence-Id", _: String)
-    val BUFCOMPLETE = mkHeader("X-Presto-Buffer-Complete", _: String)
-  }
-
-  case class StatementStats(state: String,
-                            scheduled: Boolean,
-                            nodes: Int,
-                            totalSplits: Int,
-                            queuedSplits: Int,
-                            runningSplits: Int,
-                            completedSplits: Int,
-                            userTimeMillis: Int,
-                            cpuTimeMillis: Int,
-                            processedRows: Int,
-                            processedBytes: Int)
-
-  case class ErrorLocation(lineNumber: Int, columnNumber: Int)
-
-  case class FailureInfo(message: String,
-                         stack: Vector[String],
-                         errorLocation: Option[ErrorLocation])
-
-  case class ErrorMessage(message: String,
-                          errorCode: Int,
-                          errorName: String,
-                          errorType: String,
-                          failureInfo: FailureInfo)
-
-  case class QueryStats(elapsedTime: String,
-                        queuedTime: String,
-                        totalTasks: Int,
-                        runningTasks: Int,
-                        completedTasks: Int)
-
-  case class Data(rows: Option[Vector[Vector[JsValue]]])
-
-  case class Root(source: Data, columns: Vector[String])
-
-  case class Plan(root: Root, distribution: String)
-
-  case class OutputStage(state: String,
-                         plan: Plan,
-                         types: Vector[String])
-
-  case class ColMeta(name: String, _type: String)
-
-  case class QueryResults(id: String,
-                          infoUri: String,
-                          partialCancelUri: Option[String],
-                          nextUri: Option[String],
-                          columns: Option[Vector[ColMeta]],
-                          data: Option[Vector[Vector[JsValue]]],
-                          stats: StatementStats,
-                          error: Option[ErrorMessage],
-                          updateType: Option[String],
-                          updateCount: Option[Long]) extends HttpSupervisor.Traceable {
-    override def setTraceId(newId: String): HttpSupervisor.Traceable =
-      this.copy(id = newId)
-  }
-
-  case class ErrorCode(code: Int, name: String)
-
-  val USER_ERROR = "USER_ERROR"
-  val SYNTAX_ERROR = "SYNTAX_ERROR"
-
-  class PrestoError(msg: String) extends Exception(msg)
-
-  implicit var statementStatsJsonFormat: RootJsonFormat[StatementStats] = jsonFormat11(StatementStats.apply)
-  implicit var queryStatsJsonFormat: RootJsonFormat[QueryStats] = jsonFormat5(QueryStats.apply)
-  implicit var colMetaJsonFormat: RootJsonFormat[ColMeta] = new RootJsonFormat[ColMeta] {
-    override def write(obj: ColMeta): JsValue = throw new DeserializationException("json write of ColMeta not implemented")
-
-    override def read(json: JsValue): ColMeta = {
-      val f = json.asJsObject.fields
-      ColMeta(f("name").convertTo[String], f("type").convertTo[String])
-    }
-  }
-  implicit var dataJsonFormat: RootJsonFormat[Data] = jsonFormat1(Data.apply)
-  implicit var rootJsonFormat: RootJsonFormat[Root] = jsonFormat2(Root.apply)
-  implicit var planJsonFormat: RootJsonFormat[Plan] = jsonFormat2(Plan.apply)
-  implicit var outputStageJsonFormat: RootJsonFormat[OutputStage] = jsonFormat3(OutputStage.apply)
-  implicit var errorLocation: RootJsonFormat[ErrorLocation] = jsonFormat2(ErrorLocation.apply)
-  implicit var failureInfoFormat: RootJsonFormat[FailureInfo] = jsonFormat3(FailureInfo.apply)
-  implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat5(ErrorMessage.apply)
-  implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
-
-}
-
 class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
@@ -153,7 +41,8 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
       SonicdConfig.PRESTO_WATERMARK, SonicdConfig.PRESTO_MAX_RETRIES,
-      SonicdConfig.PRESTO_RETRYIN, SonicdConfig.PRESTO_RETRY_MULTIPLIER, context)
+      SonicdConfig.PRESTO_RETRYIN, SonicdConfig.PRESTO_RETRY_MULTIPLIER,
+      SonicdConfig.PRESTO_RETRY_ERRORS, context)
   }
 }
 
@@ -182,6 +71,7 @@ class PrestoPublisher(traceId: String, query: String,
                       maxRetries: Int,
                       retryIn: FiniteDuration,
                       retryMultiplier: Int,
+                      retryErrors: Either[List[Long], Unit],
                       ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
@@ -319,19 +209,21 @@ class PrestoPublisher(traceId: String, query: String,
           val e = new Exception(error.message)
           trace(log, traceId, callType, Variation.Failure(e),
             "query status is FAILED: {}", error)
-          error.errorCode match {
-            // presto-main/src/main/java/com/facebook/presto/operator/HttpPageBufferClient.java
-            // PAGE_TRANSPORT_TIMEOUT | REMOTE_TASK_ERROR | REMOTE_TASK_MISMATCH
-            case 65540 | 65542 | 65544 if retried < maxRetries ⇒
-              debug(log, "error code is {}. retrying..", error.errorCode)
-              retried += 1
-              callType = RetryStatement(retried)
-              retryScheduled = Some(context.system.scheduler
-                .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn,
-                  new Runnable { override def run(): Unit = runStatement(callType, queryCommand) }))
-            case _ ⇒
-              debug(log, "error code is {}, skipping retry", error.errorCode)
-              context.become(terminating(DoneWithQueryExecution.error(e)))
+
+          //retry
+          if ((retryErrors.isLeft && retryErrors.left.get.contains(error.errorCode) ||
+            retryErrors.isRight && (error.isInternal || error.isExternal)) && retried < maxRetries) {
+            retried += 1
+            callType = RetryStatement(retried)
+            retryScheduled = Some(context.system.scheduler
+              .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn,
+                new Runnable {
+                  override def run(): Unit = runStatement(callType, queryCommand, context.self)
+                }))
+
+          } else {
+            debug(log, "error code is {}, skipping retry", error.errorCode)
+            context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
         case state ⇒
@@ -347,10 +239,10 @@ class PrestoPublisher(traceId: String, query: String,
       context.become(terminating(DoneWithQueryExecution.error(e)))
   }
 
-  def runStatement(callType: CallType, post: HttpRequestCommand) {
+  def runStatement(callType: CallType, post: HttpRequestCommand, sender: ActorRef) {
     trace(log, traceId, callType, Variation.Attempt,
       "send query to supervisor in path {}", supervisor.path)
-    supervisor ! post
+    supervisor.tell(post, sender)
   }
 
   def commonReceive: Receive = {
@@ -369,8 +261,124 @@ class PrestoPublisher(traceId: String, query: String,
     //first time client requests
     case Request(n) ⇒
       buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, None))
-      runStatement(callType, queryCommand)
+      runStatement(callType, queryCommand, context.self)
       tryPushDownstream()
       context.become(materialized)
   }
+}
+
+object Presto {
+  def getSupervisorName(masterUrl: String): String = s"presto_$masterUrl"
+
+  object Headers {
+    private def mkHeader(name: String, value: String): HttpHeader =
+      HttpHeader.parse(name, value).asInstanceOf[ParsingResult.Ok].header
+
+    val USER = mkHeader("X-Presto-User", _: String)
+    val SOURCE = mkHeader("X-Presto-Source", "sonicd/" + BuildInfo.version + "/" + BuildInfo.commit)
+    val CATALOG = mkHeader("X-Presto-Catalog", _: String)
+    val SCHEMA = mkHeader("X-Presto-Schema", _: String)
+    val TZONE = mkHeader("X-Presto-Time-Zone", _: String)
+    val LANG = mkHeader("X-Presto-Language", _: String)
+    val SESSION = mkHeader("X-Presto-Session", _: String)
+    val SETSESSION = mkHeader("X-Presto-Set-Session", _: String)
+    val CLEARSESSION = mkHeader("X-Presto-Clear-Session", _: String)
+    val TID = mkHeader("X-Presto-Transaction-Id", _: String)
+    val STARTEDTID = mkHeader("X-Presto-Started-Transaction-Id", _: String)
+    val CLEARTID = mkHeader("X-Presto-Clear-Transaction-Id", _: String)
+    val STATE = mkHeader("X-Presto-Current-State", _: String)
+    val MAXW = mkHeader("X-Presto-Max-Wait", _: String)
+    val MAXS = mkHeader("X-Presto-Max-Size", _: String)
+    val TAID = mkHeader("X-Presto-Task-Instance-Id", _: String)
+    val PID = mkHeader("X-Presto-Page-Sequence-Id", _: String)
+    val PAGENEXT = mkHeader("X-Presto-Page-End-Sequence-Id", _: String)
+    val BUFCOMPLETE = mkHeader("X-Presto-Buffer-Complete", _: String)
+  }
+
+  case class StatementStats(state: String,
+                            scheduled: Boolean,
+                            nodes: Int,
+                            totalSplits: Int,
+                            queuedSplits: Int,
+                            runningSplits: Int,
+                            completedSplits: Int,
+                            userTimeMillis: Int,
+                            cpuTimeMillis: Int,
+                            processedRows: Int,
+                            processedBytes: Int)
+
+  case class ErrorLocation(lineNumber: Int, columnNumber: Int)
+
+  case class FailureInfo(message: String,
+                         stack: Vector[String],
+                         errorLocation: Option[ErrorLocation])
+
+  case class ErrorMessage(message: String,
+                          errorCode: Int,
+                          errorName: String,
+                          errorType: String,
+                          failureInfo: FailureInfo) {
+    def isInternal: Boolean = errorType == "INTERNAL_ERROR"
+
+    def isExternal: Boolean = errorType == "EXTERNAL_ERROR"
+  }
+
+  case class QueryStats(elapsedTime: String,
+                        queuedTime: String,
+                        totalTasks: Int,
+                        runningTasks: Int,
+                        completedTasks: Int)
+
+  case class Data(rows: Option[Vector[Vector[JsValue]]])
+
+  case class Root(source: Data, columns: Vector[String])
+
+  case class Plan(root: Root, distribution: String)
+
+  case class OutputStage(state: String,
+                         plan: Plan,
+                         types: Vector[String])
+
+  case class ColMeta(name: String, _type: String)
+
+  case class QueryResults(id: String,
+                          infoUri: String,
+                          partialCancelUri: Option[String],
+                          nextUri: Option[String],
+                          columns: Option[Vector[ColMeta]],
+                          data: Option[Vector[Vector[JsValue]]],
+                          stats: StatementStats,
+                          error: Option[ErrorMessage],
+                          updateType: Option[String],
+                          updateCount: Option[Long]) extends HttpSupervisor.Traceable {
+    override def setTraceId(newId: String): HttpSupervisor.Traceable =
+      this.copy(id = newId)
+  }
+
+  case class ErrorCode(code: Int, name: String)
+
+  val USER_ERROR = "USER_ERROR"
+  val SYNTAX_ERROR = "SYNTAX_ERROR"
+
+  class PrestoError(msg: String) extends Exception(msg)
+
+  implicit var statementStatsJsonFormat: RootJsonFormat[StatementStats] = jsonFormat11(StatementStats.apply)
+  implicit var queryStatsJsonFormat: RootJsonFormat[QueryStats] = jsonFormat5(QueryStats.apply)
+  implicit var colMetaJsonFormat: RootJsonFormat[ColMeta] = new RootJsonFormat[ColMeta] {
+    override def write(obj: ColMeta): JsValue = throw new DeserializationException("json write of ColMeta not implemented")
+
+    override def read(json: JsValue): ColMeta = {
+      val f = json.asJsObject.fields
+      ColMeta(f("name").convertTo[String], f("type").convertTo[String])
+    }
+  }
+  implicit var dataJsonFormat: RootJsonFormat[Data] = jsonFormat1(Data.apply)
+  implicit var rootJsonFormat: RootJsonFormat[Root] = jsonFormat2(Root.apply)
+  implicit var planJsonFormat: RootJsonFormat[Plan] = jsonFormat2(Plan.apply)
+  implicit var outputStageJsonFormat: RootJsonFormat[OutputStage] = jsonFormat3(OutputStage.apply)
+  implicit var errorLocation: RootJsonFormat[ErrorLocation] = jsonFormat2(ErrorLocation.apply)
+  implicit var failureInfoFormat: RootJsonFormat[FailureInfo] = jsonFormat3(FailureInfo.apply)
+  implicit var errorMessageJsonFormat: RootJsonFormat[ErrorMessage] = jsonFormat5(ErrorMessage.apply)
+  implicit val queryResultsJsonFormat: RootJsonFormat[QueryResults] = jsonFormat10(QueryResults.apply)
+
 }

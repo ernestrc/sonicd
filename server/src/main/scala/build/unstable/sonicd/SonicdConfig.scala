@@ -60,6 +60,13 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   val PRESTO_RETRY_MULTIPLIER: Int = config.getInt("sonicd.presto.retry-multiplier")
   val PRESTO_HTTP_ENTITY_TIMEOUT = Duration(config.getDuration("sonicd.presto.http-entity-timeout").getSeconds, TimeUnit.SECONDS)
   val PRESTO_MAX_RETRIES = config.getInt("sonicd.presto.max-retries")
+  val PRESTO_RETRY_ERRORS: Either[List[Long], Unit] =
+    Try(config.getString("sonicd.presto.retry-errors")).map {
+      case "all" ⇒ Right.apply(())
+    }.getOrElse {
+      Left.apply(config.getLongList("sonicd.presto.retry-errors").map(_.toLong).toList)
+    }
+
   val PRESTO_TIMEOUT = Duration(config.getDuration("sonicd.presto.timeout").getSeconds, TimeUnit.SECONDS)
   val PRESTO_APIV = "v1"
   val PRESTO_WATERMARK = config.getInt("sonicd.presto.watermark")

@@ -20,8 +20,8 @@ import scala.concurrent.duration._
 
 class PrestoSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
-  with Matchers with BeforeAndAfterAll with ImplicitSender
-  with ImplicitSubscriber with HandlerUtils {
+    with Matchers with BeforeAndAfterAll with ImplicitSender
+    with ImplicitSubscriber with HandlerUtils {
 
   import Fixture._
 
@@ -49,9 +49,10 @@ class PrestoSourceSpec(_system: ActorSystem)
 
   def newPublisher(q: String, context: RequestContext = testCtx, watermark: Int = -1,
                    maxRetries: Int = 0, retryIn: FiniteDuration = 1.second, retryMultiplier: Int = 1,
+                   retryErrors: Either[List[Long], Unit] = Left(List.empty),
                    dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[PrestoPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
-    val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier,
+    val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier, retryErrors,
       self, query, controller.underlyingActor.context, context)
     val ref = TestActorRef[PrestoPublisher](src.handlerProps.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
@@ -344,25 +345,82 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectDone(pub)
     }
 
-    "should retry up to a maximum of n retries if error code is PAGE_TRANSPORT_TIMEOUT" in {
-      val pub = newPublisher(query1, maxRetries = 2, retryIn = 1.second)
+    "should retry up to a maximum of n retries if error is in 'retry-errors' list" in {
+      val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond, retryMultiplier = -1,
+        retryErrors = Left(List(1234, 3434)))
       pub ! ActorPublisherMessage.Request(100)
 
-      val httpCmd = expectMsgType[HttpRequestCommand]
+      expectMsgType[HttpRequestCommand]
+
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
-      val error = Presto.ErrorMessage("", 65540, "", "",
+      val error = Presto.ErrorMessage("", 1234, "", "", Presto.FailureInfo("", Vector.empty, None))
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error.copy(errorCode = 3434)), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectDone(pub, success = false)
+    }
+
+    "should retry up to a maximum of n retries if error is INTERNAL_ERROR or EXTERNAL_ERROR and 'retry-errors' config is 'all'" in {
+      val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond,
+        retryMultiplier = -1, retryErrors = Right.apply(()))
+      pub ! ActorPublisherMessage.Request(100)
+
+      expectMsgType[HttpRequestCommand]
+
+      expectQueryProgress(0, QueryProgress.Started, None, None)
+
+      val error = Presto.ErrorMessage("", 1234, "", "INTERNAL_ERROR", Presto.FailureInfo("", Vector.empty, None))
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error.copy(errorType = "EXTERNAL_ERROR")), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error.copy(errorCode = 3434)), None, None)
+
+      expectMsgType[HttpRequestCommand]
+
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error), None, None)
+
+      expectDone(pub, success = false)
+    }
+
+    "should NOT retry if config 'retry-errors' is 'all' but error is not internal or external" in {
+      val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond,
+        retryMultiplier = -1, retryErrors = Right.apply(()))
+
+      pub ! ActorPublisherMessage.Request(100)
+
+      expectMsgType[HttpRequestCommand]
+
+      expectQueryProgress(0, QueryProgress.Started, None, None)
+
+      val error = Presto.ErrorMessage("", 1224, "", "USER_ERROR",
         Presto.FailureInfo("", Vector.empty, None))
-
-      pub ! QueryResults("", "", None, None, None, None,
-        defaultStats.copy(state = "FAILED"), Some(error), None, None)
-
-      expectMsgType[HttpRequestCommand]
-
-      pub ! QueryResults("", "", None, None, None, None,
-        defaultStats.copy(state = "FAILED"), Some(error), None, None)
-
-      expectMsgType[HttpRequestCommand]
 
       pub ! QueryResults("", "", None, None, None, None,
         defaultStats.copy(state = "FAILED"), Some(error), None, None)
@@ -374,7 +432,7 @@ class PrestoSourceSpec(_system: ActorSystem)
       val pub = newPublisher(query1, maxRetries = 0, retryIn = 1.second)
       pub ! ActorPublisherMessage.Request(100)
 
-      val httpCmd = expectMsgType[HttpRequestCommand]
+      expectMsgType[HttpRequestCommand]
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       val error = Presto.ErrorMessage("", 65540, "", "",
@@ -390,7 +448,8 @@ class PrestoSourceSpec(_system: ActorSystem)
 
 //override supervisor
 class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, retryMultiplier: Int,
-                   implicitSender: ActorRef, query: Query, actorContext: ActorContext, context: RequestContext)
+                   retryErrors: Either[List[Long], Unit], implicitSender: ActorRef, query: Query,
+                   actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.PrestoSource(query, actorContext, context) {
 
   override def getSupervisor(name: String): ActorRef = implicitSender
@@ -399,6 +458,7 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, ret
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 
-    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark, maxRetries, retryIn, retryMultiplier, context)
+    Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark,
+      maxRetries, retryIn, retryMultiplier, retryErrors, context)
   }
 }
