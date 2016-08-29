@@ -117,8 +117,8 @@ class ElasticSearchPublisher(traceId: String,
                              typeHint: Option[String],
                              querySize: Long,
                              supervisor: ActorRef,
-                             watermark: Long,
-                             ctx: RequestContext)
+                             watermark: Long)
+                            (implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._

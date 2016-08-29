@@ -29,7 +29,7 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
     Sink.fromSubscriber(ActorSubscriber(wsHandler)),
     Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))
     ).recover {
-      case e: Exception ⇒ DoneWithQueryExecution.error(e)
+      case e: Exception ⇒ DoneWithQueryExecution.error("no-trace-id", e)
     }
   }
 
@@ -81,7 +81,7 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
                 extractUpgradeToWebSocket { upgrade ⇒
                   complete {
                     upgrade.handleMessages(messageSerDe(ip).recover {
-                      case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error(e).json.toString())
+                      case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error("no-trace-id", e).json.toString())
                     })
                   }
                 }

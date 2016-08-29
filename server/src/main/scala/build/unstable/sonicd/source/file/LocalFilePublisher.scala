@@ -220,7 +220,7 @@ trait LocalFilePublisher {
 
     case req: Request ⇒
       val dataLeft = files.nonEmpty && files.forall(kv ⇒ stream(query, kv._2._2))
-      if (!tail && !dataLeft) terminate(DoneWithQueryExecution.success)
+      if (!tail && !dataLeft) terminate(DoneWithQueryExecution.success(ctx.traceId))
 
     case done: DoneWithQueryExecution ⇒
       if (totalDemand > 0) terminate(done)
@@ -284,7 +284,7 @@ trait LocalFilePublisher {
       } catch {
         case e: Exception ⇒
           error(log, e, "error setting up watch")
-          terminate(DoneWithQueryExecution.error(e))
+          terminate(DoneWithQueryExecution.error(ctx.traceId, e))
       }
     case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
   }

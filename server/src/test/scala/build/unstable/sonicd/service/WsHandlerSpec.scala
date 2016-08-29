@@ -51,7 +51,7 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def expectDone(wsHandler: ActorRef): Unit = {
-    val done = DoneWithQueryExecution.success
+    val done = DoneWithQueryExecution.success("expect-done-trace-id")
     wsHandler ! done
     expectMsg(done)
   }
@@ -95,7 +95,8 @@ with ImplicitSubscriber with ImplicitGuardian {
       wsHandler ! Request(1)
       expectMsg(OutputChunk(Vector(done.get)))
       wsHandler ! Request(1)
-      expectMsg(DoneWithQueryExecution.success)
+      val d = expectMsgType[DoneWithQueryExecution]
+      assert(d.success)
 
       clientAcknowledge(wsHandler)
       expectMsg("complete")
@@ -114,7 +115,9 @@ with ImplicitSubscriber with ImplicitGuardian {
       val done: Failure[String] = Failure(new Exception("BOOM"))
       wsHandler ! done
       wsHandler ! Request(1)
-      expectMsg(DoneWithQueryExecution.error(done.failed.get))
+      val d = expectMsgType[DoneWithQueryExecution]
+      assert(!d.success)
+      assert(d.error.get == done.failed.get)
 
       clientAcknowledge(wsHandler)
       expectMsg("complete")
@@ -129,7 +132,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val q = expectMsgType[NewQuery]
       assert(q.query.traceId.nonEmpty)
 
-      val done = DoneWithQueryExecution.error(new Exception("BOOM"))
+      val done = DoneWithQueryExecution.error("trace-id", new Exception("BOOM"))
       wsHandler ! done
       wsHandler ! Request(1)
       expectMsg(done)
@@ -152,7 +155,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       assert(q.query.traceId.nonEmpty)
 
       subscription.request(1)
-      val done = DoneWithQueryExecution.error(new Exception("BOOM"))
+      val done = DoneWithQueryExecution.error("trace-id", new Exception("BOOM"))
       wsHandler ! done
       expectMsg(done)
       clientAcknowledge(wsHandler)

@@ -86,7 +86,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
       error(log, e, "error in publisher")
-      self ! DoneWithQueryExecution.error(e)
+      self ! DoneWithQueryExecution.error(traceId, e)
       Stop
   }
 
@@ -126,7 +126,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
     override def onError(t: Throwable): Unit = {
       error(log, t, "stream error")
-      self ! DoneWithQueryExecution.error(t)
+      self ! DoneWithQueryExecution.error(traceId, t)
     }
 
     override def onSubscribe(s: Subscription): Unit = {
@@ -177,6 +177,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   var subscription: StreamSubscription = null
   var cancellableCompleted: Cancellable = null
   var dataBuffer = ByteString.empty
+  implicit var traceId = UUID.randomUUID().toString
 
   def commonBehaviour: Receive = {
 
@@ -189,7 +190,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     case CompletedStream ⇒
       val msg = "completed stream without done msg"
       log.error(msg)
-      context.become(closing(DoneWithQueryExecution.error(new ProtocolException(msg))))
+      context.become(closing(DoneWithQueryExecution.error(traceId, new ProtocolException(msg))))
 
     case PeerClosed ⇒ debug(log, "peer closed")
   }
@@ -199,8 +200,10 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       case i: SonicCommand ⇒
         val withTraceId = {
           i.traceId match {
-            case Some(id) ⇒ i
-            case None ⇒ i.setTraceId(UUID.randomUUID().toString)
+            case Some(id) ⇒
+              traceId = id
+              i
+            case None ⇒ i.setTraceId(traceId)
           }
         }
         withTraceId match {
@@ -271,7 +274,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       } catch {
         case e: Exception ⇒
           log.error("error framing incoming bytes", e)
-          context.become(closing(DoneWithQueryExecution.error(e)))
+          context.become(closing(DoneWithQueryExecution.error(traceId, e)))
       } finally {
         connection ! ResumeReading
       }
@@ -282,13 +285,13 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       //auth cmd failed
       case Failure(e) ⇒
         trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
-        context.become(closing(DoneWithQueryExecution.error(e)))
+        context.become(closing(DoneWithQueryExecution.error(traceId, e)))
 
       //auth cmd succeded
       case Success(token: AuthenticationActor.Token) ⇒
         trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
         self ! OutputChunk(Vector(token))
-        self ! DoneWithQueryExecution.success
+        self ! DoneWithQueryExecution.success(traceId)
         context.become(materialized)
 
       case ev: DoneWithQueryExecution ⇒

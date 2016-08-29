@@ -71,8 +71,8 @@ class PrestoPublisher(traceId: String, query: String,
                       maxRetries: Int,
                       retryIn: FiniteDuration,
                       retryMultiplier: Int,
-                      retryErrors: Either[List[Long], Unit],
-                      ctx: RequestContext)
+                      retryErrors: Either[List[Long], Unit])
+                     (implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
   import Presto._

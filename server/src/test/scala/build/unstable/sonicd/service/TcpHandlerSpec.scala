@@ -49,6 +49,7 @@ class TcpHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   import Fixture._
+  implicit val ctx: RequestContext = RequestContext("test-trace-id", None)
 
   def this() = this(ActorSystem("TcpHandlerSpec"))
 

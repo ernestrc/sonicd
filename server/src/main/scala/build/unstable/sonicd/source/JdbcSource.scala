@@ -54,8 +54,8 @@ class JdbcPublisher(query: String,
                     driver: String,
                     executorProps: (Connection, Statement) ⇒ Props,
                     connections: ActorRef,
-                    initializationStmts: List[String],
-                    ctx: RequestContext)
+                    initializationStmts: List[String])
+                   (implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
@@ -142,7 +142,7 @@ class JdbcPublisher(query: String,
     //first time client requests
     case Request(n) ⇒
       trace(log, ctx.traceId, GetJdbcHandle, Variation.Attempt, "")
-      connections ! JdbcConnectionsHandler.GetJdbcHandle(isSelect(query), driver, dbUrl, user, password)
+      connections ! JdbcConnectionsHandler.GetJdbcHandle(isSelect(query), driver, dbUrl, user, password, ctx)
       log.debug("waiting for handle of {}", dbUrl)
       context.become(waitingForHandle, discardOld = false)
 
@@ -155,8 +155,8 @@ class JdbcPublisher(query: String,
 class JdbcExecutor(query: String,
                    conn: Connection,
                    stmt: Statement,
-                   initializationStmts: List[String],
-                   ctx: RequestContext) extends Actor with SonicdLogging {
+                   initializationStmts: List[String])
+                  (implicit ctx: RequestContext) extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -361,7 +361,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
         case e: Exception ⇒
       }
 
-    case cmd@JdbcConnectionsHandler.GetJdbcHandle(isQuery, driver, url, user, password) ⇒
+    case cmd@JdbcConnectionsHandler.GetJdbcHandle(isQuery, driver, url, user, password, ctx) ⇒
       try {
         val conn: Connection = {
           //register driver
@@ -414,7 +414,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
       } catch {
         case e: Exception ⇒
           error(log, e, "error when preparing connection/statement")
-          sender() ! DoneWithQueryExecution.error(e)
+          sender() ! DoneWithQueryExecution.error(ctx.traceId, e)
       }
   }
 }
@@ -422,7 +422,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
 object JdbcConnectionsHandler {
   val actorName = "jdbconn"
 
-  case class GetJdbcHandle(isQuery: Boolean, driver: String, url: String, user: String, password: String)
+  case class GetJdbcHandle(isQuery: Boolean, driver: String, url: String, user: String, password: String, ctx: RequestContext)
 
   case class JdbcHandle(conn: Connection, stmt: Statement)
 

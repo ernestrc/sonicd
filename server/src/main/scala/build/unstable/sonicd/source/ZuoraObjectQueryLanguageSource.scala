@@ -64,7 +64,7 @@ class ZuoraObjectQueryLanguageSource(query: build.unstable.sonicd.model.Query, a
 }
 
 class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
-                    auth: ZuoraAuth, batchSize: Int, ctx: RequestContext)
+                    auth: ZuoraAuth, batchSize: Int)(implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with ActorLogging {
 
   import ZuoraObjectQueryLanguageSource._

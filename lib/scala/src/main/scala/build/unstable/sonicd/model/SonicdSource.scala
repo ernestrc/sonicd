@@ -260,7 +260,8 @@ object SonicdSource extends SonicdLogging {
         f ⇒
           f.map {
             case d: DoneWithQueryExecution ⇒ d
-            case m ⇒ DoneWithQueryExecution.error(new Exception(s"protocol error: unknown last message: $m"))
+            case m ⇒ DoneWithQueryExecution.error(withTraceId.traceId.get,
+              new Exception(s"protocol error: unknown last message: $m"))
           }
       }
 

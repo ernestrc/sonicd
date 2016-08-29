@@ -32,6 +32,8 @@ class PrestoSourceSpec(_system: ActorSystem)
 
   def this() = this(ActorSystem("PrestoSourceSpec"))
 
+  implicit val ctx: RequestContext = RequestContext("test-trace-id", None)
+
   implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system))
 
   val mockConfig =

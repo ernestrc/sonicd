@@ -48,11 +48,11 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
       if (isAuthorized(user, source.securityLevel, clientAddress)) {
         handler ! source.handlerProps
-      } else handler ! DoneWithQueryExecution.error(new UnauthorizedException(user, clientAddress))
+      } else handler ! DoneWithQueryExecution.error(q.traceId.get, new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
         error(log, e, "error when preparing stream materialization")
-        handler ! DoneWithQueryExecution.error(e)
+        handler ! DoneWithQueryExecution.error(q.traceId.get, e)
     }
   }
 
@@ -78,8 +78,8 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   override def receive: Receive = {
 
-    case TokenValidationResult(Failure(e), _, handler, _) ⇒
-      handler ! DoneWithQueryExecution.error(e)
+    case TokenValidationResult(Failure(e), q, handler, _) ⇒
+      handler ! DoneWithQueryExecution.error(q.traceId.get, e)
 
     case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
       prepareMaterialization(handler, query, Some(user), clientAddress)

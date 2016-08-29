@@ -30,7 +30,7 @@ class SyntheticSource(query: Query, actorContext: ActorContext, context: Request
 }
 
 class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], progressWait: Int,
-                         query: String, indexed: Boolean, schema: Option[JsObject], ctx: RequestContext)
+                         query: String, indexed: Boolean, schema: Option[JsObject])(implicit ctx: RequestContext)
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
   import SyntheticPublisher._

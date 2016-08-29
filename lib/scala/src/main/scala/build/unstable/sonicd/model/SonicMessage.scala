@@ -78,20 +78,22 @@ object QueryProgress {
   val Finished = 4
 }
 
-case class DoneWithQueryExecution(error: Option[Throwable] = None) extends SonicMessage {
+case class DoneWithQueryExecution(traceId: String, error: Option[Throwable] = None) extends SonicMessage {
 
   val success = error.isEmpty
 
   override val eventType = SonicMessage.done
   override val variation: Option[String] = error.map(e ⇒ getStackTrace(e))
-  override val payload: Option[JsValue] = None
+  override val payload: Option[JsValue] = Some(JsObject("trace_id" → JsString.apply(traceId)))
 
 }
 
 object DoneWithQueryExecution {
-  val success: DoneWithQueryExecution = DoneWithQueryExecution(None)
+  def success(traceId: String): DoneWithQueryExecution = DoneWithQueryExecution(traceId)
+  def success(implicit ctx: RequestContext) = DoneWithQueryExecution(ctx.traceId)
 
-  def error(e: Throwable): DoneWithQueryExecution = DoneWithQueryExecution(Some(e))
+  def error(traceId: String, e: Throwable): DoneWithQueryExecution = DoneWithQueryExecution(traceId, Some(e))
+  def error(e: Throwable)(implicit ctx: RequestContext): DoneWithQueryExecution = DoneWithQueryExecution(ctx.traceId, Some(e))
 }
 
 //events sent by the client to the server
@@ -178,7 +180,7 @@ object SonicMessage {
         val traceId = p.get("trace_id").flatMap(_.convertTo[Option[String]])
         val token = p.get("auth").flatMap(_.convertTo[Option[String]])
         new Query(None, traceId, token, vari.get, p("config"))
-      case Some(`done`) ⇒ DoneWithQueryExecution(vari.map(fromStackTrace))
+      case Some(`done`) ⇒ DoneWithQueryExecution(pay.get.asJsObject.fields("trace_id").convertTo[String], vari.map(fromStackTrace))
       case Some(e) ⇒ throw new Exception(s"unexpected event type '$e'")
       case None ⇒ throw new Exception("no 'e' event_type")
     }
