@@ -195,18 +195,20 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
                     };
                 }
             }
-            Ok(SonicMessage::Done(None)) => {
-                debug!("stream completed successfully");
+            Ok(SonicMessage::Done(None, trace_id)) => {
+                debug!("stream '{}' completed successfully", trace_id);
                 res = Ok(());
                 break;
             }
-            Ok(SonicMessage::Done(Some(e))) => {
-                debug!("stream completed with error {:?}", &e);
-                res = Err(e.into());
+            Ok(SonicMessage::Done(Some(cause), trace_id)) => {
+                debug!("stream '{}' failed with error {:?}", &cause, trace_id);
+                let error: Error = cause.into();
+                res = Err(error).chain_err(|| format!("error when running query; trace_id: {}", trace_id));
                 break;
             }
             Err(e) => {
-                res = Err(e.into());
+                let error: Error = e.into();
+                res = Err(error).chain_err(|| "unexpected channel recv error");
                 break;
             }
             Ok(a) => debug!("ignoring msg {:?}", a),
@@ -242,11 +244,12 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
                 token = try!(util::parse_token(data));
                 break;
             }
-            Ok(SonicMessage::Done(None)) => {
-                return Err("protocol error: no data returned from the server".into());
+            Ok(SonicMessage::Done(None, trace_id)) => {
+                return Err(format!("protocol error: server returned no data for '{}'", trace_id).into());
             },
-            Ok(SonicMessage::Done(Some(e))) => {
-                return Err(e.into());
+            Ok(SonicMessage::Done(Some(cause), trace_id)) => {
+                let error: Error = cause.into();
+                return Err(error).chain_err(|| format!("error when running login command; trace_id: {}", trace_id));
             },
             Ok(_) => {},
             Err(e) => {

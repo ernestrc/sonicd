@@ -101,11 +101,14 @@ impl From<SonicMessage> for ProtoSonicMessage {
                     payload: Some(Value::Array(data)),
                 }
             },
-            SonicMessage::Done(res) => {
+            SonicMessage::Done(res, trace_id) => {
+                let mut payload = BTreeMap::new();
+
+                payload.insert("trace_id".to_owned(), Value::String(trace_id));
                 ProtoSonicMessage {
                     event_type: MessageKind::DoneKind,
                     variation: res,
-                    payload: None,
+                    payload: Some(Value::Object(payload)),
                 }
             }
         }
@@ -186,7 +189,15 @@ impl ProtoSonicMessage {
                     s => try!(Err(ErrorKind::Proto(format!("payload is not an array: {:?}", s)))),
                 }
             },
-            MessageKind::DoneKind => Ok(SonicMessage::Done(variation)),
+            MessageKind::DoneKind => {
+                let payload = try!(get_payload(payload));
+
+                let trace_id = try!(payload.get("trace_id")
+                    .and_then(|s| s.as_str().map(|s| s.to_owned()))
+                    .ok_or_else(|| ErrorKind::Proto("missing 'trace_id' in payload".to_owned())));
+
+                Ok(SonicMessage::Done(variation, trace_id))
+            },
             MessageKind::QueryKind => {
                 let payload = try!(get_payload(payload));
 

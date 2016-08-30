@@ -94,17 +94,17 @@ pub enum SonicMessage {
 
     OutputChunk(Vec<Value>),
 
-    Done(Option<String>),
+    Done(Option<String>, String),
 }
 
 impl SonicMessage {
     // DoneWithQueryExecution error
-    pub fn done<T>(e: Result<T>) -> SonicMessage {
+    pub fn done<T>(e: Result<T>, trace_id: String) -> SonicMessage {
         let variation = match e {
             Ok(_) => None,
             Err(e) => Some(format!("{}", e).to_owned()),
         };
-        SonicMessage::Done(variation).into()
+        SonicMessage::Done(variation, trace_id).into()
     }
 
     pub fn into_json(self) -> Value {
