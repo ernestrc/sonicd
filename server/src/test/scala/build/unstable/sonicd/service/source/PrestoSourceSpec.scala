@@ -379,7 +379,7 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectDone(pub, success = false)
     }
 
-    "should retry up to a maximum of n retries if error is INTERNAL_ERROR or EXTERNAL_ERROR and 'retry-errors' config is 'all'" in {
+    "should retry up to a maximum of n retries if error is INTERNAL_ERROR or EXTERNAL and 'retry-errors' config is 'all'" in {
       val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond,
         retryMultiplier = -1, retryErrors = Right.apply(()))
       pub ! ActorPublisherMessage.Request(100)
@@ -396,7 +396,7 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectMsgType[HttpRequestCommand]
 
       pub ! QueryResults("", "", None, None, None, None,
-        defaultStats.copy(state = "FAILED"), Some(error.copy(errorType = "EXTERNAL_ERROR")), None, None)
+        defaultStats.copy(state = "FAILED"), Some(error.copy(errorType = "EXTERNAL")), None, None)
 
       expectMsgType[HttpRequestCommand]
 
