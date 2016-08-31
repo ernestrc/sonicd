@@ -12,7 +12,7 @@ object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.6"
-  val sonicdV = "0.5.3"
+  val sonicdV = "0.5.4"
 
   val commonSettings = Seq(
     organization := "build.unstable",
