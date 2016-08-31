@@ -269,15 +269,16 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     val tcpHandler = newHandlerOnStreamingState(syntheticPubProps)
     watch(tcpHandler)
 
-    val writes = (0 until 103).map { i ⇒
+    val writes = (0 until 104).map { i ⇒
       tcpHandler ! TcpHandler.Ack(i + 1)
       expectMsgClass(classOf[Tcp.Write])
     }
 
     val msgs = writes.map { case w: Tcp.Write ⇒ SonicMessage.fromBytes(w.data.splitAt(4)._2) }
 
-    msgs.head shouldBe an[TypeMetadata]
-    val (progress, tail) = msgs.tail.splitAt(100)
+    msgs.head shouldBe an[QueryStarted]
+    msgs.tail.head shouldBe an[TypeMetadata]
+    val (progress, tail) = msgs.tail.tail.splitAt(100)
     progress.tail.foreach(_.getClass() shouldBe classOf[QueryProgress])
     tail.head shouldBe a[OutputChunk]
     tail.tail.head shouldBe a[DoneWithQueryExecution]

@@ -182,6 +182,9 @@ with ImplicitSubscriber with ImplicitGuardian {
     "should materialize stream and propagates messages to downstream subscriber" in {
       val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
 
+      wsHandler ! Request(1)
+      expectMsgClass(classOf[QueryStarted])
+
       val msgs = (0 until 103).map { i ⇒
         wsHandler ! Request(1)
         expectMsgClass(classOf[SonicMessage])

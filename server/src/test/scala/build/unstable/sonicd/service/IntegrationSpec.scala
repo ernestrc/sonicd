@@ -79,7 +79,7 @@ with JsonProtocol with SonicdLogging {
       val fDone = Await.result(future, 20.seconds)
 
       assert(sDone.success)
-      fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+      fDone.length shouldBe 113 //1 started + 1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
     }
 
     "run a query against a source that is configured server side" in {
@@ -93,7 +93,7 @@ with JsonProtocol with SonicdLogging {
       assert(sDone.success)
 
       val fDone = Await.result(future, 20.seconds)
-      fDone.length shouldBe 112 //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+      fDone.length shouldBe 113 //1 started + 1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
     }
 
     val verifier = new JWTVerifier(SonicdConfig.AUTH_SECRET)
@@ -135,7 +135,7 @@ with JsonProtocol with SonicdLogging {
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
 
       val fDone = Await.result(future, 20.seconds)
-      fDone.length shouldBe 112
+      fDone.length shouldBe 113
     }
 
     "reject a query of a source that requires authentication if user is authenticated with a lower authorization level" in {
@@ -157,7 +157,7 @@ with JsonProtocol with SonicdLogging {
       val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
 
       val fDone = Await.result(future, 20.seconds)
-      fDone.length shouldBe 112
+      fDone.length shouldBe 113
     }
 
     "reject a query of a source that requires authentication and has a whitelist of ips but user ip is not in the list" in {
