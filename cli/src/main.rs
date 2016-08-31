@@ -45,20 +45,20 @@ const USAGE: &'static str = "
  88888P'  \"Y88P\"  888  888 888  \"Y8888P
 
 Usage:
-  sonic <source> [-d <foo=bar>...] [options] -e <query>
-  sonic <source> [-d <foo=bar>...] [options] -f <file>
+  sonic <source> [options] -e <query>
+  sonic <source> [options] -f <file>
   sonic login [options]
   sonic -h | --help
   sonic --version
 
 Options:
-  -e, --execute         Run command literal
-  -f, --file            Run command from file
-  -c <config>           Use a different configuration file (default: $HOME/.sonicrc)
-  -d <foo=bar>          Replace variable in query in the form of `${foo}` with value `var`
+  -e, --execute         Run query literal
+  -f, --file            Run file contents as query
+  -c <config>           Override default configuration file ($HOME/.sonicrc)
+  -d <foo=var> ...      Replace variable in query in the form of `${foo}` with value `var`
   -r, --rows-only       Skip printing column names
-  -S, --silent          Skip printing query progress bar
-  -v, --verbose         Enable debug logging
+  -S, --silent          Disable progress bar
+  -v, --verbose         Enable debug level logging
   -h, --help            Print this message
   --version             Print version
 ";
