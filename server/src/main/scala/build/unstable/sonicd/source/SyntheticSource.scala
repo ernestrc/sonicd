@@ -42,6 +42,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   val rdm = seed.map(s ⇒ new Random(s)).getOrElse(new Random())
 
   var streamed = 0L
+  var started = false
   val preTarget = 101
   //+100 of progress +1 metadata
   val _query = Try(query.trim().toInt)
@@ -133,8 +134,16 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
       onNext(DoneWithQueryExecution.error(new Exception("controlled exception test")))
       onCompleteThenStop()
 
-    case Request(n) if streamed == 0L ⇒
+    case Request(n) if !started ⇒
       log.info(s"starting synthetic stream with target of '$target'")
+      started = true
+      onNext(QueryStarted(ctx.traceId))
+
+      if (n > 1) {
+        receive(Request(n - 1))
+      }
+
+    case Request(n) if streamed == 0L ⇒
       lazy val m = TypeMetadata(Vector("data" → JsNumber(0)))
 
       if (schema.isDefined) {

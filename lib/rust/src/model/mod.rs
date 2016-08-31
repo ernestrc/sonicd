@@ -78,6 +78,8 @@ pub enum SonicMessage {
     // client ~> server
     Acknowledge,
 
+    QueryStarted(String),
+
     QueryMsg(Query),
 
     AuthenticateMsg(Authenticate),

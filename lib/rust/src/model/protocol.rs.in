@@ -7,6 +7,8 @@ use super::*;
 pub enum MessageKind {
     #[serde(rename="A")]
     AcknowledgeKind,
+    #[serde(rename="S")]
+    QueryStartedKind,
     #[serde(rename="Q")]
     QueryKind,
     #[serde(rename="H")]
@@ -101,6 +103,13 @@ impl From<SonicMessage> for ProtoSonicMessage {
                     payload: Some(Value::Array(data)),
                 }
             },
+            SonicMessage::QueryStarted(trace_id) => {
+                ProtoSonicMessage {
+                    event_type: MessageKind::QueryStartedKind,
+                    variation: Some(trace_id),
+                    payload: None,
+                }
+            },
             SonicMessage::Done(res, trace_id) => {
                 let mut payload = BTreeMap::new();
 
@@ -188,6 +197,12 @@ impl ProtoSonicMessage {
                     Some(Value::Array(data)) => Ok(SonicMessage::OutputChunk(data)),
                     s => try!(Err(ErrorKind::Proto(format!("payload is not an array: {:?}", s)))),
                 }
+            },
+            MessageKind::QueryStartedKind => {
+                let trace_id = try!(variation
+                                 .ok_or_else(|| ErrorKind::Proto("QueryStarted 'variation' field is empty".to_owned())));
+
+                Ok(SonicMessage::QueryStarted(trace_id))
             },
             MessageKind::DoneKind => {
                 let payload = try!(get_payload(payload));

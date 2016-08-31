@@ -29,7 +29,7 @@ use std::cell::RefCell;
 
 use docopt::Docopt;
 use pbr::ProgressBar;
-use sonicd::{SonicMessage, Authenticate};
+use sonicd::{Authenticate, SonicMessage};
 use rpassword::read_password;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -126,7 +126,13 @@ fn show<T: Write>(pb: &mut ProgressBar<T>) {
     pb.show_message = true;
 }
 
-fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bool) -> Result<()> {
+fn exec(
+    host: &str,
+    port: &u16,
+    query: SonicMessage,
+    rows_only: bool,
+    silent: bool
+) -> Result<()> {
 
     let out = RefCell::new(stdout());
     let mut buf: Vec<SonicMessage> = Vec::new();
@@ -144,10 +150,12 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
         for msg in b.drain(..len) {
             let cols = match msg {
                 SonicMessage::OutputChunk(data) => {
-                    data.iter().fold(String::new(), |acc, val| format!("{}{:?}\t", acc, val))
+                    data.iter().fold(String::new(),
+                                     |acc, val| format!("{}{:?}\t", acc, val))
                 }
                 SonicMessage::TypeMetadata(data) => {
-                    data.iter().fold(String::new(), |acc, col| format!("{}{:?}\t", acc, col.0))
+                    data.iter().fold(String::new(),
+                                     |acc, col| format!("{}{:?}\t", acc, col.0))
                 }
                 _ => panic!("not possible!"),
             };
@@ -162,6 +170,9 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
 
     loop {
         match try!(rx.recv()) {
+            Ok(SonicMessage::QueryStarted(trace_id)) => {
+                debug!("started query with trace_id: {}", trace_id);
+            }
             Ok(msg @ SonicMessage::TypeMetadata(_)) => {
                 if !rows_only {
                     buf.push(msg);
@@ -203,7 +214,9 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
             Ok(SonicMessage::Done(Some(cause), trace_id)) => {
                 debug!("stream '{}' failed with error {:?}", &cause, trace_id);
                 let error: Error = cause.into();
-                res = Err(error).chain_err(|| format!("error when running query; trace_id: {}", trace_id));
+                res = Err(error).chain_err(|| {
+                    format!("error when running query; trace_id: {}", trace_id)
+                });
                 break;
             }
             Err(e) => {
@@ -222,8 +235,7 @@ fn exec(host: &str, port: &u16, query: SonicMessage, rows_only: bool, silent: bo
 
 pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
-    let user = std::env::var("USER")
-        .unwrap_or("unknown".to_owned());
+    let user = std::env::var("USER").unwrap_or("unknown".to_owned());
 
     try!(stdout().write(b"Enter key: "));
     try!(stdout().flush());
@@ -232,7 +244,9 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
 
     let (tx, rx) = ::std::sync::mpsc::channel();
 
-    let cmd = SonicMessage::AuthenticateMsg(Authenticate::new(user.to_owned(), key, None));
+    let cmd = SonicMessage::AuthenticateMsg(Authenticate::new(user.to_owned(),
+                                                              key,
+                                                              None));
 
     try!(sonicd::stream((host, *tcp_port), cmd, tx));
 
@@ -245,16 +259,20 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
                 break;
             }
             Ok(SonicMessage::Done(None, trace_id)) => {
-                return Err(format!("protocol error: server returned no data for '{}'", trace_id).into());
-            },
+                return Err(format!("protocol error: server returned no data \
+                                    for '{}'",
+                                   trace_id)
+                    .into());
+            }
             Ok(SonicMessage::Done(Some(cause), trace_id)) => {
                 let error: Error = cause.into();
-                return Err(error).chain_err(|| format!("error when running login command; trace_id: {}", trace_id));
-            },
-            Ok(_) => {},
-            Err(e) => {
-                return Err(e.into())
+                return Err(error).chain_err(|| {
+                    format!("error when running login command; trace_id: {}",
+                            trace_id)
+                });
             }
+            Ok(_) => {}
+            Err(e) => return Err(e.into()),
         };
     }
 
@@ -263,7 +281,10 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
     let path = util::get_config_path();
     let config = try!(util::read_config(&path));
 
-    let new_config = util::ClientConfig { auth: Some(token), ..config };
+    let new_config = util::ClientConfig {
+        auth: Some(token),
+        ..config
+    };
 
     try!(util::write_config(&new_config, &path));
 
@@ -286,7 +307,8 @@ fn _main(args: Args) -> Result<()> {
                flag_version,
                .. } = args;
 
-    let util::ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c != "" {
+    let util::ClientConfig { sonicd, tcp_port, sources, auth } = if flag_c !=
+                                                                    "" {
         debug!("sourcing passed config in path '{:?}'", &flag_c);
         try!(util::read_config(&PathBuf::from(flag_c)))
     } else {
@@ -296,7 +318,8 @@ fn _main(args: Args) -> Result<()> {
 
     if flag_file {
 
-        let query_str = try!(util::read_file_contents(&PathBuf::from(&arg_file)));
+        let query_str =
+            try!(util::read_file_contents(&PathBuf::from(&arg_file)));
         let split = try!(util::split_key_value(&flag_d));
         let injected = try!(util::inject_vars(&query_str, &split));
         let query = try!(util::build(arg_source, sources, auth, injected));
@@ -330,7 +353,9 @@ fn _main(args: Args) -> Result<()> {
 
 fn main() {
 
-    let args: Args = Docopt::new(USAGE).and_then(|d| d.decode()).unwrap_or_else(|e| e.exit());
+    let args: Args = Docopt::new(USAGE)
+        .and_then(|d| d.decode())
+        .unwrap_or_else(|e| e.exit());
 
     let verbose: bool = args.flag_verbose;
 

@@ -78,6 +78,12 @@ object QueryProgress {
   val Finished = 4
 }
 
+case class QueryStarted(traceId: String) extends SonicMessage {
+  override val variation: Option[String] = Some(traceId)
+  override val payload: Option[JsValue] = None
+  override val eventType: String = SonicMessage.started
+}
+
 case class DoneWithQueryExecution(traceId: String, error: Option[Throwable] = None) extends SonicMessage {
 
   val success = error.isEmpty
@@ -133,6 +139,7 @@ object SonicMessage {
 
   //messages
   val auth = "H"
+  val started = "S"
   val query = "Q"
   val meta = "T"
   val progress = "P"
@@ -155,6 +162,7 @@ object SonicMessage {
         case a ⇒ throw new Exception(s"expecting JsArray found $a")
       }
       case Some(`ack`) ⇒ ClientAcknowledge
+      case Some(`started`) ⇒ QueryStarted(vari.get)
       case Some(`auth`) ⇒
         val fields = pay.get.asJsObject.fields
         Authenticate(
