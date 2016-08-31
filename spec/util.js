@@ -1,7 +1,8 @@
 var assert = require('chai').assert;
 
 module.exports.testHappyPathSingle = function (client, query, n, done) {
-  client.run(query, function(err, data) {
+  client.run(query, function(err, data, traceId) {
+    assert(typeof traceId !== 'undefined');
     if (err) {
       done(err);
       return;
@@ -17,8 +18,10 @@ module.exports.testHappyPathSingle = function (client, query, n, done) {
 module.exports.testHappyPath = function (client, query, n, done) {
   var stream;
   var _done = 0;
+  var traceId;
 
-  client.run(query, function(err, data) {
+  client.run(query, function(err, data, traceId) {
+    assert(typeof traceId !== 'undefined');
     if (err) {
       done(err);
       return;
@@ -33,6 +36,10 @@ module.exports.testHappyPath = function (client, query, n, done) {
 
   stream = client.stream(query);
 
+  stream.on('trace', function(id) {
+    traceId = id;
+  });
+
   stream.on('error', function(err) {
     if (err) {
       done(err);
@@ -42,6 +49,7 @@ module.exports.testHappyPath = function (client, query, n, done) {
   });
 
   stream.on('done', function(err) {
+    assert(typeof traceId !== 'undefined');
     if (err) {
       done(err);
     } else if (_done === 1) {
@@ -55,8 +63,10 @@ module.exports.testHappyPath = function (client, query, n, done) {
 module.exports.expectError = function(client, query, done) {
   var _done = 0;
   var stream;
+  var traceId;
 
-  client.run(query, function(err) {
+  client.run(query, function(err, traceId) {
+    assert(typeof traceId !== 'undefined');
     if (err) {
       if (done) {
         if (_done === 1) {
@@ -72,6 +82,10 @@ module.exports.expectError = function(client, query, done) {
 
   stream = client.stream(query);
 
+  stream.on('trace', function(id) {
+    traceId = id;
+  });
+
   stream.on('error', function(err) {
     if (err) {
       if (done) {
@@ -83,6 +97,7 @@ module.exports.expectError = function(client, query, done) {
   });
 
   stream.on('done', function(err) {
+    assert(typeof traceId !== 'undefined');
     if (err) {
       if (done) {
         if (_done === 1) {
