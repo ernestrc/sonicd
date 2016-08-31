@@ -222,7 +222,7 @@ class PrestoPublisher(traceId: String, query: String,
                 }))
 
           } else {
-            debug(log, "error code is {}, skipping retry", error.errorCode)
+            debug(log, "error_code: {}; error_type: {}; skipping retry", error.errorCode, error.errorType)
             context.become(terminating(DoneWithQueryExecution.error(e)))
           }
 
@@ -320,7 +320,7 @@ object Presto {
                           failureInfo: FailureInfo) {
     def isInternal: Boolean = errorType == "INTERNAL_ERROR"
 
-    def isExternal: Boolean = errorType == "EXTERNAL_ERROR"
+    def isExternal: Boolean = errorType == "EXTERNAL"
   }
 
   case class QueryStats(elapsedTime: String,
