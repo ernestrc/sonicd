@@ -7,6 +7,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestKit}
+import build.unstable.sonic._
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
@@ -183,7 +184,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
 
       wsHandler ! Request(1)
-      expectMsgClass(classOf[QueryStarted])
+      expectMsgClass(classOf[StreamStarted])
 
       val msgs = (0 until 103).map { i ⇒
         wsHandler ! Request(1)

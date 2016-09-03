@@ -3,8 +3,8 @@ package build.unstable.sonicd.source
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
+import build.unstable.sonic._
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{DataSource, Query, RequestContext, SonicMessage}
 import spray.json._
 
 import scala.annotation.tailrec
@@ -34,7 +34,6 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
 
   import SyntheticPublisher._
-  import build.unstable.sonicd.model._
 
   //in case this publisher never gets subscribed to
   override def subscriptionTimeout: Duration = 10.seconds
@@ -137,7 +136,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
     case Request(n) if !started ⇒
       log.info(s"starting synthetic stream with target of '$target'")
       started = true
-      onNext(QueryStarted(ctx.traceId))
+      onNext(StreamStarted(ctx.traceId))
 
       if (n > 1) {
         receive(Request(n - 1))

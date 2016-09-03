@@ -8,6 +8,8 @@ import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.io.Tcp
 import akka.stream.scaladsl.Sink
 import akka.testkit.TestKit
+import akka.util.Timeout
+import build.unstable.sonic._
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.api.AkkaApi
 import build.unstable.sonicd.auth.ApiKey
@@ -51,6 +53,8 @@ with JsonProtocol with SonicdLogging {
   val tcpAddr = new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT)
 
   tcpIoService.tell(Tcp.Bind(tcpService, tcpAddr, options = Nil, pullMode = true), tcpService)
+  implicit val timeout: Timeout = 15.seconds
+  implicit val ctx: RequestContext  = RequestContext("IntegrationSpec", None)
 
   Class.forName(H2Driver)
   val H2Url = s"jdbc:h2:mem:IntegrationSpec"
@@ -71,9 +75,9 @@ with JsonProtocol with SonicdLogging {
   "sonicd tcp api" should {
     "run a simple query using the tcp api" in {
 
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
       val stream: Future[DoneWithQueryExecution] =
-        SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
+        SonicSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
 
       val sDone = Await.result(stream, 20.seconds)
       val fDone = Await.result(future, 20.seconds)
@@ -85,9 +89,9 @@ with JsonProtocol with SonicdLogging {
     "run a query against a source that is configured server side" in {
 
       val syntheticQuery = new Query(None, None, None, "10", JsString("test_server_config"))
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
       val stream: Future[DoneWithQueryExecution] =
-        SonicdSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
+        SonicSource.stream(tcpAddr, syntheticQuery).to(Sink.ignore).run()
 
       val sDone = Await.result(stream, 20.seconds)
       assert(sDone.success)
@@ -102,7 +106,7 @@ with JsonProtocol with SonicdLogging {
     "authenticate a user" in {
 
       val future: Future[String] =
-        SonicdSource.authenticate("serrallonga", SonicdConfig.API_KEYS.head.key, tcpAddr)
+        SonicSource.authenticate("serrallonga", SonicdConfig.API_KEYS.head.key, tcpAddr)
 
       val token = Await.result(future, 20.seconds)
       assert(!verifier.verify(token).isEmpty)
@@ -110,7 +114,7 @@ with JsonProtocol with SonicdLogging {
 
     "reject a user authentication attempt if apiKey is invalid" in {
 
-      val future: Future[String] = SonicdSource.authenticate("serrallonga", "INVALID", tcpAddr)
+      val future: Future[String] = SonicSource.authenticate("serrallonga", "INVALID", tcpAddr)
 
       val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
@@ -120,7 +124,7 @@ with JsonProtocol with SonicdLogging {
 
     "reject a query of a source that requires authentication if user is unauthenticated" in {
       val syntheticQuery = Query("10", JsString("secure_server_config"), None)
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
 
       val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
@@ -132,7 +136,7 @@ with JsonProtocol with SonicdLogging {
       val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 5, None, None).toJWTClaims("bandit"))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
 
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
 
       val fDone = Await.result(future, 20.seconds)
       fDone.length shouldBe 113
@@ -141,7 +145,7 @@ with JsonProtocol with SonicdLogging {
     "reject a query of a source that requires authentication if user is authenticated with a lower authorization level" in {
       val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 4, None, None).toJWTClaims("bandit"))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
 
       val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
@@ -154,7 +158,7 @@ with JsonProtocol with SonicdLogging {
       val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 6,
         Some(InetAddress.getByName("127.0.0.1") :: Nil), None).toJWTClaims("bandit"))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
 
       val fDone = Await.result(future, 20.seconds)
       fDone.length shouldBe 113
@@ -164,7 +168,7 @@ with JsonProtocol with SonicdLogging {
       val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 6,
         Some(InetAddress.getByName("192.168.1.17") :: Nil), None).toJWTClaims("bandit"))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
-      val future: Future[Vector[SonicMessage]] = SonicdSource.run(syntheticQuery, tcpAddr)
+      val future: Future[Vector[SonicMessage]] = SonicSource.run(syntheticQuery, tcpAddr)
 
       intercept[Throwable]{
         Await.result(future, 20.seconds)
@@ -175,9 +179,9 @@ with JsonProtocol with SonicdLogging {
       val query = Query("select * from nonesense", H2Config, None) //table nonesense doesn't exist
 
       val future: Future[Vector[SonicMessage]] =
-        SonicdSource.run(query, tcpAddr)
+        SonicSource.run(query, tcpAddr)
       val stream: Future[DoneWithQueryExecution] =
-        SonicdSource.stream(tcpAddr, query).to(Sink.ignore).run()
+        SonicSource.stream(tcpAddr, query).to(Sink.ignore).run()
 
       val sThrown = intercept[Throwable] {
           Await.result(stream, 20.seconds)
@@ -194,10 +198,10 @@ with JsonProtocol with SonicdLogging {
     "should bubble exception thrown by the tcp stage" in {
 
       val future: Future[Vector[SonicMessage]] =
-        SonicdSource.run(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
+        SonicSource.run(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
 
       val stream: Future[DoneWithQueryExecution] =
-        SonicdSource.stream(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
+        SonicSource.stream(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
           .to(Sink.ignore).run()
 
       val thrown = intercept[java.net.ConnectThrowable] {

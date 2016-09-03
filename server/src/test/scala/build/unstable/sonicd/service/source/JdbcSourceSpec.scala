@@ -5,10 +5,11 @@ import java.sql.{Connection, DriverManager, Statement}
 import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic._
 import build.unstable.sonicd.auth.{ApiKey, ApiUser}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
+import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._

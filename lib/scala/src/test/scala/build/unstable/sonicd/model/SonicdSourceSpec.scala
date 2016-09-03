@@ -2,122 +2,167 @@ package build.unstable.sonicd.model
 
 import java.net.InetSocketAddress
 
-import akka.NotUsed
-import akka.actor.ActorSystem
-import akka.stream._
-import akka.stream.scaladsl._
-import akka.util.ByteString
-import build.unstable.sonicd.model.SonicdSource.{IncompleteStreamException, SonicProtocolStage}
-import org.scalatest.concurrent._
+import akka.actor.{ActorSystem, _}
+import akka.io.Tcp
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
+import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.SonicSupervisor.NewPublisher
+import build.unstable.sonic._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
+import spray.json._
+import JsonProtocol._
 
-import scala.concurrent.Future
+import scala.concurrent.duration._
 
-class SonicdSourceSpec extends WordSpecLike with Matchers with BeforeAndAfterAll with ScalaFutures {
+class SonicdSourceSpec(_system: ActorSystem)
+  extends TestKit(_system) with WordSpecLike
+    with Matchers with BeforeAndAfterAll with ImplicitSender
+    with ImplicitSubscriber with HandlerUtils {
+
+  override protected def afterAll(): Unit = {
+    materializer.shutdown()
+    TestKit.shutdownActorSystem(system)
+  }
+
+  def this() = this(ActorSystem("PrestoSourceSpec"))
+
+  val traceId = "test-trace-id"
+  implicit val ctx: RequestContext = RequestContext(traceId, None)
+
+  implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system))
 
   val tcpError = "TCPBOOM"
 
   class TcpException extends Exception(tcpError)
 
-  implicit val system = ActorSystem(this.getClass.getSimpleName)
-  implicit val mat = ActorMaterializer(ActorMaterializerSettings(system))
+  val mockConfig =
+    s"""
+       | {
+       |  "port" : 8080,
+       |  "host" : "sonicd.unstable.build",
+       |  "class" : "SonicSource"
+       | }
+    """.stripMargin.parseJson.asJsObject
 
-  val clientProtocol: Graph[BidiShape[ByteString, ByteString, SonicMessage, SonicMessage], _] =
-    SonicProtocolStage("1")
+  val query1 = """100"""
+  val sonicQuery1 = new Query(Some(1L), Some(traceId), None, query1, mockConfig)
 
-  val tcpFailure1: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
-    Flow.fromSinkAndSource(Sink.ignore, Source.failed(new TcpException))
-      .mapMaterializedValue(_ ⇒
-        Future.successful(Tcp.OutgoingConnection(new InetSocketAddress(1), new InetSocketAddress(2))))
+  val controller: TestActorRef[TestController] =
+    TestActorRef(Props(classOf[TestController], self).
+      withDispatcher(CallingThreadDispatcher.Id))
 
-  val tcpFailure2: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
-    tcpFailure1.mapMaterializedValue(_ ⇒ Future.failed[Tcp.OutgoingConnection](new TcpException))
+  val testAddr = new InetSocketAddress("0.0.0.0", 3030)
 
-  val foldMessages: Sink[SonicMessage, Future[Vector[SonicMessage]]] =
-    Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty)(_ :+ _)
-
-  override protected def afterAll(): Unit = {
-    system.terminate()
+  def newPublisher(context: RequestContext = ctx,
+                   dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[SonicPublisher] = {
+    val src = new SonicSource(self, sonicQuery1, controller.underlyingActor.context, context)
+    val ref = TestActorRef[SonicPublisher](src.handlerProps.withDispatcher(dispatcher))
+    ActorPublisher(ref).subscribe(subs)
+    watch(ref)
+    ref
   }
 
-  def runTestGraph(queryStage: Source[SonicMessage, NotUsed],
-                   connectionStage: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]],
-                   framingStage: Flow[ByteString, ByteString, NotUsed],
-                   lastStage: Sink[SonicMessage, Future[Vector[SonicMessage]]]): Future[Vector[SonicMessage]] = {
+  "SonicSource" should {
+    "run a simple query" in {
+      val pub = newPublisher()
 
-    RunnableGraph.fromGraph(GraphDSL.create(lastStage) { implicit b ⇒
-      last ⇒
-        import GraphDSL.Implicits._
+      expectMsg(NewPublisher(ctx))
 
-        val conn = b.add(connectionStage)
-        val protocol = b.add(clientProtocol)
-        val framing = b.add(framingStage)
-        val query = b.add(queryStage)
+      pub ! ActorPublisherMessage.Request(1)
+      pub ! Tcp.Connected(testAddr, testAddr)
+      expectMsg(Tcp.Register(pub))
 
-        query ~> protocol.in2
-        protocol.out1 ~> conn
-        protocol.in1 <~ framing <~ conn
-        protocol.out2 ~> last
+      val bytes = SonicSource.lengthPrefixEncode(sonicQuery1.toBytes)
+      val write = Tcp.Write(bytes, SonicPublisher.Ack)
+      expectMsg(write)
 
-        ClosedShape
+      //fail 1
+      pub ! Tcp.CommandFailed(write)
+      expectMsg(Tcp.ResumeWriting)
+      pub ! Tcp.WritingResumed
+      expectMsg(write)
 
-    }).run()
-  }
+      //fail 2
+      pub ! Tcp.CommandFailed(write)
+      expectMsg(Tcp.ResumeWriting)
+      pub ! Tcp.WritingResumed
+      expectMsg(write)
 
-  "SonicProtocolStage" should {
-    "bubble up exception correctly if upstream connection stage fails" in {
-      val f1 = runTestGraph(Source.empty, tcpFailure1, SonicdSource.framingStage, foldMessages)
-      whenReady(f1.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
-      val f2 = runTestGraph(Source.empty, tcpFailure2, SonicdSource.framingStage, foldMessages)
-      whenReady(f2.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
+      //write succeeds
+      pub ! SonicPublisher.Ack
+      expectMsg(Tcp.ResumeReading)
+
+      expectMsg(StreamStarted(sonicQuery1.traceId.get))
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectNoMsg(200.millis)
+
+      //test that framing/buffering is working correctly
+      val prog = QueryProgress(QueryProgress.Started, 0, None, None)
+      val (first, second) = SonicSource.lengthPrefixEncode(prog.toBytes).splitAt(10)
+
+      pub ! Tcp.Received(first)
+      expectMsg(Tcp.ResumeReading)
+      expectNoMsg(200.millis)
+
+      pub ! Tcp.Received(second)
+      expectMsg(prog)
+      expectMsg(Tcp.ResumeReading)
+
+      // test that it respects stream back pressure
+      val out = OutputChunk(Vector.empty[String])
+      val b = SonicSource.lengthPrefixEncode(out.toBytes)
+
+      pub ! Tcp.Received(b)
+      expectMsg(Tcp.ResumeReading)
+      expectNoMsg(200.millis)
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(out)
+
+      //test that it closes on done
+      val done = DoneWithQueryExecution.success
+      val b2 = SonicSource.lengthPrefixEncode(done.toBytes)
+      pub ! Tcp.Received(b2)
+
+      val b3 = SonicSource.lengthPrefixEncode(ClientAcknowledge.toBytes)
+      val write2 = Tcp.Write(b3, SonicPublisher.Ack)
+      expectMsg(write2)
+      pub ! SonicPublisher.Ack
+      expectMsg(Tcp.ResumeReading)
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(done)
+
+      //stream completed
+      expectMsg("complete")
+      expectTerminated(pub)
     }
-    "fail if upstream connection closes before Done event" in {
-      val tcpFlow: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
-        Flow.fromSinkAndSource[ByteString, ByteString](
-        Sink.ignore, Source.single(SonicdSource.lengthPrefixEncode(QueryProgress(QueryProgress.Started, 1, Some(100), None).toBytes)))
-          .mapMaterializedValue(_ ⇒ Future.successful(
-            Tcp.OutgoingConnection(new InetSocketAddress(1), new InetSocketAddress(2))))
 
-      val f = runTestGraph(Source.empty, tcpFlow, SonicdSource.framingStage, foldMessages)
-      whenReady(f.failed) { ex ⇒
-        ex shouldBe an[IncompleteStreamException]
-      }
-    }
-  }
-
-  "run graph method" should {
     "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicdSource.run(Fixture.syntheticQuery, tcpFailure1)
-      whenReady(f1.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
-      val f2 = SonicdSource.run(Fixture.syntheticQuery, tcpFailure2)
-      whenReady(f2.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
-    }
-  }
+      val pub = newPublisher()
 
-  "stream graph method" should {
-    "bubble up exceptions correctly if upstream connection stage fails" in {
-      val f1 = SonicdSource.stream(Fixture.syntheticQuery, tcpFailure1).to(Sink.ignore).run()
-      whenReady(f1.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
-      val f2 = SonicdSource.stream(Fixture.syntheticQuery, tcpFailure2).to(Sink.ignore).run()
-      whenReady(f2.failed) { ex ⇒
-        ex shouldBe an[TcpException]
-        ex.getMessage shouldBe tcpError
-      }
+      expectMsg(NewPublisher(ctx))
+
+      pub ! ActorPublisherMessage.Request(1)
+      val failed = Tcp.CommandFailed(Tcp.Connect(new InetSocketAddress("", 8080)))
+      pub ! failed
+
+      expectMsg(StreamStarted(ctx.traceId))
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsgType[DoneWithQueryExecution]
+
+      expectMsg("complete")
+      expectTerminated(pub)
     }
   }
+}
+
+//override supervisor
+class SonicSource(implicitSender: ActorRef, query: Query, actorContext: ActorContext, context: RequestContext)
+  extends build.unstable.sonic.SonicSource(query, actorContext, context) {
+
+  override lazy val handlerProps: Props = Props(classOf[SonicPublisher], implicitSender, query, context)
 }

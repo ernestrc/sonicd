@@ -9,7 +9,8 @@ import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.util.ByteString
-import build.unstable.sonicd.model.Exceptions.ProtocolException
+import build.unstable.sonic._
+import Exceptions.ProtocolException
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
@@ -143,7 +144,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   def buffer(t: SonicMessage) = {
     currentOffset += 1
     //length prefix framing
-    val w = Write(SonicdSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
+    val w = Write(SonicSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
     storage.append(w)
     w
   }
@@ -180,6 +181,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   implicit var traceId = UUID.randomUUID().toString
 
   def commonBehaviour: Receive = {
+    case Terminated(_) ⇒ context.stop(self)
 
     case ConfirmedClosed ⇒ context.stop(self)
 

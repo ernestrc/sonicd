@@ -1,8 +1,8 @@
-package build.unstable.sonicd.service.source
+package build.unstable.sonicd.model
 
 import akka.actor.ActorRef
 import akka.testkit.TestKitBase
-import build.unstable.sonicd.model.{QueryProgress, DoneWithQueryExecution, TypeMetadata}
+import build.unstable.sonic.{DoneWithQueryExecution, QueryProgress, TypeMetadata}
 
 trait HandlerUtils {
   this: TestKitBase ⇒

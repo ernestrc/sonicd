@@ -1,7 +1,7 @@
-package build.unstable.sonicd.service.source
+package build.unstable.sonicd.model
 
 import akka.actor.{Actor, ActorRef, OneForOneStrategy, SupervisorStrategy}
-import build.unstable.sonicd.model.{DoneWithQueryExecution, RequestContext, SonicdLogging}
+import build.unstable.sonic.DoneWithQueryExecution
 
 class TestController(implicitSender: ActorRef) extends Actor with SonicdLogging {
 

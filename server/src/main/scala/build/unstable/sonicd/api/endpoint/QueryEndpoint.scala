@@ -8,6 +8,7 @@ import akka.stream._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.stream.scaladsl._
 import akka.util.Timeout
+import build.unstable.sonic.{DoneWithQueryExecution, SonicMessage}
 import build.unstable.sonicd.api.EndpointUtils
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model.{JsonProtocol, _}

@@ -2,8 +2,9 @@ package build.unstable.sonicd.system.actor
 
 import akka.actor.Actor
 import akka.http.scaladsl.model.DateTime
+import build.unstable.sonic.Authenticate
 import build.unstable.sonicd.auth.{ApiKey, ApiUser}
-import build.unstable.sonicd.model.{Authenticate, SonicdLogging}
+import build.unstable.sonicd.model.SonicdLogging
 import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
 

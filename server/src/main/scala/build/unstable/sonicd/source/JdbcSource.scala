@@ -5,6 +5,7 @@ import java.sql.{Connection, DriverManager, ResultSet, Statement}
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
+import build.unstable.sonic._
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._

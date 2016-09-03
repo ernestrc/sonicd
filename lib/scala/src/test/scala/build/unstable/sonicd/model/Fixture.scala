@@ -1,5 +1,6 @@
 package build.unstable.sonicd.model
 
+import build.unstable.sonic.Query
 import spray.json._
 
 object Fixture {

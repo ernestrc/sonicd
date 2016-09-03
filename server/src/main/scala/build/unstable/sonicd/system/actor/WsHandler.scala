@@ -6,10 +6,11 @@ import java.util.UUID
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrategy, RequestStrategy}
-import build.unstable.sonicd.model.Exceptions.ProtocolException
+import build.unstable.sonic.Exceptions.ProtocolException
 import build.unstable.sonicd.model._
 import build.unstable.tylog.Variation
 import JsonProtocol._
+import build.unstable.sonic._
 import org.reactivestreams._
 
 import scala.util.{Failure, Success}

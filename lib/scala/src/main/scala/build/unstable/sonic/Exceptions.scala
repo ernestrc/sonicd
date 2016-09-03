@@ -1,4 +1,4 @@
-package build.unstable.sonicd.model
+package build.unstable.sonic
 
 object Exceptions {
 

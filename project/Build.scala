@@ -55,6 +55,7 @@ object Build extends sbt.Build {
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
           "com.typesafe.akka" %% "akka-stream" % akkaV,
           "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
+          "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
           "org.scalatest" %% "scalatest" % "2.2.5" % "test"
         )
       }
@@ -85,7 +86,6 @@ object Build extends sbt.Build {
           "com.auth0" % "java-jwt" % "2.1.0",
           "ch.megard" %% "akka-http-cors" % "0.1.2",
           "ch.qos.logback" % "logback-classic" % "1.0.13",
-          "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
           "com.h2database" % "h2" % "1.3.175" % "test"
         )
       }

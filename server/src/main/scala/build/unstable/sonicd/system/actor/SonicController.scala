@@ -6,6 +6,7 @@ import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
+import build.unstable.sonic.{DataSource, DoneWithQueryExecution, Query, RequestContext}
 import build.unstable.sonicd.auth.ApiUser
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}

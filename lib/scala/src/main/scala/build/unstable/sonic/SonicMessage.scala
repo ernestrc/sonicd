@@ -1,10 +1,11 @@
-package build.unstable.sonicd.model
+package build.unstable.sonic
 
 import java.nio.charset.Charset
 
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.util.ByteString
 import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonicd.model._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import spray.json._
 
@@ -78,7 +79,7 @@ object QueryProgress {
   val Finished = 4
 }
 
-case class QueryStarted(traceId: String) extends SonicMessage {
+case class StreamStarted(traceId: String) extends SonicMessage {
   override val variation: Option[String] = Some(traceId)
   override val payload: Option[JsValue] = None
   override val eventType: String = SonicMessage.started
@@ -162,7 +163,7 @@ object SonicMessage {
         case a ⇒ throw new Exception(s"expecting JsArray found $a")
       }
       case Some(`ack`) ⇒ ClientAcknowledge
-      case Some(`started`) ⇒ QueryStarted(vari.get)
+      case Some(`started`) ⇒ StreamStarted(vari.get)
       case Some(`auth`) ⇒
         val fields = pay.get.asJsObject.fields
         Authenticate(
@@ -180,8 +181,8 @@ object SonicMessage {
         QueryProgress(
           fields("s").convertTo[Int],
           fields("p").convertTo[Double],
-          Try(fields.get("t").map(_.convertTo[Double])).toOption.flatten,
-          Try(fields.get("u").map(_.convertTo[String])).toOption.flatten
+          Try(fields.get("t").flatMap(_.convertTo[Option[Double]])).toOption.flatten,
+          Try(fields.get("u").flatMap(_.convertTo[Option[String]])).toOption.flatten
         )
       case Some(`query`) ⇒
         val p = pay.get.asJsObject.fields
@@ -225,7 +226,7 @@ class Query(val id: Option[Long],
   override val eventType: String = SonicMessage.query
 
   //CAUTION: leaking this value outside of sonicd-server is a major security risk
-  private[sonicd] lazy val config = _config match {
+  private[sonic] lazy val config = _config match {
     case o: JsObject ⇒ o
     case JsString(alias) ⇒ Try {
       ConfigFactory.load().getObject(s"sonicd.source.$alias")
@@ -238,14 +239,16 @@ class Query(val id: Option[Long],
         "object or an alias (string) that will be extracted by sonicd server")
   }
 
-  private[sonicd] def clazzName: String = config.fields.getOrElse("class",
+  private[unstable] def clazzName: String = config.fields.getOrElse("class",
     throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
   override def toString: String = s"Query(id=$id,trace_id=$traceId)"
 
-  private[sonicd] def getSourceClass: Class[_] = {
+  private[unstable] def getSourceClass: Class[_] = {
     val clazzLoader = this.getClass.getClassLoader
-    Try(clazzLoader.loadClass(clazzName))
+
+    if (clazzName == "SonicSource") clazzLoader.loadClass("build.unstable.sonic.SonicSource")
+    else Try(clazzLoader.loadClass(clazzName))
       .getOrElse(clazzLoader.loadClass("build.unstable.sonicd.source." + clazzName))
   }
 

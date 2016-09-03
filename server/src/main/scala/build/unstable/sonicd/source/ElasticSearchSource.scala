@@ -5,12 +5,13 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
 import akka.util.ByteString
+import build.unstable.sonic._
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ElasticSearch.ESQuery
 import build.unstable.sonicd.source.http.HttpSupervisor
-import build.unstable.sonicd.source.http.HttpSupervisor.{Traceable, HttpRequestCommand}
+import build.unstable.sonicd.source.http.HttpSupervisor.{HttpRequestCommand, Traceable}
 import build.unstable.tylog.Variation
 import spray.json._
 

@@ -5,6 +5,7 @@ import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
+import build.unstable.sonic._
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.http.HttpSupervisor

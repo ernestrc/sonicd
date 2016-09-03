@@ -9,6 +9,7 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
+import build.unstable.sonic._
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}

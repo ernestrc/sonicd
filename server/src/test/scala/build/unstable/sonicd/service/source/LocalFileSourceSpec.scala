@@ -4,22 +4,19 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.channels.SeekableByteChannel
 import java.nio.charset.Charset
-import java.nio.file.WatchEvent.Kind
 import java.nio.file._
 
 import akka.actor._
-import akka.stream.actor.ActorPublisherMessage.Cancel
-import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
+import akka.stream.actor.ActorPublisher
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.{Query, RequestContext}
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{OutputChunk, Query, RequestContext}
-import build.unstable.sonicd.service.{Fixture, ImplicitSubscriber}
+import build.unstable.sonicd.model._
+import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.LocalFileStreamPublisher
 import build.unstable.sonicd.source.file.FileWatcher
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpecLike}
 import spray.json._
-
-import scala.concurrent.duration._
 
 class LocalFileSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike

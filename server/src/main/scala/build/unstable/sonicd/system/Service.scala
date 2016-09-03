@@ -3,6 +3,7 @@ package build.unstable.sonicd.system
 import akka.actor.{ActorRef, Props}
 import akka.io.{IO, Tcp}
 import akka.routing.RoundRobinPool
+import build.unstable.sonic.DataSource
 import build.unstable.sonicd.SonicdConfig
 import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController, TcpSupervisor}
 
@@ -20,7 +21,7 @@ trait Service {
   val tcpService: ActorRef
 
   /**
-   * instantiates [[build.unstable.sonicd.model.DataSource]] subclasses in
+   * instantiates [[DataSource]] subclasses in
    * response to Query commands. Monitors [[build.unstable.sonicd.system.actor.TcpHandler]] and
    * [[build.unstable.sonicd.system.actor.WsHandler]]. Handles resource authorization
    */

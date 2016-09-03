@@ -4,8 +4,9 @@ import java.io.File
 import java.nio.file._
 
 import akka.actor._
+import build.unstable.sonic.RequestContext
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.file.FileWatcher.{WatchResults, PathWatchEvent, Watch}
+import build.unstable.sonicd.source.file.FileWatcher.{PathWatchEvent, Watch, WatchResults}
 import build.unstable.sonicd.source.file.FileWatcherWorker.DoWatch
 
 import scala.annotation.tailrec

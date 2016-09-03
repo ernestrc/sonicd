@@ -5,9 +5,10 @@ import java.nio.file.Path
 
 import akka.actor.{Actor, ActorContext, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
+import build.unstable.sonic.{DataSource, Query, RequestContext, SonicMessage}
 import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.source.file.{FileWatcherWorker, FileWatcher, LocalFilePublisher}
+import build.unstable.sonicd.source.file.{FileWatcher, FileWatcherWorker, LocalFilePublisher}
 import spray.json._
 
 /**
