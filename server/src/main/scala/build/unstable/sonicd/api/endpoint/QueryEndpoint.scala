@@ -8,10 +8,9 @@ import akka.stream._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.stream.scaladsl._
 import akka.util.Timeout
-import build.unstable.sonic.{DoneWithQueryExecution, SonicMessage}
+import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.{SonicMessage, StreamCompleted}
 import build.unstable.sonicd.api.EndpointUtils
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{JsonProtocol, _}
 import build.unstable.sonicd.system.actor.WsHandler
 import ch.megard.akka.http.cors.CorsDirectives
 
@@ -30,7 +29,7 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
     Sink.fromSubscriber(ActorSubscriber(wsHandler)),
     Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))
     ).recover {
-      case e: Exception ⇒ DoneWithQueryExecution.error("no-trace-id", e)
+      case e: Exception ⇒ StreamCompleted.error("no-trace-id", e)
     }
   }
 
@@ -82,7 +81,7 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
                 extractUpgradeToWebSocket { upgrade ⇒
                   complete {
                     upgrade.handleMessages(messageSerDe(ip).recover {
-                      case e: Exception ⇒ TextMessage(DoneWithQueryExecution.error("no-trace-id", e).json.toString())
+                      case e: Exception ⇒ TextMessage(StreamCompleted.error("no-trace-id", e).json.toString())
                     })
                   }
                 }

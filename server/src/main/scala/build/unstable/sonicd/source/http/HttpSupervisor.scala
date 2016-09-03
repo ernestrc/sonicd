@@ -6,10 +6,10 @@ import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.pattern._
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
-import build.unstable.sonicd.Sonicd
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.SonicdLogging
+import build.unstable.sonic.JsonProtocol
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonicd.source.http.HttpSupervisor._
+import build.unstable.sonicd.{Sonicd, SonicdLogging}
 import build.unstable.tylog.Variation
 import spray.json._
 

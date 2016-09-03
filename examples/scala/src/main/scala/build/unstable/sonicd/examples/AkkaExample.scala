@@ -14,34 +14,45 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
 /**
-  * Makes use of `sonicd-core` artifact which provides a convenience
-  * constructor for a [[akka.stream.scaladsl.Source]].
-  */
+ * Makes use of `sonicd-core` artifact which provides a streaming and futures API
+ */
 object AkkaExample extends App {
 
-  val config: JsObject = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
-  val addr = new InetSocketAddress("127.0.0.1", 10001)
-
-  val traceId = UUID.randomUUID().toString
-
-  implicit val ctx = RequestContext(traceId, None)
   implicit val system = ActorSystem()
   implicit val timeout: Timeout = 15.seconds
-  implicit val materializer: ActorMaterializer =
-    ActorMaterializer(ActorMaterializerSettings(system))
+  implicit val materializer: ActorMaterializer = ActorMaterializer(ActorMaterializerSettings(system))
 
-  val query1 = Query("100", config, None)
-  val query2 = Query("10", config, None)
+  // sonic server address
+  val addr = new InetSocketAddress("127.0.0.1", 10001)
 
-  val res1: Future[DoneWithQueryExecution] = SonicSource.stream(addr, query1).to(Sink.ignore).run()
+  // source configuration
+  val config: JsObject = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
 
-  val res2: Future[Vector[SonicMessage]] = SonicSource.run(query2, addr)
+  // build a request context
+  val traceId = UUID.randomUUID().toString
 
-  val done1 = Await.result(res1, 20.seconds)
-  val done2 = Await.result(res2, 20.seconds)
+  // instantiate client, which will allocate resources to query sonic endpoint
+  val client = Sonic.Client(addr)
 
-  assert(done1.success)
-  assert(done2.length == 112) //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+  {
+    val query = Query("100", config, traceId, None)
+
+    val source = client.stream(query)
+    val sink = Sink.ignore
+    val res: Future[StreamCompleted] = source.to(sink).run()
+
+    val done = Await.result(res, 20.seconds)
+    assert(done.success)
+  }
+
+  {
+    val query = Query("10", config, traceId, None)
+
+    val res: Future[Vector[SonicMessage]] = client.run(query)
+
+    val done = Await.result(res, 20.seconds)
+    assert(done.length == 112) //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+  }
 
   system.terminate()
 

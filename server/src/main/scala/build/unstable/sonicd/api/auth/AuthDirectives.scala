@@ -7,10 +7,9 @@ import akka.http.scaladsl.server.{Directive1, Rejection}
 import akka.pattern.ask
 import akka.stream.Materializer
 import akka.util.Timeout
-import build.unstable.sonic.{Authenticate, SonicMessage}
-import build.unstable.sonicd.auth.ApiUser
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.SonicdLogging
+import build.unstable.sonic.{JsonProtocol, ApiUser, Authenticate, SonicMessage}
+import build.unstable.sonicd.SonicdLogging
+import JsonProtocol._
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import build.unstable.tylog.Variation
 import spray.json.{JsValue, RootJsonFormat}

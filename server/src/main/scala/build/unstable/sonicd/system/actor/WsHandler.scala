@@ -7,10 +7,10 @@ import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber, OneByOneRequestStrategy, RequestStrategy}
 import build.unstable.sonic.Exceptions.ProtocolException
-import build.unstable.sonicd.model._
-import build.unstable.tylog.Variation
-import JsonProtocol._
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
+import build.unstable.sonicd.SonicdLogging
+import build.unstable.tylog.Variation
 import org.reactivestreams._
 
 import scala.util.{Failure, Success}
@@ -28,7 +28,7 @@ with ActorSubscriber with SonicdLogging {
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
       log.error("error in publisher", e)
-      self ! DoneWithQueryExecution.error(traceId, e)
+      self ! StreamCompleted.error(traceId, e)
       Stop
   }
 
@@ -47,7 +47,7 @@ with ActorSubscriber with SonicdLogging {
     case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
   }
 
-  def closing(done: DoneWithQueryExecution): Receive = {
+  def closing(done: StreamCompleted): Receive = {
     log.debug("switched to closing behaviour with ev {}", done)
     if (isActive && totalDemand > 0) {
       onNext(done)
@@ -66,7 +66,7 @@ with ActorSubscriber with SonicdLogging {
 
     override def onError(t: Throwable): Unit = {
       log.error("publisher called onError of wsHandler", t)
-      self ! DoneWithQueryExecution.error(traceId, t)
+      self ! StreamCompleted.error(traceId, t)
     }
 
     override def onSubscribe(s: Subscription): Unit = self ! s
@@ -86,13 +86,13 @@ with ActorSubscriber with SonicdLogging {
     case CompletedStream ⇒
       val msg = "completed stream without done msg"
       log.error(msg)
-      context.become(closing(DoneWithQueryExecution.error(traceId, new ProtocolException(msg))))
+      context.become(closing(StreamCompleted.error(traceId, new ProtocolException(msg))))
 
     case msg@OnError(e) ⇒
       error(log, e, "error in ws stream")
-      context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+      context.become(closing(StreamCompleted.error(traceId, e)))
 
-    case msg: DoneWithQueryExecution ⇒
+    case msg: StreamCompleted ⇒
       context.become(closing(msg))
 
   }
@@ -113,7 +113,7 @@ with ActorSubscriber with SonicdLogging {
 
       case msg@Request(n) ⇒ requestTil(subscription)
 
-      case msg: DoneWithQueryExecution ⇒ context.become(closing(msg))
+      case msg: StreamCompleted ⇒ context.become(closing(msg))
 
       case a@(OnComplete | Cancel | OnNext(ClientAcknowledge)) ⇒
         commonBehaviour.apply(a)
@@ -129,7 +129,7 @@ with ActorSubscriber with SonicdLogging {
         } catch {
           case e: Exception ⇒
             error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
-            context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+            context.become(closing(StreamCompleted.error(traceId, e)))
         }
     }
     recv orElse commonBehaviour
@@ -140,13 +140,13 @@ with ActorSubscriber with SonicdLogging {
     //auth cmd failed
     case Failure(e) ⇒
       trace(log, traceId, GenerateToken, Variation.Failure(e), "")
-      context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+      context.become(closing(StreamCompleted.error(traceId, e)))
 
     //auth cmd succeded
     case Success(token: AuthenticationActor.Token) ⇒
       trace(log, traceId, GenerateToken, Variation.Success, "received new token '{}'", token)
       onNext(OutputChunk(Vector(token)))
-      context.become(closing(DoneWithQueryExecution.success(traceId)))
+      context.become(closing(StreamCompleted.success(traceId)))
 
     case s: Subscription ⇒
       trace(log, traceId, MaterializeSource, Variation.Success, "subscribed")
@@ -159,7 +159,7 @@ with ActorSubscriber with SonicdLogging {
       val pub = ActorPublisher[SonicMessage](handler)
       pub.subscribe(subs)
 
-    case msg: DoneWithQueryExecution ⇒
+    case msg: StreamCompleted ⇒
       trace(log, traceId, MaterializeSource, Variation.Failure(msg.error.get), "error materializing source")
       context.become(closing(msg))
 
@@ -193,7 +193,7 @@ with ActorSubscriber with SonicdLogging {
       val msg = "first message should be a Query"
       log.error(msg)
       val e = new ProtocolException(msg)
-      context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+      context.become(closing(StreamCompleted.error(traceId, e)))
 
   }
 

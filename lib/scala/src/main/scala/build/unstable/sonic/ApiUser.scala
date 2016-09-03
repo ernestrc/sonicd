@@ -1,12 +1,14 @@
-package build.unstable.sonicd.auth
+package build.unstable.sonic
 
 import java.net.InetAddress
 
-import build.unstable.sonicd.model.JsonProtocol._
+import JsonProtocol._
 import spray.json._
 
 import scala.util.Try
 
+//TODO should be a trait
+// and move native auth to sonicd
 case class ApiUser(user: String, authorization: Int, mode: ApiKey.Mode, allowedIps: Option[List[InetAddress]])
 
 object ApiUser {

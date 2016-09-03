@@ -5,12 +5,11 @@ import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
-import build.unstable.sonicd.{BuildInfo, SonicdConfig}
+import build.unstable.sonicd.{BuildInfo, SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
 import spray.json._
 
@@ -34,7 +33,7 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
     }
   }
 
-  lazy val handlerProps: Props = {
+  lazy val publisher: Props = {
     //if no presto supervisor has been initialized yet for this presto cluster, initialize one
     val prestoSupervisor = actorContext.child(supervisorName).getOrElse {
       actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
@@ -157,7 +156,7 @@ class PrestoPublisher(traceId: String, query: String,
 
   /* BEHAVIOUR */
 
-  def terminating(done: DoneWithQueryExecution): Receive = {
+  def terminating(done: StreamCompleted): Receive = {
     tryPushDownstream()
     if (buffer.isEmpty && isActive && totalDemand > 0) {
       onNext(done)
@@ -203,7 +202,7 @@ class PrestoPublisher(traceId: String, query: String,
         case "FINISHED" ⇒
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           trace(log, traceId, callType, Variation.Success, r.stats.state)
-          context.become(terminating(done = DoneWithQueryExecution.success))
+          context.become(terminating(done = StreamCompleted.success))
 
         case "FAILED" ⇒
           val error = r.error.get
@@ -224,20 +223,20 @@ class PrestoPublisher(traceId: String, query: String,
 
           } else {
             debug(log, "error_code: {}; error_type: {}; skipping retry", error.errorCode, error.errorType)
-            context.become(terminating(DoneWithQueryExecution.error(e)))
+            context.become(terminating(StreamCompleted.error(e)))
           }
 
         case state ⇒
           val msg = s"unexpected query state from presto $state"
           val e = new Exception(msg)
           trace(log, traceId, callType, Variation.Failure(e), msg)
-          context.become(terminating(DoneWithQueryExecution.error(e)))
+          context.become(terminating(StreamCompleted.error(e)))
       }
       tryPushDownstream()
 
     case Status.Failure(e) ⇒
       trace(log, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
-      context.become(terminating(DoneWithQueryExecution.error(e)))
+      context.become(terminating(StreamCompleted.error(e)))
   }
 
   def runStatement(callType: CallType, post: HttpRequestCommand, sender: ActorRef) {

@@ -5,9 +5,9 @@ import java.nio.file.Path
 
 import akka.actor._
 import akka.stream.actor.ActorPublisher
-import build.unstable.sonic.{DataSource, Query, RequestContext, SonicMessage}
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
+import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic._
+import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.{FileWatcher, FileWatcherWorker, LocalFilePublisher}
 import spray.json._
 
@@ -19,7 +19,7 @@ import spray.json._
 class LocalJsonStreamSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
-  val handlerProps: Props = {
+  val publisher: Props = {
     val path = getConfig[String]("path")
     val tail = getOption[Boolean]("tail").getOrElse(true)
 

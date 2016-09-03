@@ -5,8 +5,7 @@ import java.net.InetAddress
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.Timeout
-import build.unstable.sonic.{DoneWithQueryExecution, Query}
-import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonic.{ApiKey, ApiUser, Query, StreamCompleted}
 import build.unstable.sonicd.system.actor.AuthenticationActor.ValidateToken
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
 import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController}
@@ -76,7 +75,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
         assert(cmd.token == auth)
 
         lastSender ! user
-        val done = expectMsgType[DoneWithQueryExecution]
+        val done = expectMsgType[StreamCompleted]
 
         done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
@@ -91,7 +90,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
         c ! NewQuery(syntheticQuery, None)
 
-        val done = expectMsgType[DoneWithQueryExecution]
+        val done = expectMsgType[StreamCompleted]
 
         done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 
@@ -114,7 +113,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       assert(cmd.token == auth)
 
       lastSender ! user
-      val done = expectMsgType[DoneWithQueryExecution]
+      val done = expectMsgType[StreamCompleted]
 
       done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
 

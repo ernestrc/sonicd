@@ -4,8 +4,7 @@ import java.nio.charset.Charset
 
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.util.ByteString
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
+import build.unstable.sonic.JsonProtocol._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import spray.json._
 
@@ -38,7 +37,7 @@ sealed trait SonicMessage {
   def toWsMessage: Message =
     TextMessage.Strict(json.compactPrint)
 
-  def isDone: Boolean = this.isInstanceOf[DoneWithQueryExecution]
+  def isCompleted: Boolean = this.isInstanceOf[StreamCompleted]
 }
 
 //events sent by the server to the client
@@ -85,22 +84,24 @@ case class StreamStarted(traceId: String) extends SonicMessage {
   override val eventType: String = SonicMessage.started
 }
 
-case class DoneWithQueryExecution(traceId: String, error: Option[Throwable] = None) extends SonicMessage {
+case class StreamCompleted(traceId: String, error: Option[Throwable] = None) extends SonicMessage {
 
   val success = error.isEmpty
 
-  override val eventType = SonicMessage.done
+  override val eventType = SonicMessage.completed
   override val variation: Option[String] = error.map(e ⇒ getStackTrace(e))
   override val payload: Option[JsValue] = Some(JsObject("trace_id" → JsString.apply(traceId)))
 
 }
 
-object DoneWithQueryExecution {
-  def success(traceId: String): DoneWithQueryExecution = DoneWithQueryExecution(traceId)
-  def success(implicit ctx: RequestContext) = DoneWithQueryExecution(ctx.traceId)
+object StreamCompleted {
+  def success(traceId: String): StreamCompleted = StreamCompleted(traceId)
 
-  def error(traceId: String, e: Throwable): DoneWithQueryExecution = DoneWithQueryExecution(traceId, Some(e))
-  def error(e: Throwable)(implicit ctx: RequestContext): DoneWithQueryExecution = DoneWithQueryExecution(ctx.traceId, Some(e))
+  def error(traceId: String, e: Throwable): StreamCompleted = StreamCompleted(traceId, Some(e))
+
+  def success(implicit ctx: RequestContext) = StreamCompleted(ctx.traceId)
+
+  def error(e: Throwable)(implicit ctx: RequestContext): StreamCompleted = StreamCompleted(ctx.traceId, Some(e))
 }
 
 //events sent by the client to the server
@@ -146,7 +147,7 @@ object SonicMessage {
   val progress = "P"
   val out = "O"
   val ack = "A"
-  val done = "D"
+  val completed = "D"
 
   def unapply(ev: SonicMessage): Option[(String, Option[String], Option[JsValue])] =
     Some((ev.eventType, ev.variation, ev.payload))
@@ -189,7 +190,7 @@ object SonicMessage {
         val traceId = p.get("trace_id").flatMap(_.convertTo[Option[String]])
         val token = p.get("auth").flatMap(_.convertTo[Option[String]])
         new Query(None, traceId, token, vari.get, p("config"))
-      case Some(`done`) ⇒ DoneWithQueryExecution(pay.get.asJsObject.fields("trace_id").convertTo[String], vari.map(fromStackTrace))
+      case Some(`completed`) ⇒ StreamCompleted(pay.get.asJsObject.fields("trace_id").convertTo[String], vari.map(fromStackTrace))
       case Some(e) ⇒ throw new Exception(s"unexpected event type '$e'")
       case None ⇒ throw new Exception("no 'e' event_type")
     }
@@ -226,7 +227,7 @@ class Query(val id: Option[Long],
   override val eventType: String = SonicMessage.query
 
   //CAUTION: leaking this value outside of sonicd-server is a major security risk
-  private[sonic] lazy val config = _config match {
+  private[unstable] lazy val config = _config match {
     case o: JsObject ⇒ o
     case JsString(alias) ⇒ Try {
       ConfigFactory.load().getObject(s"sonicd.source.$alias")
@@ -247,8 +248,7 @@ class Query(val id: Option[Long],
   private[unstable] def getSourceClass: Class[_] = {
     val clazzLoader = this.getClass.getClassLoader
 
-    if (clazzName == "SonicSource") clazzLoader.loadClass("build.unstable.sonic.SonicSource")
-    else Try(clazzLoader.loadClass(clazzName))
+    Try(clazzLoader.loadClass(clazzName))
       .getOrElse(clazzLoader.loadClass("build.unstable.sonicd.source." + clazzName))
   }
 
@@ -264,12 +264,18 @@ object Query {
   def apply(query: String, config: JsObject, authToken: Option[String]): Query =
     new Query(None, None, authToken, query, config)
 
+  def apply(query: String, config: JsObject, traceId: String, authToken: Option[String]): Query =
+    new Query(None, Some(traceId), authToken, query, config)
+
   /**
    * Build a Query from a configuration alias 'config' for the sonicd server to
    * load from its configuration
    */
   def apply(query: String, config: JsString, authToken: Option[String]): Query =
     new Query(None, None, authToken, query, config)
+
+  def apply(query: String, config: JsString, traceId: String, authToken: Option[String]): Query =
+    new Query(None, Some(traceId), authToken, query, config)
 
   def unapply(query: Query): Option[(Option[Long], Option[String], String)] =
     Some((query.id, query.auth, query.query))

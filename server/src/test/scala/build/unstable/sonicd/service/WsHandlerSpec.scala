@@ -8,7 +8,7 @@ import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestKit}
 import build.unstable.sonic._
-import build.unstable.sonicd.model.JsonProtocol._
+import JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
 import build.unstable.sonicd.system.actor.WsHandler
@@ -52,7 +52,7 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def expectDone(wsHandler: ActorRef): Unit = {
-    val done = DoneWithQueryExecution.success("expect-done-trace-id")
+    val done = StreamCompleted.success("expect-done-trace-id")
     wsHandler ! done
     expectMsg(done)
   }
@@ -96,7 +96,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       wsHandler ! Request(1)
       expectMsg(OutputChunk(Vector(done.get)))
       wsHandler ! Request(1)
-      val d = expectMsgType[DoneWithQueryExecution]
+      val d = expectMsgType[StreamCompleted]
       assert(d.success)
 
       clientAcknowledge(wsHandler)
@@ -116,7 +116,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val done: Failure[String] = Failure(new Exception("BOOM"))
       wsHandler ! done
       wsHandler ! Request(1)
-      val d = expectMsgType[DoneWithQueryExecution]
+      val d = expectMsgType[StreamCompleted]
       assert(!d.success)
       assert(d.error.get == done.failed.get)
 
@@ -133,7 +133,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val q = expectMsgType[NewQuery]
       assert(q.query.traceId.nonEmpty)
 
-      val done = DoneWithQueryExecution.error("trace-id", new Exception("BOOM"))
+      val done = StreamCompleted.error("trace-id", new Exception("BOOM"))
       wsHandler ! done
       wsHandler ! Request(1)
       expectMsg(done)
@@ -156,7 +156,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       assert(q.query.traceId.nonEmpty)
 
       subscription.request(1)
-      val done = DoneWithQueryExecution.error("trace-id", new Exception("BOOM"))
+      val done = StreamCompleted.error("trace-id", new Exception("BOOM"))
       wsHandler ! done
       expectMsg(done)
       clientAcknowledge(wsHandler)
@@ -195,7 +195,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       val (progress, tail) = msgs.tail.splitAt(100)
       progress.tail.foreach(_.getClass shouldBe classOf[QueryProgress])
       tail.head shouldBe a[OutputChunk]
-      tail.tail.head shouldBe a[DoneWithQueryExecution]
+      tail.tail.head shouldBe a[StreamCompleted]
 
       expectComplete(wsHandler)
 

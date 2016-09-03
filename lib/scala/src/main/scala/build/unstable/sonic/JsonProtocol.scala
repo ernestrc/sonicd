@@ -1,4 +1,4 @@
-package build.unstable.sonicd.model
+package build.unstable.sonic
 
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit

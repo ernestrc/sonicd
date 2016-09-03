@@ -5,10 +5,9 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
-import build.unstable.sonicd.SonicdConfig
+import build.unstable.sonicd.{SonicdLogging, SonicdConfig}
 import build.unstable.sonicd.api.auth.AuthEndpoint
 import build.unstable.sonicd.api.endpoint.{MonitoringEndpoint, QueryEndpoint}
-import build.unstable.sonicd.model.SonicdLogging
 import build.unstable.sonicd.system.{Service, System}
 
 trait Api {

@@ -1,8 +1,8 @@
-package build.unstable.sonicd.auth
+package build.unstable.sonic
 
 import java.net.InetAddress
 
-import build.unstable.sonicd.model.JsonProtocol._
+import JsonProtocol._
 import spray.json._
 
 import scala.collection.JavaConversions._
@@ -49,10 +49,22 @@ object ApiKey {
 
   object Mode {
 
+    implicit val jsonFormat: RootJsonFormat[ApiKey.Mode] = new RootJsonFormat[Mode] {
+      override def read(json: JsValue): Mode = json match {
+        case JsString("rw") ⇒ Mode.ReadWrite
+        case JsString("r") ⇒ Mode.Read
+        case ss ⇒ throw new Exception(s"unexpected value for ApiKey.Mode: $ss")
+      }
+      override def write(obj: Mode): JsValue = obj match {
+        case Read ⇒ JsString("r")
+        case ReadWrite ⇒ JsString("rw")
+      }
+    }
+
     def apply(str: String): Try[Mode] = str match {
       case "r" ⇒ Success(Read)
       case "rw" ⇒ Success(ReadWrite)
-      case e ⇒ Failure(new Exception(s"unknown mode '$e'"))
+      case e ⇒ Failure(new Exception(s"unknown ApiKey.Mode '$e'"))
     }
 
     case object Read extends Mode {
@@ -68,5 +80,7 @@ object ApiKey {
     }
 
   }
+
+  implicit val jsonFormat: RootJsonFormat[ApiKey] = jsonFormat5(ApiKey.apply)
 
 }

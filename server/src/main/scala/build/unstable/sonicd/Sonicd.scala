@@ -2,27 +2,14 @@ package build.unstable.sonicd
 
 import java.net.InetSocketAddress
 
-import akka.Done
-import akka.http.impl.engine.HttpConnectionTimeoutException
-import akka.http.impl.util.MapError
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.Http.{ServerBinding, IncomingConnection}
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
-import akka.http.scaladsl.settings.ServerSettings
 import akka.io.Tcp
-import akka.stream.Server
-import akka.stream.scaladsl.{Source, Flow, Keep, Sink}
 import akka.stream.scaladsl.{Tcp ⇒ StreamTcp}
 import build.unstable.sonicd.api.AkkaApi
-import build.unstable.sonicd.model.SonicdLogging
 import build.unstable.sonicd.system.{AkkaService, AkkaSystem}
 import com.typesafe.sslconfig.akka.AkkaSSLConfig
 import com.typesafe.sslconfig.akka.util.AkkaLoggerFactory
 import com.typesafe.sslconfig.ssl.{ConfigSSLContextBuilder, SSLConfigFactory}
-
-import scala.concurrent.{TimeoutException, Future}
-import scala.util.{Failure, Success}
-import scala.util.control.NonFatal
 
 object Sonicd extends App with AkkaSystem with AkkaService with AkkaApi with SonicdLogging {
 

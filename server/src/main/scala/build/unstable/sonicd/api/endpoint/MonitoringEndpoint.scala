@@ -6,12 +6,12 @@ import akka.http.scaladsl.server.Route
 import akka.pattern._
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
+import build.unstable.sonic.JsonProtocol
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonicd.BuildInfo
 import build.unstable.sonicd.api.EndpointUtils
-import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController
 import spray.json._
-import JsonProtocol._
 
 class MonitoringEndpoint(responseTimeout: Timeout, controller: ActorRef)
                         (implicit val mat: ActorMaterializer, system: ActorSystem) extends EndpointUtils {

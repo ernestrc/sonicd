@@ -2,7 +2,7 @@ package build.unstable.sonicd.model
 
 import akka.actor.ActorRef
 import akka.testkit.TestKitBase
-import build.unstable.sonic.{DoneWithQueryExecution, QueryProgress, TypeMetadata}
+import build.unstable.sonic.{StreamCompleted, QueryProgress, TypeMetadata}
 
 trait HandlerUtils {
   this: TestKitBase ⇒
@@ -24,8 +24,8 @@ trait HandlerUtils {
     expectMsgAnyClassOf(classOf[TypeMetadata])
   }
 
-  def expectDone(pub: ActorRef, success: Boolean = true): DoneWithQueryExecution = {
-    val d = expectMsgType[DoneWithQueryExecution]
+  def expectDone(pub: ActorRef, success: Boolean = true): StreamCompleted = {
+    val d = expectMsgType[StreamCompleted]
     if (success) assert(d.success)
     else assert(!d.success)
 

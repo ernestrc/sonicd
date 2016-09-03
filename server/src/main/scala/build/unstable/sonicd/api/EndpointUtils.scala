@@ -6,7 +6,7 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{Directive1, RouteResult}
 import akka.http.scaladsl.unmarshalling.FromRequestUnmarshaller
 import akka.stream.ActorMaterializer
-import build.unstable.sonicd.model.SonicdLogging
+import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
 
 trait EndpointUtils extends SonicdLogging {

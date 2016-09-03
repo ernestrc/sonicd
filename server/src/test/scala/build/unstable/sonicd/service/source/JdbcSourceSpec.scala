@@ -5,9 +5,8 @@ import java.sql.{Connection, DriverManager, Statement}
 import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.auth.{ApiKey, ApiUser}
-import build.unstable.sonicd.model.JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor}
@@ -64,7 +63,7 @@ class JdbcSourceSpec(_system: ActorSystem)
   def newPublisher(q: String, context: RequestContext = testCtx): ActorRef = {
     val query = new Query(Some(1L), Some("traceId"), None, q, H2Config)
     val src = new JdbcSource(query, controller.underlyingActor.context, context)
-    val ref = controller.underlyingActor.context.actorOf(src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
+    val ref = controller.underlyingActor.context.actorOf(src.publisher.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -162,7 +161,7 @@ class JdbcSourceSpec(_system: ActorSystem)
 
       pub ! ActorPublisherMessage.Request(1)
       expectMsgPF() {
-        case d: DoneWithQueryExecution ⇒ assert(d.error.nonEmpty)
+        case d: StreamCompleted ⇒ assert(d.error.nonEmpty)
       }
       expectMsg("complete")
       expectTerminated(pub)

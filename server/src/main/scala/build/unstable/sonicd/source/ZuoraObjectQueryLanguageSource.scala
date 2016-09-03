@@ -12,9 +12,8 @@ import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
 import build.unstable.sonic
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ZuoraService._
 import build.unstable.sonicd.{Sonicd, SonicdConfig}
 import spray.json._
@@ -42,7 +41,7 @@ class ZuoraObjectQueryLanguageSource(query: sonic.Query, actorContext: ActorCont
           sslParameters = Some(Sonicd.sslContext.getDefaultSSLParameters)))
   }
 
-  override lazy val handlerProps: Props = {
+  override lazy val publisher: Props = {
     val user: String = getConfig[String]("username")
     val password: String = getConfig[String]("password")
     val host: String = getConfig[String]("host")
@@ -136,7 +135,7 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
       if (res.done || streamLimit.isDefined && { streamed += effectiveBatchSize; streamed == streamLimit.get }) {
         log.info(s"successfully fetched $totalSize zuora objects")
         buffer.enqueue(QueryProgress(QueryProgress.Finished, 0, None, None))
-        self ! DoneWithQueryExecution.success
+        self ! StreamCompleted.success
       } else {
         buffer.enqueue(QueryProgress(QueryProgress.Running, effectiveBatchSize, Some(totalSize), Some("objects")))
 
@@ -155,14 +154,14 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
       } catch {
         case e: Exception ⇒
           log.error(e, "error when building output chunks")
-          self ! DoneWithQueryExecution.error(e)
+          self ! StreamCompleted.error(e)
       }
       stream()
 
     case res: ZuoraService#QueryFailed ⇒
-      self ! DoneWithQueryExecution.error(res.error)
+      self ! StreamCompleted.error(res.error)
 
-    case r: DoneWithQueryExecution ⇒
+    case r: StreamCompleted ⇒
       buffer.enqueue(r)
       stream()
       if (buffer.isEmpty) {
@@ -191,22 +190,22 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
         if (trim.startsWith("show")) {
           log.debug("showing table names")
           buffer.enqueue(ZuoraService.ShowTables.output: _*)
-          buffer.enqueue(DoneWithQueryExecution.success)
+          buffer.enqueue(StreamCompleted.success)
           nothing
         } else if (trim.startsWith("desc") || trim.startsWith("describe")) {
           log.debug("describing table {}", trim)
           query.split(" ").lastOption.map { parsed ⇒
             ZuoraService.tables.find(t ⇒ t.name == parsed || t.nameLower == parsed)
               .map { table ⇒
-                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ DoneWithQueryExecution.success
+                val msgs = table.description.map(s ⇒ OutputChunk.apply(Vector(s))) :+ StreamCompleted.success
                 buffer.enqueue(msgs: _*)
                 nothing
               }.getOrElse {
-              buffer.enqueue(DoneWithQueryExecution.error(new Exception(s"table '$parsed' not found")))
+              buffer.enqueue(StreamCompleted.error(new Exception(s"table '$parsed' not found")))
               nothing
             }
           }.getOrElse {
-            buffer.enqueue(DoneWithQueryExecution.error(new Exception(s"error parsing $query")))
+            buffer.enqueue(StreamCompleted.error(new Exception(s"error parsing $query")))
             nothing
           }
         } else {

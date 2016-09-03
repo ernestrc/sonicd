@@ -6,8 +6,8 @@ import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{OutputChunk, Query, QueryProgress, RequestContext}
-import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.Presto.{ColMeta, QueryResults, StatementStats}
@@ -57,7 +57,7 @@ class PrestoSourceSpec(_system: ActorSystem)
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
     val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier, retryErrors,
       self, query, controller.underlyingActor.context, context)
-    val ref = TestActorRef[PrestoPublisher](src.handlerProps.withDispatcher(dispatcher))
+    val ref = TestActorRef[PrestoPublisher](src.publisher.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -457,7 +457,7 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, ret
 
   override def getSupervisor(name: String): ActorRef = implicitSender
 
-  override lazy val handlerProps: Props = {
+  override lazy val publisher: Props = {
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 

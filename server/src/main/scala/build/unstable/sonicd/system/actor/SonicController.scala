@@ -6,9 +6,8 @@ import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
-import build.unstable.sonic.{DataSource, DoneWithQueryExecution, Query, RequestContext}
-import build.unstable.sonicd.auth.ApiUser
-import build.unstable.sonicd.model._
+import build.unstable.sonic._
+import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
 
@@ -48,12 +47,12 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       debug(log, "successfully instantiated source {} for query with id '{}'", source, queryId)
 
       if (isAuthorized(user, source.securityLevel, clientAddress)) {
-        handler ! source.handlerProps
-      } else handler ! DoneWithQueryExecution.error(q.traceId.get, new UnauthorizedException(user, clientAddress))
+        handler ! source.publisher
+      } else handler ! StreamCompleted.error(q.traceId.get, new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
         error(log, e, "error when preparing stream materialization")
-        handler ! DoneWithQueryExecution.error(q.traceId.get, e)
+        handler ! StreamCompleted.error(q.traceId.get, e)
     }
   }
 
@@ -70,6 +69,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   /* STATE */
 
+  //TODO deprecate queryId
   var handled: Long = 0L
 
   case class TokenValidationResult(user: Try[ApiUser], query: Query,
@@ -80,7 +80,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
   override def receive: Receive = {
 
     case TokenValidationResult(Failure(e), q, handler, _) ⇒
-      handler ! DoneWithQueryExecution.error(q.traceId.get, e)
+      handler ! StreamCompleted.error(q.traceId.get, e)
 
     case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
       prepareMaterialization(handler, query, Some(user), clientAddress)

@@ -1,4 +1,4 @@
-package build.unstable.sonicd.model
+package build.unstable.sonicd.service.source
 
 import java.net.InetSocketAddress
 
@@ -7,11 +7,12 @@ import akka.io.Tcp
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.SonicSupervisor.NewPublisher
+import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.SonicSupervisor.RegisterPublisher
 import build.unstable.sonic._
+import build.unstable.sonicd.model._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
-import JsonProtocol._
 
 import scala.concurrent.duration._
 
@@ -28,7 +29,6 @@ class SonicdSourceSpec(_system: ActorSystem)
   def this() = this(ActorSystem("PrestoSourceSpec"))
 
   val traceId = "test-trace-id"
-  implicit val ctx: RequestContext = RequestContext(traceId, None)
 
   implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system))
 
@@ -41,7 +41,12 @@ class SonicdSourceSpec(_system: ActorSystem)
        | {
        |  "port" : 8080,
        |  "host" : "sonicd.unstable.build",
-       |  "class" : "SonicSource"
+       |  "class" : "SonicSource",
+       |  "config": {
+       |     "port" : 8080,
+       |     "url" : "presto.unstable.build",
+       |     "class" : "PrestoSource"
+       |   }
        | }
     """.stripMargin.parseJson.asJsObject
 
@@ -54,10 +59,10 @@ class SonicdSourceSpec(_system: ActorSystem)
 
   val testAddr = new InetSocketAddress("0.0.0.0", 3030)
 
-  def newPublisher(context: RequestContext = ctx,
+  def newPublisher(traceId: String = traceId,
                    dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[SonicPublisher] = {
-    val src = new SonicSource(self, sonicQuery1, controller.underlyingActor.context, context)
-    val ref = TestActorRef[SonicPublisher](src.handlerProps.withDispatcher(dispatcher))
+    val src = new SonicSource(self, sonicQuery1, controller.underlyingActor.context, RequestContext(traceId, None))
+    val ref = TestActorRef[SonicPublisher](src.publisher.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -67,13 +72,13 @@ class SonicdSourceSpec(_system: ActorSystem)
     "run a simple query" in {
       val pub = newPublisher()
 
-      expectMsg(NewPublisher(ctx))
+      expectMsg(RegisterPublisher(traceId))
 
       pub ! ActorPublisherMessage.Request(1)
       pub ! Tcp.Connected(testAddr, testAddr)
       expectMsg(Tcp.Register(pub))
 
-      val bytes = SonicSource.lengthPrefixEncode(sonicQuery1.toBytes)
+      val bytes = Sonic.lengthPrefixEncode(sonicQuery1.toBytes)
       val write = Tcp.Write(bytes, SonicPublisher.Ack)
       expectMsg(write)
 
@@ -100,7 +105,7 @@ class SonicdSourceSpec(_system: ActorSystem)
 
       //test that framing/buffering is working correctly
       val prog = QueryProgress(QueryProgress.Started, 0, None, None)
-      val (first, second) = SonicSource.lengthPrefixEncode(prog.toBytes).splitAt(10)
+      val (first, second) = Sonic.lengthPrefixEncode(prog.toBytes).splitAt(10)
 
       pub ! Tcp.Received(first)
       expectMsg(Tcp.ResumeReading)
@@ -112,7 +117,7 @@ class SonicdSourceSpec(_system: ActorSystem)
 
       // test that it respects stream back pressure
       val out = OutputChunk(Vector.empty[String])
-      val b = SonicSource.lengthPrefixEncode(out.toBytes)
+      val b = Sonic.lengthPrefixEncode(out.toBytes)
 
       pub ! Tcp.Received(b)
       expectMsg(Tcp.ResumeReading)
@@ -122,11 +127,11 @@ class SonicdSourceSpec(_system: ActorSystem)
       expectMsg(out)
 
       //test that it closes on done
-      val done = DoneWithQueryExecution.success
-      val b2 = SonicSource.lengthPrefixEncode(done.toBytes)
+      val done = StreamCompleted.success(traceId)
+      val b2 = Sonic.lengthPrefixEncode(done.toBytes)
       pub ! Tcp.Received(b2)
 
-      val b3 = SonicSource.lengthPrefixEncode(ClientAcknowledge.toBytes)
+      val b3 = Sonic.lengthPrefixEncode(ClientAcknowledge.toBytes)
       val write2 = Tcp.Write(b3, SonicPublisher.Ack)
       expectMsg(write2)
       pub ! SonicPublisher.Ack
@@ -143,16 +148,16 @@ class SonicdSourceSpec(_system: ActorSystem)
     "bubble up exceptions correctly if upstream connection stage fails" in {
       val pub = newPublisher()
 
-      expectMsg(NewPublisher(ctx))
+      expectMsg(RegisterPublisher(traceId))
 
       pub ! ActorPublisherMessage.Request(1)
       val failed = Tcp.CommandFailed(Tcp.Connect(new InetSocketAddress("", 8080)))
       pub ! failed
 
-      expectMsg(StreamStarted(ctx.traceId))
+      expectMsg(StreamStarted(traceId))
 
       pub ! ActorPublisherMessage.Request(1)
-      expectMsgType[DoneWithQueryExecution]
+      expectMsgType[StreamCompleted]
 
       expectMsg("complete")
       expectTerminated(pub)
@@ -162,7 +167,7 @@ class SonicdSourceSpec(_system: ActorSystem)
 
 //override supervisor
 class SonicSource(implicitSender: ActorRef, query: Query, actorContext: ActorContext, context: RequestContext)
-  extends build.unstable.sonic.SonicSource(query, actorContext, context) {
+  extends build.unstable.sonicd.source.SonicSource(query, actorContext, context) {
 
-  override lazy val handlerProps: Props = Props(classOf[SonicPublisher], implicitSender, query, context)
+  override lazy val publisher: Props = Props(classOf[SonicPublisher], implicitSender, query, false)
 }

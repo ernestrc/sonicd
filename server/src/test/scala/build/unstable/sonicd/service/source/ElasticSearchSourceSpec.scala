@@ -5,8 +5,8 @@ import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{OutputChunk, Query, RequestContext, TypeMetadata}
-import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonic._
+import JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
@@ -50,7 +50,7 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
                    watermark: Long = 10, querySize: Long = 100): TestActorRef[ElasticSearchPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
     val src = new ElasticSearchSource(querySize, watermark, self, query, controller.underlyingActor.context, context)
-    val ref = TestActorRef[ElasticSearchPublisher](src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
+    val ref = TestActorRef[ElasticSearchPublisher](src.publisher.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -345,7 +345,7 @@ class ElasticSearchSource(querySize: Long, watermark: Long, implicitSender: Acto
   extends build.unstable.sonicd.source.ElasticSearchSource(query, actorContext, context) {
   override def getSupervisor(name: String): ActorRef = implicitSender
 
-  override lazy val handlerProps: Props = {
+  override lazy val publisher: Props = {
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 

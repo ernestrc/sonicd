@@ -2,7 +2,7 @@ package build.unstable.sonic
 
 import akka.actor._
 import build.unstable.sonic.DataSource.ConfigurationException
-import build.unstable.sonicd.model.JsonProtocol._
+import JsonProtocol._
 import spray.json._
 
 object DataSource {
@@ -20,6 +20,6 @@ abstract class DataSource(query: Query, actorContext: ActorContext, context: Req
 
   def getOption[T: JsonFormat](key: String): Option[T] = query.config.fields.get(key).map(_.convertTo[T])
 
-  def handlerProps: Props
+  def publisher: Props
 
 }

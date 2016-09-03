@@ -7,8 +7,7 @@ import java.nio.file.{Path, WatchEvent}
 import akka.actor.{Actor, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
-import build.unstable.sonic.{RequestContext, SonicMessage, SonicSource}
-import build.unstable.sonicd.auth.{ApiKey, ApiUser}
+import build.unstable.sonic._
 import build.unstable.sonicd.source.SyntheticPublisher
 import build.unstable.sonicd.source.file.FileWatcherWorker
 
@@ -16,7 +15,7 @@ object Fixture {
 
   import build.unstable.sonicd.model.Fixture._
 
-  val queryBytes = SonicSource.lengthPrefixEncode(syntheticQuery.toBytes)
+  val queryBytes = Sonic.lengthPrefixEncode(syntheticQuery.toBytes)
 
   // in memory db
   val H2Driver = "org.h2.Driver"

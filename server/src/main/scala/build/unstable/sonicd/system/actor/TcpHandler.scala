@@ -9,10 +9,10 @@ import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.util.ByteString
+import build.unstable.sonic.Exceptions.ProtocolException
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import Exceptions.ProtocolException
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
+import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 
@@ -87,7 +87,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
       error(log, e, "error in publisher")
-      self ! DoneWithQueryExecution.error(traceId, e)
+      self ! StreamCompleted.error(traceId, e)
       Stop
   }
 
@@ -104,7 +104,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     debug(log, "stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
   }
 
-  def closing(ev: DoneWithQueryExecution): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+  def closing(ev: StreamCompleted): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
     debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
     // check if we're ready to send done msg
     if (storage.isEmpty) {
@@ -127,7 +127,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
     override def onError(t: Throwable): Unit = {
       error(log, t, "stream error")
-      self ! DoneWithQueryExecution.error(traceId, t)
+      self ! StreamCompleted.error(traceId, t)
     }
 
     override def onSubscribe(s: Subscription): Unit = {
@@ -144,7 +144,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   def buffer(t: SonicMessage) = {
     currentOffset += 1
     //length prefix framing
-    val w = Write(SonicSource.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
+    val w = Write(Sonic.lengthPrefixEncode(t.toBytes), Ack(currentOffset))
     storage.append(w)
     w
   }
@@ -185,14 +185,14 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
     case ConfirmedClosed ⇒ context.stop(self)
 
-    case ev: DoneWithQueryExecution ⇒
+    case ev: StreamCompleted ⇒
       log.debug("received done msg")
       context.become(closing(ev))
 
     case CompletedStream ⇒
       val msg = "completed stream without done msg"
       log.error(msg)
-      context.become(closing(DoneWithQueryExecution.error(traceId, new ProtocolException(msg))))
+      context.become(closing(StreamCompleted.error(traceId, new ProtocolException(msg))))
 
     case PeerClosed ⇒ debug(log, "peer closed")
   }
@@ -276,7 +276,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       } catch {
         case e: Exception ⇒
           log.error("error framing incoming bytes", e)
-          context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+          context.become(closing(StreamCompleted.error(traceId, e)))
       } finally {
         connection ! ResumeReading
       }
@@ -287,16 +287,16 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       //auth cmd failed
       case Failure(e) ⇒
         trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
-        context.become(closing(DoneWithQueryExecution.error(traceId, e)))
+        context.become(closing(StreamCompleted.error(traceId, e)))
 
       //auth cmd succeded
       case Success(token: AuthenticationActor.Token) ⇒
         trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
         self ! OutputChunk(Vector(token))
-        self ! DoneWithQueryExecution.success(traceId)
+        self ! StreamCompleted.success(traceId)
         context.become(materialized)
 
-      case ev: DoneWithQueryExecution ⇒
+      case ev: StreamCompleted ⇒
         context.become(closing(ev))
         trace(log, traceId, MaterializeSource, Variation.Failure(ev.error.get),
           "controller failed to materialize source")

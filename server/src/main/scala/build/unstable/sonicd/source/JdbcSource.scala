@@ -5,11 +5,10 @@ import java.sql.{Connection, DriverManager, ResultSet, Statement}
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.SonicdConfig
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.JdbcConnectionsHandler.JdbcHandle
+import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
 import spray.json._
 
@@ -36,7 +35,7 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
     Props(classOf[JdbcExecutor], query.query, conn, stmt, initializationStmts, context)
       .withDispatcher("akka.actor.jdbc-dispatcher")
 
-  lazy val handlerProps: Props = Props(classOf[JdbcPublisher],
+  lazy val publisher: Props = Props(classOf[JdbcPublisher],
     query.query, dbUrl, user, password, driver,
     executorProps, jdbcConnectionsActor, initializationStmts, context)
     .withDispatcher("akka.actor.jdbc-dispatcher")
@@ -128,7 +127,7 @@ class JdbcPublisher(query: String,
       context.watch(executor)
       context.become(streaming(executor))
 
-    case r: DoneWithQueryExecution ⇒
+    case r: StreamCompleted ⇒
       trace(log, ctx.traceId, GetJdbcHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
       onNext(r)
       onCompleteThenStop()
@@ -198,7 +197,7 @@ class JdbcExecutor(query: String,
   def extractValue[T](v: T)(c: (T) ⇒ JsValue): JsValue =
     if (v != null) c(v) else JsNull
 
-  def terminate(done: DoneWithQueryExecution) = {
+  def terminate(done: StreamCompleted) = {
     context.parent ! done
     context.stop(self)
   }
@@ -272,7 +271,7 @@ class JdbcExecutor(query: String,
       }
       if (isDone && n > 0) {
         log.debug("stopping: last row extracted")
-        terminate(DoneWithQueryExecution.success)
+        terminate(StreamCompleted.success)
       }
   }
 
@@ -291,7 +290,7 @@ class JdbcExecutor(query: String,
       debug(log, "split query into {} statements", statements.size)
 
       if (statements.isEmpty) {
-        terminate(DoneWithQueryExecution.error(new Exception("nothing to run")))
+        terminate(StreamCompleted.error(new Exception("nothing to run")))
       } else if (statements.foldLeft(true)((acc, u) ⇒ { val isResultSet = execute(u); acc && isResultSet })) {
         rs = stmt.getResultSet
         val rsmd = rs.getMetaData
@@ -331,9 +330,9 @@ class JdbcExecutor(query: String,
           log.error("user ran update statements successfully without write access")
         }
         context.parent ! TypeMetadata(Vector.empty) //n at least will be 1
-        if (n - 1 > 0) terminate(DoneWithQueryExecution.success)
+        if (n - 1 > 0) terminate(StreamCompleted.success)
         else context.become({
-          case r: Request ⇒ terminate(DoneWithQueryExecution.success)
+          case r: Request ⇒ terminate(StreamCompleted.success)
         })
       }
   }
@@ -415,7 +414,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
       } catch {
         case e: Exception ⇒
           error(log, e, "error when preparing connection/statement")
-          sender() ! DoneWithQueryExecution.error(ctx.traceId, e)
+          sender() ! StreamCompleted.error(ctx.traceId, e)
       }
   }
 }

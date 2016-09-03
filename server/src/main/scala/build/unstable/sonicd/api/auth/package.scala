@@ -1,6 +1,7 @@
-package build.unstable.sonicd
+package build.unstable.sonicd.api
 
-import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonic.{JsonProtocol, ApiKey}
+import JsonProtocol._
 import spray.json._
 
 package object auth {

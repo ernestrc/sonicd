@@ -9,9 +9,9 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
+import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
 import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel
 import spray.json._
@@ -73,7 +73,7 @@ trait LocalFilePublisher {
 
   /* HELPERS */
 
-  def terminate(done: DoneWithQueryExecution) = {
+  def terminate(done: StreamCompleted) = {
     onNext(done)
     onCompleteThenStop()
   }
@@ -221,9 +221,9 @@ trait LocalFilePublisher {
 
     case req: Request ⇒
       val dataLeft = files.nonEmpty && files.forall(kv ⇒ stream(query, kv._2._2))
-      if (!tail && !dataLeft) terminate(DoneWithQueryExecution.success(ctx.traceId))
+      if (!tail && !dataLeft) terminate(StreamCompleted.success(ctx.traceId))
 
-    case done: DoneWithQueryExecution ⇒
+    case done: StreamCompleted ⇒
       if (totalDemand > 0) terminate(done)
       else context.system.scheduler.scheduleOnce(100.millis, self, done)
 
@@ -285,7 +285,7 @@ trait LocalFilePublisher {
       } catch {
         case e: Exception ⇒
           error(log, e, "error setting up watch")
-          terminate(DoneWithQueryExecution.error(ctx.traceId, e))
+          terminate(StreamCompleted.error(ctx.traceId, e))
       }
     case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
   }

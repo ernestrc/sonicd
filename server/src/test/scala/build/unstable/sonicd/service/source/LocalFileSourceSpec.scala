@@ -9,8 +9,8 @@ import java.nio.file._
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{Query, RequestContext}
-import build.unstable.sonicd.model.JsonProtocol._
+import build.unstable.sonic.{JsonProtocol, RequestContext, Query}
+import JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.LocalFileStreamPublisher
@@ -87,7 +87,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
                    watchers: Vector[(File, ActorRef)] = Vector(tmp → self)): ActorRef = {
     val query = new Query(Some(1L), Some("traceId"), None, q, config)
     val src = new LocalFileStreamSource(watchers, query, controller.underlyingActor.context, testCtx)
-    val ref = system.actorOf(src.handlerProps.withDispatcher(CallingThreadDispatcher.Id))
+    val ref = system.actorOf(src.publisher.withDispatcher(CallingThreadDispatcher.Id))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
@@ -172,7 +172,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
 class LocalFileStreamSource(watchers: Vector[(File, ActorRef)], query: Query, actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.LocalFileStreamSource(query, actorContext, context) {
 
-  override lazy val handlerProps: Props = {
+  override lazy val publisher: Props = {
     val path = getConfig[String]("path")
     val tail = getConfig[Boolean]("tail")
 

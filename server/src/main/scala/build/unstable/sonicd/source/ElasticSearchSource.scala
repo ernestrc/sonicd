@@ -5,18 +5,17 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
 import akka.util.ByteString
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import build.unstable.sonicd.SonicdConfig
-import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.ElasticSearch.ESQuery
 import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.{HttpRequestCommand, Traceable}
+import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
 import spray.json._
 
-import scala.concurrent.duration.{Duration, FiniteDuration, _}
 import scala.collection.mutable
+import scala.concurrent.duration.{Duration, FiniteDuration, _}
 
 object ElasticSearch {
   def getSupervisorName(nodeUrl: String, port: Int): String = s"elasticsearch_${nodeUrl}_$port"
@@ -88,7 +87,7 @@ class ElasticSearchSource(query: Query, actorContext: ActorContext, context: Req
     }
   }
 
-  lazy val handlerProps: Props = {
+  lazy val publisher: Props = {
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
     val supervisor = getSupervisor(supervisorName)
 
@@ -187,7 +186,7 @@ class ElasticSearchPublisher(traceId: String,
 
   /* BEHAVIOUR */
 
-  def terminating(done: DoneWithQueryExecution): Receive = {
+  def terminating(done: StreamCompleted): Receive = {
     tryPushDownstream()
     if (buffer.isEmpty && isActive && totalDemand > 0) {
       onNext(done)
@@ -224,7 +223,7 @@ class ElasticSearchPublisher(traceId: String,
 
       if (fetched == target) {
         trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)
-        context.become(terminating(DoneWithQueryExecution.success))
+        context.become(terminating(StreamCompleted.success))
       } else {
         nextFrom += nhits
         tryPullUpstream()
@@ -233,7 +232,7 @@ class ElasticSearchPublisher(traceId: String,
 
     case Status.Failure(e) ⇒
       trace(log, traceId, ExecuteStatement, Variation.Failure(e), "something went wrong with the http request")
-      context.become(terminating(DoneWithQueryExecution.error(e)))
+      context.become(terminating(StreamCompleted.error(e)))
   }
 
   def commonReceive: Receive = {

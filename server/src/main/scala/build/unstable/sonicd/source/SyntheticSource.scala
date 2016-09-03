@@ -4,7 +4,7 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonic._
-import build.unstable.sonicd.model.JsonProtocol._
+import JsonProtocol._
 import spray.json._
 
 import scala.annotation.tailrec
@@ -15,7 +15,7 @@ import scala.util.{Random, Try}
 class SyntheticSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
-  val handlerProps: Props = {
+  val publisher: Props = {
     val seed = getOption[Int]("seed")
     val size = getOption[Int]("size")
     val progress = getOption[Int]("progress-delay").getOrElse(10)
@@ -130,7 +130,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
 
     //on the 10th message, if shouldThrowControlledException
     case Request(n) if shouldThrowExpectedException && streamed == 111L ⇒
-      onNext(DoneWithQueryExecution.error(new Exception("controlled exception test")))
+      onNext(StreamCompleted.error(new Exception("controlled exception test")))
       onCompleteThenStop()
 
     case Request(n) if !started ⇒
@@ -159,7 +159,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
 
     case Request(n) if target.nonEmpty && streamed >= target.get ⇒
       log.info(s"reached target of ${target.get - preTarget}")
-      onNext(DoneWithQueryExecution.success)
+      onNext(StreamCompleted.success)
       onCompleteThenStop()
 
     case Request(n) ⇒ stream(n)
