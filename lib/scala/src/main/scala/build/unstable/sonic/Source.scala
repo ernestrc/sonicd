@@ -6,7 +6,7 @@ import java.nio.ByteBuffer
 import akka.actor.{Actor, ActorContext, ActorRef, ActorSystem, Props, Terminated}
 import akka.io.{IO, Tcp}
 import akka.stream.actor.ActorPublisher
-import akka.stream.scaladsl.{Flow, Source}
+import akka.stream.scaladsl.{Keep, Sink, Flow, Source}
 import akka.stream.{ActorMaterializer, scaladsl}
 import akka.util.{ByteString, Timeout}
 import build.unstable.sonic.SonicPublisher.Ack
@@ -52,27 +52,12 @@ case object SonicSource {
     * @param address sonicd instance address
     * @param query   query to run
     */
-  def run(query: Query, address: InetSocketAddress)
-         (implicit system: ActorSystem, timeout: Timeout, ctx: RequestContext): Future[Vector[SonicMessage]] = {
-    ???
-    /*
-    val prom = Promise[Vector[SonicMessage]]()
-
-    val subscriber = new Subscriber[SonicMessage] {
-
-      private val buffer = ListBuffer.empty[SonicMessage]
-
-      override def onError(t: Throwable): Unit = ???
-
-      override def onSubscribe(s: Subscription): Unit = ???
-
-      override def onComplete(): Unit = {
-      }
-
-      override def onNext(t: SonicMessage): Unit = buffer.append(t)
-
-    }*/
-
+  final def run(address: InetSocketAddress, query: Query)
+         (implicit system: ActorSystem, timeout: Timeout,
+          ctx: RequestContext, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
+    stream(address, query)
+      .toMat(Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty[SonicMessage])((a, e) ⇒ a :+ e))(Keep.right)
+      .run()
   }
 
   /**
@@ -84,8 +69,6 @@ case object SonicSource {
     * @param address sonicd instance address
     * @param q       query to run
     */
-  //TODO overload methods with different combination of implicits
-  //TODO materialized value should be tuple with future of traceId as well
   final def stream(address: InetSocketAddress, q: Query)
                   (implicit system: ActorSystem, ctx: RequestContext, timeout: Timeout): Source[SonicMessage, Future[DoneWithQueryExecution]] = {
     import akka.pattern.ask
