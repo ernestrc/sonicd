@@ -10,6 +10,7 @@ import build.unstable.sonic.Exceptions.ProtocolException
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
 import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonicd.model.StreamSubscription
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 
@@ -23,7 +24,7 @@ with ActorSubscriber with SonicdLogging {
 
   override protected def requestStrategy: RequestStrategy = OneByOneRequestStrategy
 
-  case object CompletedStream
+  case object UpstreamCompleted
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
@@ -43,24 +44,19 @@ with ActorSubscriber with SonicdLogging {
     debug(log, "stopped ws handler in path '{}'", self.path)
   }
 
-  def awaitingAck: Receive = {
-    case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
-  }
 
-  def closing(done: StreamCompleted): Receive = {
-    log.debug("switched to closing behaviour with ev {}", done)
-    if (isActive && totalDemand > 0) {
-      onNext(done)
-      awaitingAck
-    } else {
-      case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
-      case Request(n) =>
-        if (isActive) {
-          onNext(done)
-          context.become(awaitingAck)
-        }
+  /* HELPERS */
+
+  def requestTil(): Unit = {
+    //make sure that requested is never > than totalDemand
+    while (pendingToStream < totalDemand) {
+      subscription.request(1)
+      pendingToStream += 1L
     }
   }
+
+
+  /* STATE */
 
   val subs = new Subscriber[SonicMessage] {
 
@@ -71,19 +67,48 @@ with ActorSubscriber with SonicdLogging {
 
     override def onSubscribe(s: Subscription): Unit = self ! s
 
-    override def onComplete(): Unit = self ! CompletedStream
+    override def onComplete(): Unit = self ! UpstreamCompleted
 
     override def onNext(t: SonicMessage): Unit = self ! t
 
   }
 
+  var pendingToStream: Long = 0L
+  var traceId: String = UUID.randomUUID().toString
+  var subscription: StreamSubscription = null
+
+
+  /* BEHAVIOUR */
+
+  def awaitingAck: Receive = {
+    case Cancel | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
+  }
+
+  def closing(done: StreamCompleted): Receive = {
+    log.debug("switched to closing behaviour with ev {}", done)
+    if (isActive && totalDemand > 0) {
+      onNext(done)
+      awaitingAck
+    } else {
+      case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒ onCompleteThenStop()
+      case UpstreamCompleted ⇒ //ignore
+      case Request(n) =>
+        if (isActive) {
+          onNext(done)
+          context.become(awaitingAck)
+        }
+      //this can only happen if cancel was sent between props and subscription
+      case s: Subscription ⇒ s.cancel()
+    }
+  }
+
   def commonBehaviour: Receive = {
 
-    case Cancel | OnComplete | OnNext(ClientAcknowledge) ⇒
+    case Cancel | OnComplete ⇒
       log.debug("client completed/canceled stream")
       onCompleteThenStop()
 
-    case CompletedStream ⇒
+    case UpstreamCompleted ⇒
       val msg = "completed stream without done msg"
       log.error(msg)
       context.become(closing(StreamCompleted.error(traceId, new ProtocolException(msg))))
@@ -97,45 +122,36 @@ with ActorSubscriber with SonicdLogging {
 
   }
 
-  var pendingToStream: Long = 0L
-  implicit var traceId: String = UUID.randomUUID().toString
+  def materialized: Receive = {
+    case OnNext(CancelStream) ⇒
+      subscription.cancel() //cancel source
+      context.become(closing(StreamCompleted.success(traceId)))
 
-  def requestTil(implicit s: Subscription): Unit = {
-    //make sure that requested is never > than totalDemand
-    while (pendingToStream < totalDemand) {
-      s.request(1)
-      pendingToStream += 1L
-    }
-  }
+    case a@(OnComplete | Cancel) ⇒
+      subscription.cancel()
+      onCompleteThenStop()
 
-  def materialized(subscription: Subscription): Receive = {
-    val recv: Receive = {
+    case msg@Request(n) ⇒ requestTil()
 
-      case msg@Request(n) ⇒ requestTil(subscription)
+    case msg: StreamCompleted ⇒ context.become(closing(msg))
 
-      case msg: StreamCompleted ⇒ context.become(closing(msg))
-
-      case a@(OnComplete | Cancel | OnNext(ClientAcknowledge)) ⇒
-        commonBehaviour.apply(a)
-        subscription.cancel() //cancel source
-
-      case msg: SonicMessage ⇒
-        try {
-          if (isActive) {
-            onNext(msg)
-            pendingToStream -= 1L
-          }
-          else warning(log, "dropping message {}: wsHandler is not active", msg)
-        } catch {
-          case e: Exception ⇒
-            error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
-            context.become(closing(StreamCompleted.error(traceId, e)))
+    case msg: SonicMessage ⇒
+      try {
+        if (isActive) {
+          onNext(msg)
+          pendingToStream -= 1L
         }
-    }
-    recv orElse commonBehaviour
+        else warning(log, "dropping message {}: wsHandler is not active", msg)
+      } catch {
+        case e: Exception ⇒
+          error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
+          context.become(closing(StreamCompleted.error(traceId, e)))
+      }
   }
 
   def awaitingReply(traceId: String): Receive = {
+
+    case OnNext(CancelStream) ⇒ context.become(closing(StreamCompleted.success(traceId)))
 
     //auth cmd failed
     case Failure(e) ⇒
@@ -150,8 +166,9 @@ with ActorSubscriber with SonicdLogging {
 
     case s: Subscription ⇒
       trace(log, traceId, MaterializeSource, Variation.Success, "subscribed")
-      requestTil(s)
-      context.become(materialized(s))
+      subscription = new StreamSubscription(s)
+      requestTil()
+      context.become(materialized orElse commonBehaviour)
 
     case handlerProps: Props ⇒
       log.debug("received props {}", handlerProps)
@@ -190,7 +207,7 @@ with ActorSubscriber with SonicdLogging {
       context.become(awaitingReply(withTraceId.traceId.get) orElse commonBehaviour)
 
     case OnNext(msg) ⇒
-      val msg = "first message should be a Query"
+      val msg = "first message should be a SonicCommand"
       log.error(msg)
       val e = new ProtocolException(msg)
       context.become(closing(StreamCompleted.error(traceId, e)))

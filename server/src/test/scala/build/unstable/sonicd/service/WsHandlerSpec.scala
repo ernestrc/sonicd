@@ -6,7 +6,7 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
-import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestKit}
+import akka.testkit.{TestActorRef, CallingThreadDispatcher, ImplicitSender, TestKit}
 import build.unstable.sonic._
 import JsonProtocol._
 import build.unstable.sonicd.model._
@@ -29,8 +29,9 @@ with ImplicitSubscriber with ImplicitGuardian {
     TestKit.shutdownActorSystem(system)
   }
 
-  def newWatchedHandler(): ActorRef = {
-    val wsHandler = guardian.underlyingActor.context.actorOf(
+  def newWatchedHandler(): TestActorRef[WsHandler] = {
+    val wsHandler =
+    TestActorRef[WsHandler](
       Props(classOf[WsHandler], self, self, Some(InetAddress.getLocalHost))
         .withDispatcher(CallingThreadDispatcher.Id))
 
@@ -52,7 +53,7 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   def expectDone(wsHandler: ActorRef): Unit = {
-    val done = StreamCompleted.success("expect-done-trace-id")
+    val done = StreamCompleted.success(syntheticQuery.traceId.get)
     wsHandler ! done
     expectMsg(done)
   }
@@ -69,7 +70,7 @@ with ImplicitSubscriber with ImplicitGuardian {
     expectTerminated(wsHandler)
   }
 
-  def newHandlerOnStreamingState(props: Props): ActorRef = {
+  def newHandlerOnStreamingState(props: Props): TestActorRef[WsHandler] = {
     val wsHandler = newWatchedHandler()
     wsHandler ! OnNext(syntheticQuery)
     val q = expectMsgType[NewQuery]
@@ -199,6 +200,21 @@ with ImplicitSubscriber with ImplicitGuardian {
 
       expectComplete(wsHandler)
 
+    }
+
+    "should handle client cancel message" in {
+      val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
+
+      wsHandler ! Request(1)
+      expectMsgClass(classOf[StreamStarted])
+
+      wsHandler ! OnNext(CancelStream)
+      assert(wsHandler.underlyingActor.subscription.isCancelled)
+
+      wsHandler ! Request(1)
+      expectMsg(StreamCompleted.success(syntheticQuery.traceId.get))
+
+      expectComplete(wsHandler)
     }
   }
 }

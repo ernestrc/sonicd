@@ -13,6 +13,7 @@ import build.unstable.sonic.Exceptions.ProtocolException
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
 import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonicd.model.StreamSubscription
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 
@@ -74,16 +75,6 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   import akka.io.Tcp._
   import context.dispatcher
 
-  //wrapper around org.reactivestreams.Subscription
-  class StreamSubscription(s: Subscription) {
-    var requested: Long = 0L
-
-    def request(n: Long) = {
-      requested += n
-      s.request(n)
-    }
-  }
-
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
       error(log, e, "error in publisher")
@@ -100,46 +91,11 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    if (cancellableCompleted != null) cancellableCompleted.cancel()
     debug(log, "stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
   }
 
-  def closing(ev: StreamCompleted): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
-    debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
-    // check if we're ready to send done msg
-    if (storage.isEmpty) {
-      buffer(ev)
-      writeOne()
-    } else buffer(ev)
 
-    {
-      case PeerClosed ⇒ debug(log, "peer closed")
-      case ConfirmedClosed ⇒ context.stop(self)
-      case CommandFailed(_: Write) => connection ! ResumeWriting
-      case WritingResumed => writeOne()
-      case Ack(offset) =>
-        acknowledge(offset)
-        if (storage.length > 0) writeOne()
-    }
-  }
-
-  val subs = new Subscriber[SonicMessage] {
-
-    override def onError(t: Throwable): Unit = {
-      error(log, t, "stream error")
-      self ! StreamCompleted.error(traceId, t)
-    }
-
-    override def onSubscribe(s: Subscription): Unit = {
-      self ! s
-    }
-
-    override def onComplete(): Unit = {
-      cancellableCompleted = context.system.scheduler.scheduleOnce(2.seconds, self, CompletedStream)
-    }
-
-    override def onNext(t: SonicMessage): Unit = self ! t
-  }
+  /* HELPERS */
 
   def buffer(t: SonicMessage) = {
     currentOffset += 1
@@ -169,16 +125,59 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     }
   }
 
-  context watch connection
+  val subs = new Subscriber[SonicMessage] {
+
+    override def onError(t: Throwable): Unit = {
+      error(log, t, "stream error")
+      self ! StreamCompleted.error(traceId, t)
+    }
+
+    override def onSubscribe(s: Subscription): Unit = self ! s
+
+    override def onComplete(): Unit = self ! CompletedStream
+
+    override def onNext(t: SonicMessage): Unit = self ! t
+  }
+
+
+  /* STATE */
 
   val storage = ListBuffer.empty[Write]
   var currentOffset = 0
   var transferred = 0
   var handler = context.system.deadLetters
   var subscription: StreamSubscription = null
-  var cancellableCompleted: Cancellable = null
   var dataBuffer = ByteString.empty
-  implicit var traceId = UUID.randomUUID().toString
+  var traceId = UUID.randomUUID().toString
+
+
+  /* BEHAVIOUR */
+
+  context watch connection
+
+  def closing(ev: StreamCompleted, needAck: Boolean = true): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+    debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
+    // check if we're ready to send done msg
+    if (storage.isEmpty) {
+      buffer(ev)
+      writeOne()
+    } else buffer(ev)
+
+    {
+      case PeerClosed ⇒ debug(log, "peer closed")
+      case ConfirmedClosed ⇒ context.stop(self)
+      case CommandFailed(_: Write) => connection ! ResumeWriting
+      case WritingResumed => writeOne()
+      case Ack(offset) =>
+        acknowledge(offset)
+        if (storage.length > 0) writeOne()
+        else if (!needAck) context.stop(self)
+
+      // this can only happen if client cancel msg is delivered
+      // after subscribing but before receiving subscription
+      case s: Subscription ⇒ s.cancel()
+    }
+  }
 
   def commonBehaviour: Receive = {
     case Terminated(_) ⇒ context.stop(self)
@@ -229,13 +228,21 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
   def deserializeAndHandleClientAcknowledgeFrame(data: ByteString): Unit =
     SonicMessage.fromBytes(data) match {
+      //TODO don't close
       case ClientAcknowledge ⇒ connection ! ConfirmedClose
+      case CancelStream ⇒
+        storage.clear()
+        context.become(closing(StreamCompleted.success(traceId), needAck = false))
       case anyElse ⇒ //ignore
     }
 
   def deserializeAndHandleMessageFrame(data: ByteString): Unit =
     SonicMessage.fromBytes(data) match {
       case ClientAcknowledge ⇒ connection ! ConfirmedClose
+      case CancelStream ⇒
+        storage.clear()
+        subscription.cancel()
+        context.become(closing(StreamCompleted.success(traceId), needAck = false))
       case anyElse ⇒ handler ! OnNext(anyElse)
     }
 
@@ -289,7 +296,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
         context.become(closing(StreamCompleted.error(traceId, e)))
 
-      //auth cmd succeded
+      //auth cmd succeeded
       case Success(token: AuthenticationActor.Token) ⇒
         trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
         self ! OutputChunk(Vector(token))

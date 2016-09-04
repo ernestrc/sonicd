@@ -132,6 +132,12 @@ case class Authenticate(user: String, key: String, traceId: Option[String])
   override def toString: String = s"Authenticate($user)"
 }
 
+case object CancelStream extends SonicMessage {
+  override val variation: Option[String] = None
+  override val payload: Option[JsValue] = None
+  override val eventType: String = SonicMessage.cancel
+}
+
 object SonicMessage {
 
   //fields
@@ -141,6 +147,7 @@ object SonicMessage {
 
   //messages
   val auth = "H"
+  val cancel = "C"
   val started = "S"
   val query = "Q"
   val meta = "T"
@@ -165,6 +172,7 @@ object SonicMessage {
       }
       case Some(`ack`) ⇒ ClientAcknowledge
       case Some(`started`) ⇒ StreamStarted(vari.get)
+      case Some(`cancel`) ⇒ CancelStream
       case Some(`auth`) ⇒
         val fields = pay.get.asJsObject.fields
         Authenticate(
