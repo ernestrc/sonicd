@@ -18,7 +18,6 @@ import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
@@ -69,11 +68,10 @@ object TcpHandler {
 
 class TcpHandler(controller: ActorRef, authService: ActorRef,
                  connection: ActorRef, clientAddress: InetAddress)
-  extends Actor with SonicdLogging {
+  extends Actor with SonicdLogging with Stash {
 
   import TcpHandler._
   import akka.io.Tcp._
-  import context.dispatcher
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
@@ -125,6 +123,22 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     }
   }
 
+  def initState() {
+    storage.clear()
+    currentOffset = 0
+    transferred = 0
+    handler = context.system.deadLetters
+    subscription = null
+    dataBuffer = ByteString.empty
+    traceId = UUID.randomUUID().toString
+  }
+
+  def restartInternally(): Unit = {
+    initState()
+    unstashAll()
+    context.become(receive)
+  }
+
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
@@ -143,19 +157,20 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   /* STATE */
 
   val storage = ListBuffer.empty[Write]
-  var currentOffset = 0
-  var transferred = 0
-  var handler = context.system.deadLetters
-  var subscription: StreamSubscription = null
-  var dataBuffer = ByteString.empty
-  var traceId = UUID.randomUUID().toString
+  var currentOffset: Long = _
+  var transferred: Long = _
+  var handler: ActorRef = _
+  var subscription: StreamSubscription = _
+  var dataBuffer: ByteString = _
+  var traceId: String = _
 
 
   /* BEHAVIOUR */
 
   context watch connection
+  initState()
 
-  def closing(ev: StreamCompleted, needAck: Boolean = true): Receive = framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+  def closing(ev: StreamCompleted): Receive = framing(stashCommandsHandleAckCancel) orElse {
     debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
     // check if we're ready to send done msg
     if (storage.isEmpty) {
@@ -165,13 +180,11 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
     {
       case PeerClosed ⇒ debug(log, "peer closed")
-      case ConfirmedClosed ⇒ context.stop(self)
       case CommandFailed(_: Write) => connection ! ResumeWriting
       case WritingResumed => writeOne()
       case Ack(offset) =>
         acknowledge(offset)
         if (storage.length > 0) writeOne()
-        else if (!needAck) context.stop(self)
 
       // this can only happen if client cancel msg is delivered
       // after subscribing but before receiving subscription
@@ -181,8 +194,6 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
   def commonBehaviour: Receive = {
     case Terminated(_) ⇒ context.stop(self)
-
-    case ConfirmedClosed ⇒ context.stop(self)
 
     case ev: StreamCompleted ⇒
       log.debug("received done msg")
@@ -196,7 +207,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     case PeerClosed ⇒ debug(log, "peer closed")
   }
 
-  def deserializeAndHandleInitCommands(data: ByteString): Unit = {
+  def handleCommands(data: ByteString): Unit = {
     SonicMessage.fromBytes(data) match {
       case i: SonicCommand ⇒
         val withTraceId = {
@@ -221,38 +232,30 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
             authService ! withTraceId
         }
 
-        context.become(waitingReply(withTraceId.traceId.get) orElse commonBehaviour)
+        context.become(waiting(withTraceId.traceId.get) orElse commonBehaviour)
       case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
     }
   }
 
-  def deserializeAndHandleClientAcknowledgeFrame(data: ByteString): Unit =
+  def stashCommandsHandleAckCancel(data: ByteString): Unit =
     SonicMessage.fromBytes(data) match {
-      //TODO don't close
-      case ClientAcknowledge ⇒ connection ! ConfirmedClose
+      //stash pipelined commands
+      case c: SonicCommand ⇒ stash()
+      case ClientAcknowledge ⇒ restartInternally()
       case CancelStream ⇒
         storage.clear()
-        context.become(closing(StreamCompleted.success(traceId), needAck = false))
+        if (subscription != null) subscription.cancel()
+        context.become(closing(StreamCompleted.success(traceId)))
       case anyElse ⇒ //ignore
     }
 
-  def deserializeAndHandleMessageFrame(data: ByteString): Unit =
-    SonicMessage.fromBytes(data) match {
-      case ClientAcknowledge ⇒ connection ! ConfirmedClose
-      case CancelStream ⇒
-        storage.clear()
-        subscription.cancel()
-        context.become(closing(StreamCompleted.success(traceId), needAck = false))
-      case anyElse ⇒ handler ! OnNext(anyElse)
-    }
-
   def materialized: Receive =
-    commonBehaviour orElse framing(deserializeAndHandleMessageFrame) orElse {
+    commonBehaviour orElse framing(stashCommandsHandleAckCancel) orElse {
       case t: SonicMessage ⇒
         buffer(t)
         writeOne()
 
-        context.become(commonBehaviour orElse {
+        context.become(commonBehaviour orElse{
           case t: SonicMessage ⇒ buffer(t)
           case Ack(offset) ⇒
             acknowledge(offset)
@@ -261,8 +264,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
               context.unbecome()
             } else writeOne()
           case WritingResumed ⇒ writeOne()
-          case Tcp.CommandFailed(Write(_, _)) =>
-            connection ! ResumeWriting
+          case Tcp.CommandFailed(Write(_, _)) => connection ! ResumeWriting
         }, discardOld = false)
     }
 
@@ -289,8 +291,8 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
       }
   }
 
-  def waitingReply(traceId: String): Receive =
-    framing(deserializeAndHandleClientAcknowledgeFrame) orElse {
+  def waiting(traceId: String): Receive =
+    framing(stashCommandsHandleAckCancel) orElse {
       //auth cmd failed
       case Failure(e) ⇒
         trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
@@ -323,5 +325,5 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         pub.subscribe(subs)
     }
 
-  def receive: Receive = framing(deserializeAndHandleInitCommands) orElse commonBehaviour
+  def receive: Receive = framing(handleCommands) orElse commonBehaviour
 }

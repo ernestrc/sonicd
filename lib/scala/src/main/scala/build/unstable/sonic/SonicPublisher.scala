@@ -4,7 +4,7 @@ import java.util.UUID
 
 import akka.actor.{ActorRef, Terminated}
 import akka.io.Tcp
-import akka.stream.actor.ActorPublisher
+import akka.stream.actor.{ActorPublisherMessage, ActorPublisher}
 import akka.util.ByteString
 import build.unstable.sonic.SonicPublisher.{StreamException, Ack}
 import build.unstable.tylog.Variation
@@ -78,8 +78,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
           context.become({
             case WritingResumed ⇒ connection ! write
             case t@Tcp.CommandFailed(_: Tcp.Write) ⇒ connection ! ResumeWriting
-            case Ack ⇒
-              context.become(terminating(d))
+            case Ack ⇒ context.become(terminating(d))
           }, discardOld = true)
 
         case m if buffer.isEmpty && isActive && totalDemand > 0 ⇒ onNext(m)
@@ -139,36 +138,22 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     }
   }
 
-  //TODO def waitingCancelAck then when received termiante
-  def waitingCancelAck: Receive = {
-    case Tcp.Received(data) ⇒
-      pendingRead ++= data
-      tryFrame()
-      if (isActive && totalDemand > 0 && buffer.nonEmpty) {
-        onNext(buffer.dequeue())
-      }
-      if (buffer.isEmpty) {
-
-      }
-      connection ! ResumeReading
-  }
-
   def commonBehaviour: Receive = {
-    case Cancel ⇒
+    case ActorPublisherMessage.Cancel ⇒
       val write = Tcp.Write(Sonic.lengthPrefixEncode(CancelStream.toBytes), Ack)
+      connection ! write
       context.become({
         case WritingResumed ⇒ connection ! write
         case t@Tcp.CommandFailed(_: Tcp.Write) ⇒ connection ! ResumeWriting
-        case Ack ⇒ context.become(waitingCancelAck)
-      }, discardOld = true)
+        case Ack ⇒ context.unbecome()
+      }, discardOld = false)
 
     case Terminated(_) ⇒
       context.become(terminating(StreamCompleted.error(traceId, new Exception("tcp connection terminated unexpectedly"))))
-
   }
 
   def materialized: Receive = commonBehaviour orElse {
-    case Request(_) ⇒
+    case ActorPublisherMessage.Request(_) ⇒
       tryFrame()
       tryPushDownstream()
 
@@ -190,7 +175,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     connection ! write
 
     {
-      case WritingResumed ⇒ connection ! write
+      case Tcp.WritingResumed ⇒ connection ! write
       case t@Tcp.CommandFailed(_: Tcp.Write) ⇒ connection ! ResumeWriting
       case Ack ⇒
         firstSent = true
@@ -204,37 +189,28 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
 
   // halfReady signals when one of the async events (Connected, Request)
   // that we're waiting for has been received already
-  def idle(halfReady: Boolean): Receive = commonBehaviour orElse {
+  def idle: Receive = commonBehaviour orElse {
 
-    case f@CommandFailed(_: Connect) ⇒
+    case f@Tcp.CommandFailed(_: Connect) ⇒
       trace(log, traceId, CreateTcpConnection,
         Variation.Failure(new Exception(f.cmd.failureMessage.toString)), "failed to obtain new tcp connection")
       context.become(terminating(StreamCompleted.error(traceId, new Exception(f.cmd.failureMessage.toString))))
 
-    case SubscriptionTimeoutExceeded ⇒
+    case ActorPublisherMessage.SubscriptionTimeoutExceeded ⇒
       log.info(s"no subscriber in within subs timeout $subscriptionTimeout")
       onCompleteThenStop()
 
-    case Connected(_, _) if halfReady ⇒
+    case Tcp.Connected(_, _) ⇒
       trace(log, traceId, CreateTcpConnection, Variation.Success, "received tcp connection")
       connection = sender()
       context watch connection
       context.become(connected)
 
-    case Connected(_, _) ⇒
-      trace(log, traceId, CreateTcpConnection, Variation.Success, "received new tcp connection")
-      connection = sender()
-      context.become(idle(halfReady = true))
-
-    case Request(_) if halfReady ⇒
-      context.become(connected)
-
-    case Request(_) ⇒
-      context.become(idle(halfReady = true))
+    case ActorPublisherMessage.Request(_) ⇒ //ignore for now
 
     case anyElse ⇒ warning(log, "received unexpected {} when in idle state", anyElse)
   }
 
-  override def receive: Receive = idle(halfReady = false)
+  override def receive: Receive = idle
 
 }

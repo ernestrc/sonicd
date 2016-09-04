@@ -1,8 +1,9 @@
 package build.unstable.sonicd.model
 
 import akka.actor.ActorRef
+import akka.io.Tcp
 import akka.testkit.TestKitBase
-import build.unstable.sonic.{StreamCompleted, QueryProgress, TypeMetadata}
+import build.unstable.sonic.{Sonic, StreamCompleted, QueryProgress, TypeMetadata}
 
 trait HandlerUtils {
   this: TestKitBase ⇒

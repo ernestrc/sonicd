@@ -19,8 +19,8 @@ import scala.concurrent.duration._
 
 class SonicdSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
-    with Matchers with BeforeAndAfterAll with ImplicitSender
-    with ImplicitSubscriber with HandlerUtils {
+  with Matchers with BeforeAndAfterAll with ImplicitSender
+  with ImplicitSubscriber with HandlerUtils {
 
   override protected def afterAll(): Unit = {
     materializer.shutdown()
@@ -165,6 +165,58 @@ class SonicdSourceSpec(_system: ActorSystem)
       expectTerminated(pub)
     }
 
+    "handle stream cancel and propagate cancel upstream" in {
+      val pub = newPublisher()
+
+      expectMsg(RegisterPublisher(traceId))
+
+      pub ! ActorPublisherMessage.Request(1)
+      pub ! Tcp.Connected(testAddr, testAddr)
+      expectMsg(Tcp.Register(pub))
+
+      val bytes = Sonic.lengthPrefixEncode(sonicQuery1.toBytes)
+      val write = Tcp.Write(bytes, SonicPublisher.Ack)
+      expectMsg(write)
+
+      //write succeeds
+      pub ! SonicPublisher.Ack
+      expectMsg(Tcp.ResumeReading)
+
+      //stream starts
+      expectMsg(StreamStarted(traceId))
+
+      //client cancels
+      pub ! ActorPublisherMessage.Request(1)
+      expectNoMsg(220.millis)
+
+      pub ! ActorPublisherMessage.Cancel
+
+      val b2 = Sonic.lengthPrefixEncode(CancelStream.toBytes)
+      val write2 = Tcp.Write(b2, SonicPublisher.Ack)
+      expectMsg(write2)
+
+      pub ! SonicPublisher.Ack
+      pub ! ActorPublisherMessage.Request(10)
+
+      //server should send complete
+      val done = StreamCompleted.success(traceId)
+      val b3 = Sonic.lengthPrefixEncode(done.toBytes)
+      pub ! Tcp.Received(b3)
+
+      //ack
+      val b4 = Sonic.lengthPrefixEncode(ClientAcknowledge.toBytes)
+      val write3 = Tcp.Write(b4, SonicPublisher.Ack)
+
+      expectMsg(write3)
+      pub ! SonicPublisher.Ack
+
+      expectMsg(Tcp.ResumeReading)
+
+      expectMsg(done)
+
+      //expect publisher to be in idle state
+      //TODO
+    }
     /*
     "bubble up exception correctly if connection dies unexpectedly" in {
       {
@@ -190,7 +242,7 @@ class SonicdSourceSpec(_system: ActorSystem)
         expectMsgType[StreamCompleted]
 
         expectMsg("complete")
-        expectTerminated(pub)
+        expectIdle
       }
 
       {
@@ -203,7 +255,7 @@ class SonicdSourceSpec(_system: ActorSystem)
         expectMsgType[StreamCompleted]
 
         expectMsg("complete")
-        expectTerminated(pub)
+        expectIdle
       }
     }*/
   }

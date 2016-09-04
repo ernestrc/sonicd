@@ -214,6 +214,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       wsHandler ! Request(1)
       expectMsg(StreamCompleted.success(syntheticQuery.traceId.get))
 
+      clientAcknowledge(wsHandler)
       expectComplete(wsHandler)
     }
   }

@@ -49,7 +49,7 @@ object Sonic {
 
             override def cancel(): Boolean = {
               if (!cancelled) {
-                ref ! Cancel
+                ref ! CancelStream
                 cancelled = true
                 cancelled
               } else false
