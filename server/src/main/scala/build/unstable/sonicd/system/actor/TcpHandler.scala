@@ -233,7 +233,10 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         }
 
         context.become(waiting(withTraceId.traceId.get) orElse commonBehaviour)
-      case anyElse ⇒ throw new Exception(s"protocol error $anyElse not expected")
+      case anyElse ⇒
+        val msg = "first message should be a SonicCommand"
+        val e = new ProtocolException(msg)
+        context.become(closing(StreamCompleted.error(traceId, e)))
     }
   }
 
