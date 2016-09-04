@@ -2,8 +2,8 @@ package build.unstable.sonicd.service
 
 import java.net.InetAddress
 
-import akka.actor.{ActorRef, ActorSystem, Props}
-import akka.stream.actor.ActorPublisher
+import akka.actor.{PoisonPill, ActorRef, ActorSystem, Props}
+import akka.stream.actor.{ActorSubscriberMessage, ActorPublisherMessage, ActorPublisher}
 import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.testkit.{TestActorRef, CallingThreadDispatcher, ImplicitSender, TestKit}
@@ -29,13 +29,12 @@ with ImplicitSubscriber with ImplicitGuardian {
     TestKit.shutdownActorSystem(system)
   }
 
-  def newWatchedHandler(): TestActorRef[WsHandler] = {
+  def newHandler(): TestActorRef[WsHandler] = {
     val wsHandler =
-    TestActorRef[WsHandler](
+      TestActorRef[WsHandler](
       Props(classOf[WsHandler], self, self, Some(InetAddress.getLocalHost))
         .withDispatcher(CallingThreadDispatcher.Id))
 
-    watch(wsHandler)
     ActorPublisher.apply[SonicMessage](wsHandler).subscribe(subs)
     wsHandler
   }
@@ -58,20 +57,19 @@ with ImplicitSubscriber with ImplicitGuardian {
     expectMsg(done)
   }
 
-  def clientAcknowledge(wsHandler: ActorRef) = {
+  def expectIdle(wsHandler: TestActorRef[WsHandler]): Unit = {
+    assert(wsHandler.underlyingActor.pendingToStream == 0)
+    assert(wsHandler.underlyingActor.subscription == null)
+  }
+
+  def clientAcknowledge(wsHandler: TestActorRef[WsHandler]) = {
     val ack = OnNext(ClientAcknowledge)
     wsHandler ! ack
+    expectIdle(wsHandler)
   }
 
-  def expectComplete(wsHandler: ActorRef) {
-    //wsHandler ! OnComplete
-    clientAcknowledge(wsHandler)
-    expectMsg("complete")
-    expectTerminated(wsHandler)
-  }
-
-  def newHandlerOnStreamingState(props: Props): TestActorRef[WsHandler] = {
-    val wsHandler = newWatchedHandler()
+  def newMaterializedHandler(props: Props): TestActorRef[WsHandler] = {
+    val wsHandler = newHandler()
     wsHandler ! OnNext(syntheticQuery)
     val q = expectMsgType[NewQuery]
 
@@ -83,8 +81,8 @@ with ImplicitSubscriber with ImplicitGuardian {
   }
 
   "WsHandler" should {
-    "should handle authenticate message" in {
-      val wsHandler = newWatchedHandler()
+    "handle authenticate message" in {
+      val wsHandler = newHandler()
 
       wsHandler ! Request(1)
       wsHandler ! OnNext(Authenticate("serrallonga", "a", None))
@@ -101,12 +99,12 @@ with ImplicitSubscriber with ImplicitGuardian {
       assert(d.success)
 
       clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
       expectMsg("complete")
-      expectTerminated(wsHandler)
     }
 
-    "should handle authenticate message and auth error" in {
-      val wsHandler = newWatchedHandler()
+    "handle authenticate message and auth error" in {
+      val wsHandler = newHandler()
 
       wsHandler ! Request(1)
       wsHandler ! OnNext(Authenticate("serrallonga", "a", None))
@@ -122,12 +120,12 @@ with ImplicitSubscriber with ImplicitGuardian {
       assert(d.error.get == done.failed.get)
 
       clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
       expectMsg("complete")
-      expectTerminated(wsHandler)
     }
 
-    "should handle error event when controller fails to instantiate publisher" in {
-      val wsHandler = newWatchedHandler()
+    "handle error event when controller fails to instantiate publisher" in {
+      val wsHandler = newHandler()
 
       wsHandler ! OnNext(syntheticQuery)
 
@@ -140,15 +138,14 @@ with ImplicitSubscriber with ImplicitGuardian {
       expectMsg(done)
 
       clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
       expectMsg("complete")
-      expectTerminated(wsHandler)
     }
 
-    "should not call onComplete twice (respect ReactiveStreams rules)" in {
+    "not call onComplete twice (respect ReactiveStreams rules)" in {
       val wsHandler = guardian.underlying.actor.context.actorOf(Props(classOf[WsHandler], self, self, None)
         .withDispatcher(CallingThreadDispatcher.Id))
 
-      watch(wsHandler)
       ActorPublisher.apply[SonicMessage](wsHandler).subscribe(subs)
 
       wsHandler ! OnNext(syntheticQuery)
@@ -160,13 +157,117 @@ with ImplicitSubscriber with ImplicitGuardian {
       val done = StreamCompleted.error("trace-id", new Exception("BOOM"))
       wsHandler ! done
       expectMsg(done)
-      clientAcknowledge(wsHandler)
+
+      wsHandler ! PoisonPill
       expectMsg("complete")
-      expectTerminated(wsHandler)
     }
 
-    "should forward all messages until completed is called" in {
-      val wsHandler = newHandlerOnStreamingState(zombiePubProps)
+    "terminate if upstream completes" in {
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+        wsHandler ! ActorSubscriberMessage.OnComplete
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! ActorSubscriberMessage.OnComplete
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! ActorSubscriberMessage.OnComplete
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        wsHandler ! ActorSubscriberMessage.OnComplete
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+    }
+
+    "terminate if dowstream cancels" in {
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! ActorPublisherMessage.Cancel
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+        wsHandler ! ActorPublisherMessage.Cancel
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! ActorPublisherMessage.Cancel
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+      {
+        val wsHandler = newMaterializedHandler(zombiePubProps)
+        watch(wsHandler)
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        wsHandler ! ActorPublisherMessage.Cancel
+        expectMsg("complete")
+        expectTerminated(wsHandler)
+      }
+    }
+
+    "forward all messages until completed is called" in {
+      val wsHandler = newMaterializedHandler(zombiePubProps)
 
       wsHandler ! Request(1)
       expectProgress(wsHandler)
@@ -177,12 +278,14 @@ with ImplicitSubscriber with ImplicitGuardian {
       wsHandler ! Request(1)
       expectDone(wsHandler)
 
-      expectComplete(wsHandler)
+      clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
+      expectMsg("complete")
 
     }
 
-    "should materialize stream and propagates messages to downstream subscriber" in {
-      val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
+    "materialize stream and propagates messages to downstream subscriber" in {
+      val wsHandler = newMaterializedHandler(syntheticPubProps)
 
       wsHandler ! Request(1)
       expectMsgClass(classOf[StreamStarted])
@@ -198,12 +301,14 @@ with ImplicitSubscriber with ImplicitGuardian {
       tail.head shouldBe a[OutputChunk]
       tail.tail.head shouldBe a[StreamCompleted]
 
-      expectComplete(wsHandler)
+      clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
+      expectMsg("complete")
 
     }
 
-    "should handle client cancel message" in {
-      val wsHandler = newHandlerOnStreamingState(syntheticPubProps)
+    "handle client cancel message" in {
+      val wsHandler = newMaterializedHandler(syntheticPubProps)
 
       wsHandler ! Request(1)
       expectMsgClass(classOf[StreamStarted])
@@ -215,7 +320,87 @@ with ImplicitSubscriber with ImplicitGuardian {
       expectMsg(StreamCompleted.success(syntheticQuery.traceId.get))
 
       clientAcknowledge(wsHandler)
-      expectComplete(wsHandler)
+      clientAcknowledge(wsHandler)
+      wsHandler ! PoisonPill
+      expectMsg("complete")
+    }
+
+    "pipeline multiple commands" in {
+      val wsHandler = newHandler()
+
+      //1st query
+      {
+        wsHandler ! OnNext(syntheticQuery)
+        expectMsgType[NewQuery]
+
+        wsHandler ! zombiePubProps
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        clientAcknowledge(wsHandler)
+      }
+
+      //2c nd query
+      {
+        wsHandler ! OnNext(syntheticQuery)
+        expectMsgType[NewQuery]
+
+        wsHandler ! zombiePubProps
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        clientAcknowledge(wsHandler)
+      }
+
+      //3rd and 4th queries
+      {
+        wsHandler ! OnNext(syntheticQuery)
+        wsHandler ! OnNext(syntheticQuery)
+        expectMsgType[NewQuery]
+
+        wsHandler ! zombiePubProps
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        clientAcknowledge(wsHandler)
+
+        //--
+
+        expectMsgType[NewQuery]
+        wsHandler ! zombiePubProps
+
+        wsHandler ! Request(1)
+        expectProgress(wsHandler)
+
+        wsHandler ! Request(1)
+        expectOutput(wsHandler)
+
+        wsHandler ! Request(1)
+        expectDone(wsHandler)
+
+        clientAcknowledge(wsHandler)
+      }
     }
   }
 }
