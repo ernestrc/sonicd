@@ -2,17 +2,19 @@ package build.unstable.sonic
 
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.UUID
 
-import akka.actor.{ActorSystem, Props}
-import akka.pattern.ask
+import akka.actor.{ActorSystem, Cancellable, Props}
 import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
+import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.scaladsl.{Keep, Sink, Source}
-import akka.util.{ByteString, Timeout}
+import akka.util.ByteString
+import spray.json.{JsArray, JsString}
 
 import scala.concurrent.Future
 
-case object Sonic {
+object Sonic {
 
   private[unstable] def sonicSupervisorProps(addr: InetSocketAddress): Props =
     Props(classOf[SonicSupervisor], addr)
@@ -24,38 +26,58 @@ case object Sonic {
     ByteString(len.array() ++ bytes)
   }
 
+  private val fold = Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty[SonicMessage])((a, e) ⇒ a :+ e)
+
   case class Client(address: InetSocketAddress)(implicit system: ActorSystem) {
 
     val supervisor = system.actorOf(Sonic.sonicSupervisorProps(address))
 
     type Token = String
 
-    /**
-     * builds a [[akka.stream.scaladsl.Source]] of SonicMessage(s).
-     * The materialized value signals, if the stream is finite, when the stream is completed
-     */
-    final def stream(query: Query)
-                    (implicit system: ActorSystem, timeout: Timeout): Source[SonicMessage, Future[StreamCompleted]] = {
-      val publisher: Props = Props(classOf[SonicPublisher], supervisor, query, true)
+
+    final def stream(cmd: SonicCommand)(implicit system: ActorSystem): Source[SonicMessage, Cancellable] = {
+
+      val publisher: Props = Props(classOf[SonicPublisher], supervisor, cmd, true)
       val ref = system.actorOf(publisher)
 
       Source.fromPublisher(ActorPublisher[SonicMessage](ref))
-        .mapMaterializedValue(_ ⇒ ref.ask(SonicPublisher.RegisterDone)(timeout).mapTo[StreamCompleted])
+        .mapMaterializedValue { _ ⇒
+          new Cancellable {
+            private var cancelled = false
+
+            override def isCancelled: Boolean = cancelled
+
+            override def cancel(): Boolean = {
+              if (!cancelled) {
+                ref ! Cancel
+                cancelled = true
+                cancelled
+              } else false
+            }
+          }
+        }
     }
 
-    final def run(query: Query)
-                 (implicit system: ActorSystem, timeout: Timeout, mat: ActorMaterializer): Future[Vector[SonicMessage]] = {
-      stream(query)
-        .toMat(Sink.fold[Vector[SonicMessage], SonicMessage](Vector.empty[SonicMessage])((a, e) ⇒ a :+ e))(Keep.right)
-        .run()
-    }
 
-    /**
-     * Authenticates a user and returns a token. Future will fail if api-key is invalid
-     */
-    final def authenticate(user: String, apiKey: String)
+    final def run(cmd: SonicCommand)(implicit system: ActorSystem, mat: ActorMaterializer): Future[Vector[SonicMessage]] =
+      stream(cmd).toMat(fold)(Keep.right).run()
+
+
+    final def authenticate(user: String, apiKey: String, traceId: String = UUID.randomUUID().toString)
                           (implicit system: ActorSystem, mat: ActorMaterializer): Future[Token] = {
-      ???
+
+      import system.dispatcher
+
+      stream(Authenticate(user, apiKey, Some(traceId)))
+        .toMat(fold)(Keep.right)
+        .run()
+        .flatMap(_.collectFirst {
+          case OutputChunk(JsArray(Vector(JsString(token)))) ⇒ Future.successful(token)
+        }.getOrElse {
+          Future.failed(
+            new SonicPublisher.StreamException(traceId, new Exception("protocol error: no token found in stream")))
+        })
     }
   }
+
 }

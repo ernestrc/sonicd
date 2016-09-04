@@ -8,6 +8,7 @@ import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.SonicPublisher.StreamException
 import build.unstable.sonic.SonicSupervisor.RegisterPublisher
 import build.unstable.sonic._
 import build.unstable.sonicd.model._
@@ -145,7 +146,7 @@ class SonicdSourceSpec(_system: ActorSystem)
       expectTerminated(pub)
     }
 
-    "bubble up exceptions correctly if upstream connection stage fails" in {
+    "bubble up exception when upstream connect fails" in {
       val pub = newPublisher()
 
       expectMsg(RegisterPublisher(traceId))
@@ -159,9 +160,52 @@ class SonicdSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       expectMsgType[StreamCompleted]
 
-      expectMsg("complete")
+      //onError
+      expectMsgType[StreamException]
       expectTerminated(pub)
     }
+
+    /*
+    "bubble up exception correctly if connection dies unexpectedly" in {
+      {
+        val pub = newPublisher()
+        expectMsg(RegisterPublisher(traceId))
+
+        pub ! ActorPublisherMessage.Request(1)
+        pub ! Tcp.Connected(testAddr, testAddr)
+        expectMsg(Tcp.Register(pub))
+
+        val bytes = Sonic.lengthPrefixEncode(sonicQuery1.toBytes)
+        val write = Tcp.Write(bytes, SonicPublisher.Ack)
+        expectMsg(write)
+
+        pub ! SonicPublisher.Ack
+        expectMsg(Tcp.ResumeReading)
+
+        expectMsg(StreamStarted(sonicQuery1.traceId.get))
+
+        pub ! Terminated(self)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsgType[StreamCompleted]
+
+        expectMsg("complete")
+        expectTerminated(pub)
+      }
+
+      {
+        val pub = newPublisher()
+        expectMsg(RegisterPublisher(traceId))
+
+        pub ! Terminated(self)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsgType[StreamCompleted]
+
+        expectMsg("complete")
+        expectTerminated(pub)
+      }
+    }*/
   }
 }
 

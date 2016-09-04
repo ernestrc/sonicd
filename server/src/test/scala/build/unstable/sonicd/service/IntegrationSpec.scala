@@ -3,12 +3,14 @@ package build.unstable.sonicd.service
 import java.net.{InetAddress, InetSocketAddress}
 import java.sql.DriverManager
 
+import akka.Done
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.io.Tcp
-import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.{Keep, Sink}
 import akka.testkit.TestKit
 import akka.util.Timeout
+import build.unstable.sonic.SonicPublisher.StreamException
 import build.unstable.sonic._
 import build.unstable.sonicd.api.AkkaApi
 import build.unstable.sonicd.system.AkkaService
@@ -75,13 +77,12 @@ with JsonProtocol with SonicdLogging {
     "run a simple query using the tcp api" in {
 
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
-      val stream: Future[StreamCompleted] =
-        client.stream(syntheticQuery).to(Sink.ignore).run()
+      val stream: Future[Done] =
+        client.stream(syntheticQuery).toMat(Sink.ignore)(Keep.right).run()
 
-      val sDone = Await.result(stream, 20.seconds)
+      Await.result(stream, 20.seconds)
       val fDone = Await.result(future, 20.seconds)
 
-      assert(sDone.success)
       fDone.length shouldBe 113 //1 StreamStarted + 1 metadata + 100 QueryProgress + 10 OutputChunk + 1 StreamCompleted
     }
 
@@ -89,11 +90,10 @@ with JsonProtocol with SonicdLogging {
 
       val syntheticQuery = new Query(None, None, None, "10", JsString("test_server_config"))
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
-      val stream: Future[StreamCompleted] =
-        client.stream(syntheticQuery).to(Sink.ignore).run()
+      val stream: Future[Done] =
+        client.stream(syntheticQuery).toMat(Sink.ignore)(Keep.right).run()
 
-      val sDone = Await.result(stream, 20.seconds)
-      assert(sDone.success)
+      Await.result(stream, 20.seconds)
 
       val fDone = Await.result(future, 20.seconds)
       fDone.length shouldBe 113 //1 started + 1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
@@ -118,7 +118,7 @@ with JsonProtocol with SonicdLogging {
       val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
-      assert(e.getMessage.contains("INVALID"))
+      assert(e.getCause.getMessage.contains("INVALID"))
     }
 
     "reject a query of a source that requires authentication if user is unauthenticated" in {
@@ -128,7 +128,7 @@ with JsonProtocol with SonicdLogging {
       val e = intercept[Throwable]{
         Await.result(future, 20.seconds)
       }
-      assert(e.getMessage.contains("unauthenticated"))
+      assert(e.getCause.getMessage.contains("unauthenticated"))
     }
 
     "accept a query of a source that requires authentication if user is authenticated with at least the sources security level" in {
@@ -146,11 +146,11 @@ with JsonProtocol with SonicdLogging {
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
 
-      val e = intercept[Throwable]{
+      val e = intercept[StreamException]{
         Await.result(future, 20.seconds)
       }
 
-      assert(e.getMessage.contains("unauthorized"))
+      assert(e.getCause.getMessage.contains("unauthorized"))
     }
 
     "accept a query of a source that requires authentication and has a whitelist of ips and user ip is in the list" in {
@@ -179,18 +179,42 @@ with JsonProtocol with SonicdLogging {
 
       val future: Future[Vector[SonicMessage]] =
         client.run(query)
-      val stream: Future[StreamCompleted] =
-        client.stream(query).to(Sink.ignore).run()
 
-      val sThrown = intercept[Throwable] {
+      val stream: Future[Done] =
+        client.stream(query).toMat(Sink.ignore)(Keep.right).run()
+
+      val sThrown = intercept[StreamException] {
           Await.result(stream, 20.seconds)
         }
-      assert(sThrown.getMessage.contains("not found"))
+      assert(sThrown.getCause.toString.contains("not found"))
 
-      val thrown = intercept[Throwable] {
+      val thrown = intercept[StreamException] {
           Await.result(future, 20.seconds)
         }
-      assert(thrown.getMessage.contains("not found"))
+      assert(thrown.getCause.toString.contains("not found"))
+    }
+
+    "error message should contain traceId" in {
+
+      val traceID = "coolTraceId"
+
+      val query = Query("select * from nonesense", H2Config, traceID, None) //table nonesense doesn't exist
+
+      val future: Future[Vector[SonicMessage]] =
+        client.run(query)
+
+      val stream: Future[Done] =
+        client.stream(query).toMat(Sink.ignore)(Keep.right).run()
+
+      val sThrown = intercept[StreamException] {
+          Await.result(stream, 20.seconds)
+        }
+      assert(sThrown.getMessage.contains(traceID))
+
+      val thrown = intercept[StreamException] {
+          Await.result(future, 20.seconds)
+        }
+      assert(thrown.getMessage.contains(traceID))
     }
 
     /*

@@ -3,8 +3,9 @@ package build.unstable.sonicd.examples
 import java.net.InetSocketAddress
 import java.util.UUID
 
+import akka.Done
 import akka.actor._
-import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.{Keep, Sink}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.Timeout
 import build.unstable.sonic._
@@ -39,10 +40,11 @@ object AkkaExample extends App {
 
     val source = client.stream(query)
     val sink = Sink.ignore
-    val res: Future[StreamCompleted] = source.to(sink).run()
+    val res: Cancellable = source.to(sink).run()
 
-    val done = Await.result(res, 20.seconds)
-    assert(done.success)
+    res.cancel()
+
+    assert(res.isCancelled)
   }
 
   {

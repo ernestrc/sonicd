@@ -6,7 +6,7 @@ import akka.actor.{ActorRef, Terminated}
 import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
 import akka.util.ByteString
-import build.unstable.sonic.SonicPublisher.Ack
+import build.unstable.sonic.SonicPublisher.{StreamException, Ack}
 import build.unstable.tylog.Variation
 
 import scala.annotation.tailrec
@@ -16,8 +16,8 @@ object SonicPublisher {
 
   case object Ack extends Tcp.Event
 
-  case object RegisterDone
-
+  class StreamException(traceId: String, cause: Throwable)
+    extends Exception(s"stream $traceId completed with errors", cause)
 }
 
 class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Boolean)
@@ -31,21 +31,17 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
   @scala.throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
     debug(log, "stopped sonic publisher of '{}'", traceId)
-    context unwatch supervisor
     if (firstSent && !firstReceived) {
       val msg = "server never sent any messages"
       val e = new Exception(msg)
       trace(log, traceId, EstablishCommunication, Variation.Failure(e), msg)
     }
-    registerDone.foreach(_ !
-      done.getOrElse(StreamCompleted.error(traceId, new Exception("publisher stopped unexpectedly"))))
     super.postStop()
   }
 
   @scala.throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
     debug(log, "starting sonic publisher of '{}'", traceId)
-    context watch supervisor
     supervisor ! SonicSupervisor.RegisterPublisher(traceId)
   }
 
@@ -72,7 +68,6 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
   var connection: ActorRef = _
   var pendingRead: ByteString = ByteString.empty
   var done: Option[StreamCompleted] = None
-  var registerDone: Option[ActorRef] = None
   var firstSent: Boolean = false
   var firstReceived: Boolean = false
 
@@ -83,8 +78,13 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     tryPushDownstream()
     done = Some(ev)
     if (buffer.isEmpty && isActive && totalDemand > 0) {
-      onNext(ev)
-      onCompleteThenStop()
+      if (ev.error.isDefined) {
+        onNext(ev)
+        onErrorThenStop(new StreamException(traceId, ev.error.get))
+      } else {
+        onNext(ev)
+        onCompleteThenStop()
+      }
     }
 
     {
@@ -93,9 +93,9 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
   }
 
   def commonBehaviour: Receive = {
-
-    case SonicPublisher.RegisterDone ⇒
-      registerDone = Some(sender())
+    case Cancel ⇒
+      // TODO cancel upstream properly
+      // context.become(terminating(StreamCompleted.error(traceId, new Exception("client cancelled"))))
 
     case Terminated(_) ⇒
       context.become(terminating(StreamCompleted.error(traceId, new Exception("tcp connection terminated unexpectedly"))))
@@ -199,6 +199,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     case Connected(_, _) if halfReady ⇒
       trace(log, traceId, CreateTcpConnection, Variation.Success, "received tcp connection")
       connection = sender()
+      context watch connection
       context.become(connected)
 
     case Connected(_, _) ⇒
