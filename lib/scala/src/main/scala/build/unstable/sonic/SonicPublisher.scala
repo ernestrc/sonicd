@@ -18,6 +18,7 @@ object SonicPublisher {
 
   class StreamException(traceId: String, cause: Throwable)
     extends Exception(s"stream $traceId completed with errors", cause)
+
 }
 
 class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Boolean)
@@ -55,51 +56,6 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     while (isActive && totalDemand > 0 && buffer.nonEmpty) {
       onNext(buffer.dequeue())
     }
-  }
-
-  val (cmd, traceId) = command.traceId.map(command → _).getOrElse(command → UUID.randomUUID().toString)
-
-
-  /* STATE */
-
-  val buffer =
-    if (isClient) mutable.Queue[SonicMessage]()
-    else mutable.Queue[SonicMessage](StreamStarted(traceId))
-  var connection: ActorRef = _
-  var pendingRead: ByteString = ByteString.empty
-  var done: Option[StreamCompleted] = None
-  var firstSent: Boolean = false
-  var firstReceived: Boolean = false
-
-
-  /* BEHAVIOUR */
-
-  def terminating(ev: StreamCompleted): Receive = {
-    tryPushDownstream()
-    done = Some(ev)
-    if (buffer.isEmpty && isActive && totalDemand > 0) {
-      if (ev.error.isDefined) {
-        onNext(ev)
-        onErrorThenStop(new StreamException(traceId, ev.error.get))
-      } else {
-        onNext(ev)
-        onCompleteThenStop()
-      }
-    }
-
-    {
-      case r: Request ⇒ terminating(ev)
-    }
-  }
-
-  def commonBehaviour: Receive = {
-    case Cancel ⇒
-      // TODO cancel upstream properly
-      // context.become(terminating(StreamCompleted.error(traceId, new Exception("client cancelled"))))
-
-    case Terminated(_) ⇒
-      context.become(terminating(StreamCompleted.error(traceId, new Exception("tcp connection terminated unexpectedly"))))
-
   }
 
   @tailrec
@@ -146,6 +102,69 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
         error(log, e, "error framing incoming bytes")
         context.become(terminating(StreamCompleted.error(traceId, e)))
     }
+  }
+
+  val (cmd, traceId) = command.traceId.map(command → _).getOrElse(command → UUID.randomUUID().toString)
+
+
+  /* STATE */
+
+  val buffer =
+    if (isClient) mutable.Queue[SonicMessage]()
+    else mutable.Queue[SonicMessage](StreamStarted(traceId))
+  var connection: ActorRef = _
+  var pendingRead: ByteString = ByteString.empty
+  var done: Option[StreamCompleted] = None
+  var firstSent: Boolean = false
+  var firstReceived: Boolean = false
+
+
+  /* BEHAVIOUR */
+
+  def terminating(ev: StreamCompleted): Receive = {
+    tryPushDownstream()
+    done = Some(ev)
+    if (buffer.isEmpty && isActive && totalDemand > 0) {
+      if (ev.error.isDefined) {
+        onNext(ev)
+        onErrorThenStop(new StreamException(traceId, ev.error.get))
+      } else {
+        onNext(ev)
+        onCompleteThenStop()
+      }
+    }
+
+    {
+      case r: Request ⇒ terminating(ev)
+    }
+  }
+
+  //TODO def waitingCancelAck then when received termiante
+  def waitingCancelAck: Receive = {
+    case Tcp.Received(data) ⇒
+      pendingRead ++= data
+      tryFrame()
+      if (isActive && totalDemand > 0 && buffer.nonEmpty) {
+        onNext(buffer.dequeue())
+      }
+      if (buffer.isEmpty) {
+
+      }
+      connection ! ResumeReading
+  }
+
+  def commonBehaviour: Receive = {
+    case Cancel ⇒
+      val write = Tcp.Write(Sonic.lengthPrefixEncode(CancelStream.toBytes), Ack)
+      context.become({
+        case WritingResumed ⇒ connection ! write
+        case t@Tcp.CommandFailed(_: Tcp.Write) ⇒ connection ! ResumeWriting
+        case Ack ⇒ context.become(waitingCancelAck)
+      }, discardOld = true)
+
+    case Terminated(_) ⇒
+      context.become(terminating(StreamCompleted.error(traceId, new Exception("tcp connection terminated unexpectedly"))))
+
   }
 
   def materialized: Receive = commonBehaviour orElse {
