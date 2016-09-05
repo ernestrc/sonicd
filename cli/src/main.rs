@@ -170,7 +170,7 @@ fn exec(
 
     loop {
         match try!(rx.recv()) {
-            Ok(SonicMessage::QueryStarted(trace_id)) => {
+            Ok(SonicMessage::StreamStarted(trace_id)) => {
                 debug!("started query with trace_id: {}", trace_id);
             }
             Ok(msg @ SonicMessage::TypeMetadata(_)) => {
@@ -206,12 +206,12 @@ fn exec(
                     };
                 }
             }
-            Ok(SonicMessage::Done(None, trace_id)) => {
+            Ok(SonicMessage::StreamCompleted(None, trace_id)) => {
                 debug!("stream '{}' completed successfully", trace_id);
                 res = Ok(());
                 break;
             }
-            Ok(SonicMessage::Done(Some(cause), trace_id)) => {
+            Ok(SonicMessage::StreamCompleted(Some(cause), trace_id)) => {
                 debug!("stream '{}' failed with error {:?}", &cause, trace_id);
                 let error: Error = cause.into();
                 res = Err(error).chain_err(|| {
@@ -258,13 +258,13 @@ pub fn login(host: &str, tcp_port: &u16) -> Result<()> {
                 token = try!(util::parse_token(data));
                 break;
             }
-            Ok(SonicMessage::Done(None, trace_id)) => {
+            Ok(SonicMessage::StreamCompleted(None, trace_id)) => {
                 return Err(format!("protocol error: server returned no data \
                                     for '{}'",
                                    trace_id)
                     .into());
             }
-            Ok(SonicMessage::Done(Some(cause), trace_id)) => {
+            Ok(SonicMessage::StreamCompleted(Some(cause), trace_id)) => {
                 let error: Error = cause.into();
                 return Err(error).chain_err(|| {
                     format!("error when running login command; trace_id: {}",

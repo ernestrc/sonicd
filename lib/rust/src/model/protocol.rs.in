@@ -8,7 +8,7 @@ pub enum MessageKind {
     #[serde(rename="A")]
     AcknowledgeKind,
     #[serde(rename="S")]
-    QueryStartedKind,
+    StreamStartedKind,
     #[serde(rename="Q")]
     QueryKind,
     #[serde(rename="H")]
@@ -20,7 +20,7 @@ pub enum MessageKind {
     #[serde(rename="O")]
     OutputKind,
     #[serde(rename="D")]
-    DoneKind,
+    StreamCompletedKind,
 }
 
 
@@ -103,19 +103,19 @@ impl From<SonicMessage> for ProtoSonicMessage {
                     payload: Some(Value::Array(data)),
                 }
             },
-            SonicMessage::QueryStarted(trace_id) => {
+            SonicMessage::StreamStarted(trace_id) => {
                 ProtoSonicMessage {
-                    event_type: MessageKind::QueryStartedKind,
+                    event_type: MessageKind::StreamStartedKind,
                     variation: Some(trace_id),
                     payload: None,
                 }
             },
-            SonicMessage::Done(res, trace_id) => {
+            SonicMessage::StreamCompleted(res, trace_id) => {
                 let mut payload = BTreeMap::new();
 
                 payload.insert("trace_id".to_owned(), Value::String(trace_id));
                 ProtoSonicMessage {
-                    event_type: MessageKind::DoneKind,
+                    event_type: MessageKind::StreamCompletedKind,
                     variation: res,
                     payload: Some(Value::Object(payload)),
                 }
@@ -198,20 +198,20 @@ impl ProtoSonicMessage {
                     s => try!(Err(ErrorKind::Proto(format!("payload is not an array: {:?}", s)))),
                 }
             },
-            MessageKind::QueryStartedKind => {
+            MessageKind::StreamStartedKind => {
                 let trace_id = try!(variation
-                                 .ok_or_else(|| ErrorKind::Proto("QueryStarted 'variation' field is empty".to_owned())));
+                                 .ok_or_else(|| ErrorKind::Proto("StreamStarted 'variation' field is empty".to_owned())));
 
-                Ok(SonicMessage::QueryStarted(trace_id))
+                Ok(SonicMessage::StreamStarted(trace_id))
             },
-            MessageKind::DoneKind => {
+            MessageKind::StreamCompletedKind => {
                 let payload = try!(get_payload(payload));
 
                 let trace_id = try!(payload.get("trace_id")
                     .and_then(|s| s.as_str().map(|s| s.to_owned()))
                     .ok_or_else(|| ErrorKind::Proto("missing 'trace_id' in payload".to_owned())));
 
-                Ok(SonicMessage::Done(variation, trace_id))
+                Ok(SonicMessage::StreamCompleted(variation, trace_id))
             },
             MessageKind::QueryKind => {
                 let payload = try!(get_payload(payload));

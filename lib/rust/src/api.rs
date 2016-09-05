@@ -9,6 +9,7 @@ use model::SonicMessage;
 use error::Result;
 use io::*;
 
+// TODO rewrite using mio and futures
 fn send_cmd(stream: &mut TcpStream, cmd: SonicMessage) -> Result<()> {
 
     debug!("framing command {:?}", &cmd);

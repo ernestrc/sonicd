@@ -1,6 +1,6 @@
 [package]
 name = "sonicd"
-version = "0.5.4"
+version = "0.6.0"
 authors = ["Ernest Romero <ernest@unstable.build>"]
 description = "client library for Sonicd, a data streaming gateway"
 license-file = "LICENSE"

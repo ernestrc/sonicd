@@ -78,7 +78,7 @@ pub enum SonicMessage {
     // client ~> server
     Acknowledge,
 
-    QueryStarted(String),
+    StreamStarted(String),
 
     QueryMsg(Query),
 
@@ -96,17 +96,17 @@ pub enum SonicMessage {
 
     OutputChunk(Vec<Value>),
 
-    Done(Option<String>, String),
+    StreamCompleted(Option<String>, String),
 }
 
 impl SonicMessage {
-    // DoneWithQueryExecution error
-    pub fn done<T>(e: Result<T>, trace_id: String) -> SonicMessage {
+    // StreamComplete error
+    pub fn complete<T>(e: Result<T>, trace_id: String) -> SonicMessage {
         let variation = match e {
             Ok(_) => None,
             Err(e) => Some(format!("{}", e).to_owned()),
         };
-        SonicMessage::Done(variation, trace_id).into()
+        SonicMessage::StreamCompleted(variation, trace_id).into()
     }
 
     pub fn into_json(self) -> Value {
