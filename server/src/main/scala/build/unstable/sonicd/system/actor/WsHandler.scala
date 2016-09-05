@@ -14,6 +14,7 @@ import build.unstable.sonicd.model.StreamSubscription
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
 class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
@@ -44,6 +45,11 @@ with ActorSubscriber with SonicdLogging with Stash {
     debug(log, "stopped ws handler in path '{}'", self.path)
   }
 
+  override def unhandled(message: Any): Unit = {
+    warning(log, "message not handled {}", message)
+    super.unhandled(message)
+  }
+
 
   /* HELPERS */
 
@@ -54,13 +60,15 @@ with ActorSubscriber with SonicdLogging with Stash {
       pendingToStream += 1L
     }
   }
-  
+
   def setInitState(): Unit = {
     pendingToStream = 0L
     traceId = UUID.randomUUID().toString
     subscription = null
+    waitingFor = null
+    handler = null
   }
-  
+
   def restartInternally(): Unit = {
     setInitState()
     unstashAll()
@@ -88,69 +96,75 @@ with ActorSubscriber with SonicdLogging with Stash {
   var pendingToStream: Long = _
   var traceId: String = _
   var subscription: StreamSubscription = _
+  var waitingFor: CallType = _
+  var handler: ActorRef = _
 
   setInitState()
 
 
   /* BEHAVIOUR */
 
-  def waitingAck:Receive = stashCommands orElse {
-    case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒ onCompleteThenStop()
-    case OnNext(ClientAcknowledge) ⇒ restartInternally()
-  }
-
-  def closing(done: StreamCompleted): Receive = stashCommands orElse {
-    log.debug("switched to closing behaviour with ev {}", done)
-    if (isActive && totalDemand > 0) {
-      onNext(done)
-      waitingAck
-    } else commonBehaviour orElse {
-      case OnNext(ClientAcknowledge) ⇒ restartInternally()
-      case UpstreamCompleted ⇒ //ignore
-      case Request(n) => 
-        onNext(done)
-        context.become(waitingAck)
-      //this can only happen if cancel was sent between props and subscription
-      case s: Subscription ⇒ s.cancel()
-    }
-  }
-
-  def commonBehaviour: Receive = {
-
-    case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒
-      log.debug("client completed/canceled stream")
-      onCompleteThenStop()
-
-    case UpstreamCompleted ⇒
-      val msg = "completed stream without done msg"
-      log.error(msg)
-      context.become(closing(StreamCompleted.error(traceId, new ProtocolException(msg))))
-
-    case msg@OnError(e) ⇒
-      error(log, e, "error in ws stream")
-      context.become(closing(StreamCompleted.error(traceId, e)))
-
-    case msg: StreamCompleted ⇒
-      context.become(closing(msg))
-
-  }
-
   def stashCommands: Receive = {
     case OnNext(i: SonicCommand) ⇒ stash()
   }
 
-  def materialized: Receive = stashCommands orElse {
+  def commonBehaviour: Receive = {
+
+    case UpstreamCompleted ⇒
+      val msg = "completed stream without done msg"
+      log.error(msg)
+      context.become(completing(StreamCompleted.error(traceId, new ProtocolException(msg))))
+
+    case msg@OnError(NonFatal(e)) ⇒
+      warning(log, "ws stream error {}", e)
+      context.become(completing(StreamCompleted.error(traceId, e)))
+
+    case msg@OnError(e) ⇒
+      error(log, e, "ws stream fatal error")
+      onErrorThenStop(e)
+
+  }
+
+  // 4
+  def completing(done: StreamCompleted): Receive = stashCommands orElse {
+    log.debug("switched to closing behaviour with ev {}", done)
+    val recv: Receive = {
+      case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒
+        onComplete()
+        context.stop(self)
+      case UpstreamCompleted ⇒ //expected, overrides commonBehaviour
+      case OnNext(ClientAcknowledge) ⇒ restartInternally()
+      //this can only happen if cancel was sent between props and subscription
+      case s: Subscription ⇒ s.cancel()
+    }
+
+    if (isActive && totalDemand > 0) {
+      onNext(done)
+      stashCommands orElse recv orElse commonBehaviour
+    } else stashCommands orElse recv orElse commonBehaviour orElse {
+      case Request(n) =>
+        onNext(done)
+        context.become(stashCommands orElse recv orElse commonBehaviour)
+    }
+  }
+
+  // 3
+  def materialized: Receive = stashCommands orElse commonBehaviour orElse {
+
+    case ActorSubscriberMessage.OnComplete | ActorPublisherMessage.Cancel ⇒
+      // its polite to cancel first before stopping
+      subscription.cancel()
+      //will succeed
+      onComplete()
+      context.stop(self)
+
     case OnNext(CancelStream) ⇒
       subscription.cancel() //cancel source
-      context.become(closing(StreamCompleted.success(traceId)))
-
-    case a@(ActorSubscriberMessage.OnComplete | ActorPublisherMessage.Cancel) ⇒
-      subscription.cancel()
-      onCompleteThenStop()
+      context.become(completing(StreamCompleted.success(traceId)))
 
     case msg@Request(n) ⇒ requestTil()
 
-    case msg: StreamCompleted ⇒ context.become(closing(msg))
+    case msg: StreamCompleted ⇒ context.become(completing(msg))
 
     case msg: SonicMessage ⇒
       try {
@@ -162,46 +176,62 @@ with ActorSubscriber with SonicdLogging with Stash {
       } catch {
         case e: Exception ⇒
           error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
-          context.become(closing(StreamCompleted.error(traceId, e)))
+          context.become(completing(StreamCompleted.error(traceId, e)))
       }
   }
 
-  def waiting(traceId: String): Receive = stashCommands orElse {
+  // 2
+  def waiting(traceId: String): Receive = stashCommands orElse commonBehaviour orElse {
 
-    case OnNext(CancelStream) ⇒ context.become(closing(StreamCompleted.success(traceId)))
+    case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒
+      val msg = "client completed/canceled stream while waiting for source materialization"
+      val e = new Exception(msg)
+      trace(log, traceId, waitingFor, Variation.Failure(e), msg)
+      // we dont need to worry about cancelling subscription here
+      // because terminating this actor will stop the source actor
+      onComplete()
+      context.stop(self)
 
-    case a@(ActorSubscriberMessage.OnComplete | ActorPublisherMessage.Cancel) ⇒ onCompleteThenStop()
+    case OnNext(CancelStream) ⇒ context.become(completing(StreamCompleted.success(traceId)))
 
     //auth cmd failed
     case Failure(e) ⇒
-      trace(log, traceId, GenerateToken, Variation.Failure(e), "")
-      context.become(closing(StreamCompleted.error(traceId, e)))
+      trace(log, traceId, waitingFor, Variation.Failure(e), "")
+      context.become(completing(StreamCompleted.error(traceId, e)))
 
     //auth cmd succeded
     case Success(token: AuthenticationActor.Token) ⇒
-      trace(log, traceId, GenerateToken, Variation.Success, "received new token '{}'", token)
+      trace(log, traceId, waitingFor, Variation.Success, "received new token '{}'", token)
       onNext(OutputChunk(Vector(token)))
-      context.become(closing(StreamCompleted.success(traceId)))
+      context.become(completing(StreamCompleted.success(traceId)))
 
     case s: Subscription ⇒
-      trace(log, traceId, MaterializeSource, Variation.Success, "subscribed")
+      trace(log, traceId, waitingFor, Variation.Success, "materialized source and subscribed to it")
       subscription = new StreamSubscription(s)
       requestTil()
-      context.become(materialized orElse commonBehaviour)
+      context.become(materialized)
 
     case handlerProps: Props ⇒
       log.debug("received props {}", handlerProps)
-      val handler = context.actorOf(handlerProps)
+      handler = context.actorOf(handlerProps)
       val pub = ActorPublisher[SonicMessage](handler)
       pub.subscribe(subs)
 
     case msg: StreamCompleted ⇒
-      trace(log, traceId, MaterializeSource, Variation.Failure(msg.error.get), "error materializing source")
-      context.become(closing(msg))
+      trace(log, traceId, waitingFor, Variation.Failure(msg.error.get), "error materializing source")
+      context.become(completing(msg))
 
   }
 
-  def start: Receive = {
+  // 1
+  def receive: Receive = commonBehaviour orElse {
+    case ActorPublisherMessage.Cancel ⇒
+      log.debug("client completed stream before sending a command")
+      context.stop(self)
+
+    case ActorSubscriberMessage.OnComplete ⇒
+      log.debug("client completed stream before sending a command")
+      onCompleteThenStop()
 
     case OnNext(i: SonicCommand) ⇒
       val withTraceId = {
@@ -214,24 +244,24 @@ with ActorSubscriber with SonicdLogging with Stash {
       }
       withTraceId match {
         case q: Query ⇒
-          trace(log, withTraceId.traceId.get, MaterializeSource, Variation.Attempt, "recv query {}", q)
+          waitingFor = MaterializeSource
+          trace(log, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing query {}", q)
 
           controller ! SonicController.NewQuery(q, clientAddress)
 
         case a: Authenticate ⇒
-          trace(log, withTraceId.traceId.get, GenerateToken, Variation.Attempt, "recv authenticate cmd {}", a)
+          waitingFor = GenerateToken
+          trace(log, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing authenticate cmd {}", a)
 
           authService ! a
       }
-      context.become(waiting(withTraceId.traceId.get) orElse commonBehaviour)
+      context.become(waiting(withTraceId.traceId.get))
 
     case OnNext(msg) ⇒
       val msg = "first message should be a SonicCommand"
       log.error(msg)
       val e = new ProtocolException(msg)
-      context.become(closing(StreamCompleted.error(traceId, e)))
+      context.become(completing(StreamCompleted.error(traceId, e)))
 
   }
-
-  override def receive: Receive = start orElse commonBehaviour
 }

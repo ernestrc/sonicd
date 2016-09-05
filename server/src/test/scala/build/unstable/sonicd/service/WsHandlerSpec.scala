@@ -3,18 +3,18 @@ package build.unstable.sonicd.service
 import java.net.InetAddress
 
 import akka.actor.{PoisonPill, ActorRef, ActorSystem, Props}
-import akka.stream.actor.{ActorSubscriberMessage, ActorPublisherMessage, ActorPublisher}
 import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
-import akka.testkit.{TestActorRef, CallingThreadDispatcher, ImplicitSender, TestKit}
+import akka.stream.actor.{ActorSubscriberMessage, ActorPublisher, ActorPublisherMessage}
+import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import JsonProtocol._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.system.actor.SonicController.NewQuery
 import build.unstable.sonicd.system.actor.WsHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-import scala.util.{Failure, Success}
+import scala.util.{Success, Failure}
 
 class WsHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender
@@ -214,7 +214,7 @@ with ImplicitSubscriber with ImplicitGuardian {
       }
     }
 
-    "terminate if dowstream cancels" in {
+    "terminate if downstream cancels" in {
       {
         val wsHandler = newMaterializedHandler(zombiePubProps)
         watch(wsHandler)
@@ -223,14 +223,12 @@ with ImplicitSubscriber with ImplicitGuardian {
         expectProgress(wsHandler)
 
         wsHandler ! ActorPublisherMessage.Cancel
-        expectMsg("complete")
         expectTerminated(wsHandler)
       }
       {
         val wsHandler = newMaterializedHandler(zombiePubProps)
         watch(wsHandler)
         wsHandler ! ActorPublisherMessage.Cancel
-        expectMsg("complete")
         expectTerminated(wsHandler)
       }
       {
@@ -244,7 +242,6 @@ with ImplicitSubscriber with ImplicitGuardian {
         expectOutput(wsHandler)
 
         wsHandler ! ActorPublisherMessage.Cancel
-        expectMsg("complete")
         expectTerminated(wsHandler)
       }
       {
@@ -261,7 +258,6 @@ with ImplicitSubscriber with ImplicitGuardian {
         expectDone(wsHandler)
 
         wsHandler ! ActorPublisherMessage.Cancel
-        expectMsg("complete")
         expectTerminated(wsHandler)
       }
     }
