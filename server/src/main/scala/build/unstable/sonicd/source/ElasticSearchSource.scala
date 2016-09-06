@@ -221,7 +221,7 @@ class ElasticSearchPublisher(traceId: String,
 
       r.hits.hits.foreach(h ⇒ buffer.enqueue(OutputChunk(h._source.fields.values.to[Vector])))
 
-      if (fetched == target) {
+      if (nhits < nextSize || fetched == target) {
         trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)
         context.become(terminating(StreamCompleted.success))
       } else {
