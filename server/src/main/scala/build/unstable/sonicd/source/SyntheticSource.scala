@@ -4,7 +4,7 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonicd.model.JsonProtocol._
-import build.unstable.sonicd.model.{DataSource, Query, RequestContext, SonicMessage}
+import build.unstable.sonicd.model._
 import spray.json._
 
 import scala.annotation.tailrec
@@ -31,7 +31,7 @@ class SyntheticSource(query: Query, actorContext: ActorContext, context: Request
 
 class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], progressWait: Int,
                          query: String, indexed: Boolean, schema: Option[JsObject])(implicit ctx: RequestContext)
-  extends Actor with ActorPublisher[SonicMessage] with ActorLogging {
+  extends Actor with ActorPublisher[SonicMessage] with SonicdLogging {
 
   import SyntheticPublisher._
   import build.unstable.sonicd.model._
@@ -44,14 +44,15 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   var streamed = 0L
   val preTarget = 101
   //+100 of progress +1 metadata
-  val _query = Try(query.trim().toInt)
-  val target =
+  lazy val _query = Try(query.trim().toInt)
+  val target = size.orElse{
     _query
       .recoverWith {
         case e: Exception ⇒
-          log.warning("could not parse query to determine test target size")
+          warning(log, "could not parse query to determine test target size and size parameter was not passed")
           Try(size.get)
-      }.toOption.map(_ + preTarget)
+      }.toOption
+  }.map(_ + preTarget)
 
   val data = target.map(t ⇒ (0 until t).map(_ ⇒ genOne()).to[mutable.Queue])
 
@@ -65,7 +66,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   // pass query or size '28'
   val shouldThrowExpectedException = _query.isSuccess && _query.get == 28
 
-  if (shouldThrowExpectedException) log.warning("this source will throw an expected exception")
+  if (shouldThrowExpectedException) warning(log, "this source will throw an expected exception")
 
   // if string is empty, value is 0 or bool is true, randomize values
   // otherwise use the value provided in the schema
