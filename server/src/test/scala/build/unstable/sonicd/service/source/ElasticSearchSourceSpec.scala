@@ -70,7 +70,6 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
   val query1 = """{"query":{"term":{"event_source":{"value":"raven"}}}}"""
   val queryWithType = """{"_type": "complicatedType", "query":{"term":{"event_source":{"value":"raven"}}}}"""
   val queryWithIndex = """{"_index": "complicatedIndex", "query":{"term":{"event_source":{"value":"raven"}}}}"""
-  val queryWithSize = """{"query":{"term":{"event_source":{"value":"raven"}}},"size":1}"""
   val queryWithFrom = """{"query":{"term":{"event_source":{"value":"raven"}}},"from":5}"""
 
 
@@ -150,15 +149,16 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
     }
 
     "if query has a 'size', limit es query to that and stream exactly that number of elements" in {
+      val queryWithSize = """{"query":{"term":{"event_source":{"value":"raven"}}},"size":5}"""
       val pub = newPublisher(queryWithSize)
       pub ! ActorPublisherMessage.Request(1)
       val httpCmd = expectMsgType[HttpRequestCommand]
 
       //assert that size is one
-      assertPayload(httpCmd.request._4, 1, 0)
+      assertPayload(httpCmd.request._4, 5, 0)
 
       //complete stream
-      completeSimpleStream(pub)
+      completeSimpleStream(pub, 3)
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
     }
