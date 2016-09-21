@@ -53,7 +53,7 @@ object AkkaExample extends App {
     val res: Future[Vector[SonicMessage]] = client.run(query)
 
     val done = Await.result(res, 20.seconds)
-    assert(done.length == 112) //1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
+    assert(done.length == 113) //1 started + 1 metadata + 100 QueryProgress + 10 OutputChunk + 1 DoneWithQueryExecution
   }
 
   system.terminate()

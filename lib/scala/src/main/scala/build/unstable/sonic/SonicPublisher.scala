@@ -164,6 +164,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
       tryPushDownstream()
       connection ! ResumeReading
 
+    // FIXME CancelStream recv in some scenarios
     case anyElse ⇒ log.warning("received unexpected {} when in idle state", anyElse)
 
   }
