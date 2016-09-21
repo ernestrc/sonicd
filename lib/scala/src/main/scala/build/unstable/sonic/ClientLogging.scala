@@ -11,8 +11,6 @@ trait ClientLogging extends TypedLogging {
 
   /* client */
 
-  case object BuildGraph extends CallType
-
   case object CreateTcpConnection extends CallType
 
   case object EstablishCommunication extends CallType
