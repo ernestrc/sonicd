@@ -12,6 +12,7 @@ import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.{HttpRequestCommand, Traceable}
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json._
 
 import scala.collection.mutable
@@ -127,13 +128,13 @@ class ElasticSearchPublisher(traceId: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    info(log, "stopping ES publisher {}", traceId)
+    log.info( "stopping ES publisher {}", traceId)
     context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting ES publisher {}", traceId)
+    log.debug( "starting ES publisher {}", traceId)
     context watch supervisor
   }
 
@@ -222,7 +223,7 @@ class ElasticSearchPublisher(traceId: String,
       r.hits.hits.foreach(h ⇒ buffer.enqueue(OutputChunk(h._source.fields.values.to[Vector])))
 
       if (nhits < nextSize || fetched == target) {
-        trace(log, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)
+        log.tylog(Level.INFO, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)
         context.become(terminating(StreamCompleted.success))
       } else {
         nextFrom += nhits
@@ -231,7 +232,7 @@ class ElasticSearchPublisher(traceId: String,
       tryPushDownstream()
 
     case Status.Failure(e) ⇒
-      trace(log, traceId, ExecuteStatement, Variation.Failure(e), "something went wrong with the http request")
+      log.tylog(Level.INFO, traceId, ExecuteStatement, Variation.Failure(e), "something went wrong with the http request")
       context.become(terminating(StreamCompleted.error(e)))
   }
 
@@ -249,7 +250,7 @@ class ElasticSearchPublisher(traceId: String,
 
     //first time client requests
     case Request(n) ⇒
-      trace(log, traceId, ExecuteStatement, Variation.Attempt,
+      log.tylog(Level.INFO, traceId, ExecuteStatement, Variation.Attempt,
         "send query to supervisor in path {}", supervisor.path)
       tryPullUpstream()
       context.become(materialized)

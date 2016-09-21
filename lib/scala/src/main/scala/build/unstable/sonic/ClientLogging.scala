@@ -17,6 +17,4 @@ trait ClientLogging extends TypedLogging {
 
   case object EstablishCommunication extends CallType
 
-  final lazy val log: Logger = LoggerFactory.getLogger(this.getClass)
-
 }

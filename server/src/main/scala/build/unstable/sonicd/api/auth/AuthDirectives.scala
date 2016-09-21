@@ -7,11 +7,12 @@ import akka.http.scaladsl.server.{Directive1, Rejection}
 import akka.pattern.ask
 import akka.stream.Materializer
 import akka.util.Timeout
-import build.unstable.sonic.{JsonProtocol, ApiUser, Authenticate, SonicMessage}
+import build.unstable.sonic.{ApiUser, Authenticate, JsonProtocol, SonicMessage}
 import build.unstable.sonicd.SonicdLogging
 import JsonProtocol._
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json.{JsValue, RootJsonFormat}
 
 import scala.util.{Failure, Success, Try}
@@ -37,14 +38,14 @@ trait AuthDirectives {
   def createAuthToken(authService: ActorRef, t: Timeout, traceId: String): Directive1[AuthenticationActor.Token] =
     entity(as[Authenticate]).flatMap { authCmd =>
       onSuccess {
-        trace(log, traceId, GenerateToken, Variation.Attempt, "")
+        log.tylog(Level.INFO,  traceId, GenerateToken, Variation.Attempt, "")
         authService.ask(authCmd)(t)
           .mapTo[Try[AuthenticationActor.Token]]
           .andThen {
             case Success(token) ⇒
-              trace(log, traceId, GenerateToken, Variation.Success, "created token {}", token)
+              log.tylog(Level.INFO, traceId, GenerateToken, Variation.Success, "created token {}", token)
             case Failure(e) ⇒
-              trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
+              log.tylog(Level.INFO, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
           }(mat.executionContext)
       }.flatMap {
         case Success(token) ⇒ provide(token)
@@ -55,14 +56,14 @@ trait AuthDirectives {
   def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[ApiUser] =
     headerValueByName("SONICD-AUTH").flatMap { token ⇒
       onSuccess {
-        trace(log, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
+        log.tylog(Level.INFO, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
         authService.ask(AuthenticationActor.ValidateToken(token, traceId))(t)
           .mapTo[Try[ApiUser]]
           .andThen {
             case Success(res) ⇒
-              trace(log, traceId, ValidateToken, Variation.Success, "validated token {}", token)
+              log.tylog(Level.INFO, traceId, ValidateToken, Variation.Success, "validated token {}", token)
             case Failure(e) ⇒
-              trace(log, traceId, ValidateToken, Variation.Failure(e), "token validation for token {} failed", token)
+              log.tylog(Level.INFO, traceId, ValidateToken, Variation.Failure(e), "token validation for token {} failed", token)
           }(mat.executionContext)
       }.flatMap {
         case Success(u) ⇒ provide(u)

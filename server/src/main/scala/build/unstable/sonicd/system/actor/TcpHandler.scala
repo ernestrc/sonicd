@@ -7,7 +7,6 @@ import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
 import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
-import akka.stream.actor.ActorSubscriberMessage.OnNext
 import akka.util.ByteString
 import build.unstable.sonic.Exceptions.ProtocolException
 import build.unstable.sonic.JsonProtocol._
@@ -16,6 +15,7 @@ import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.model.StreamSubscription
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
+import org.slf4j.event.Level
 
 import scala.collection.mutable.ListBuffer
 import scala.util.control.NonFatal
@@ -26,7 +26,7 @@ class TcpSupervisor(controller: ActorRef, authService: ActorRef)
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    info(log, "tcp supervisor {} is up and awaiting Tcp.Bound message", self)
+    log.debug("tcp supervisor {} is up and awaiting Tcp.Bound message", self)
   }
 
   override def supervisorStrategy: SupervisorStrategy =
@@ -37,7 +37,7 @@ class TcpSupervisor(controller: ActorRef, authService: ActorRef)
   def listening(listener: ActorRef): Receive = {
 
     case c@Tcp.Connected(remote, local) =>
-      debug(log, "new connection: remoteAddr: {}; localAddr: {}", remote, local)
+      log.debug("new connection: remoteAddr: {}; localAddr: {}", remote, local)
       val connection = sender()
       val handler = context.actorOf(Props(classOf[TcpHandler], controller,
         authService, connection, remote.getAddress))
@@ -50,7 +50,7 @@ class TcpSupervisor(controller: ActorRef, authService: ActorRef)
     case Tcp.CommandFailed(_: Tcp.Bind) ⇒ context stop self
 
     case b@Tcp.Bound(localAddress) ⇒
-      info(log, "ready and listening for new connections on {}", localAddress)
+      log.debug("ready and listening for new connections on {}", localAddress)
       val listener = sender()
       listener ! Tcp.ResumeAccepting(1)
       context.become(listening(listener))
@@ -75,21 +75,21 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
-      error(log, e, "error in publisher")
+      log.error(e, "error in publisher")
       self ! StreamCompleted.error(traceId, e)
       Stop
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting tcp handler in path {}", self.path)
+    log.debug("starting tcp handler in path {}", self.path)
     connection ! ResumeReading
   }
 
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    debug(log, "stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
+    log.debug("stopped tcp handler in path '{}'. transferred {} events", self.path, transferred)
   }
 
 
@@ -117,9 +117,9 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         //log.debug("acknowledge offset {} transferred {} therefore ack {}", offset, transferred, idx)
 
         storage.remove(idx.toInt)
-      } else warning(log, "received double ack: {}", offset)
+      } else log.warning("received double ack: {}", offset)
     } else {
-      warning(log, "storage was empty at ack {}", offset)
+      log.warning("storage was empty at ack {}", offset)
     }
   }
 
@@ -142,7 +142,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
-      error(log, t, "stream error")
+      log.error(t, "stream error")
       self ! StreamCompleted.error(traceId, t)
     }
 
@@ -171,7 +171,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
   initState()
 
   def closing(ev: StreamCompleted): Receive = framing(stashCommandsHandleAckCancel) orElse {
-    debug(log, "switched to closing behaviour with ev {} and storage {}", ev, storage)
+    log.debug("switched to closing behaviour with ev {} and storage {}", ev, storage)
     // check if we're ready to send done msg
     if (storage.isEmpty) {
       buffer(ev)
@@ -179,7 +179,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     } else buffer(ev)
 
     {
-      case PeerClosed ⇒ debug(log, "peer closed")
+      case PeerClosed ⇒ log.debug("peer closed")
       case CommandFailed(_: Write) => connection ! ResumeWriting
       case WritingResumed => writeOne()
       case Ack(offset) =>
@@ -201,10 +201,11 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
 
     case CompletedStream ⇒
       val msg = "completed stream without done msg"
-      log.error(msg)
-      context.become(closing(StreamCompleted.error(traceId, new ProtocolException(msg))))
+      val e = new ProtocolException(msg)
+      log.error(e, msg)
+      context.become(closing(StreamCompleted.error(traceId, e)))
 
-    case PeerClosed ⇒ debug(log, "peer closed")
+    case PeerClosed ⇒ log.debug("peer closed")
   }
 
   def handleCommands(data: ByteString): Unit = {
@@ -220,13 +221,13 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         }
         withTraceId match {
           case q: Query ⇒
-            trace(log, withTraceId.traceId.get, MaterializeSource,
+            log.tylog(Level.INFO, withTraceId.traceId.get, MaterializeSource,
               Variation.Attempt, "deserialized query {}", withTraceId)
 
             controller ! SonicController.NewQuery(q, Some(clientAddress))
 
           case a: Authenticate ⇒
-            trace(log, withTraceId.traceId.get, GenerateToken,
+            log.tylog(Level.INFO, withTraceId.traceId.get, GenerateToken,
               Variation.Attempt, "deserialized auth cmd {}", withTraceId)
 
             authService ! withTraceId
@@ -258,7 +259,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         buffer(t)
         writeOne()
 
-        context.become(commonBehaviour orElse{
+        context.become(commonBehaviour orElse {
           case t: SonicMessage ⇒ buffer(t)
           case Ack(offset) ⇒
             acknowledge(offset)
@@ -287,7 +288,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         }
       } catch {
         case e: Exception ⇒
-          log.error("error framing incoming bytes", e)
+          log.error(e, "error framing incoming bytes")
           context.become(closing(StreamCompleted.error(traceId, e)))
       } finally {
         connection ! ResumeReading
@@ -298,19 +299,19 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
     framing(stashCommandsHandleAckCancel) orElse {
       //auth cmd failed
       case Failure(e) ⇒
-        trace(log, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
+        log.tylog(Level.INFO, traceId, GenerateToken, Variation.Failure(e), "failed to create token")
         context.become(closing(StreamCompleted.error(traceId, e)))
 
       //auth cmd succeeded
       case Success(token: AuthenticationActor.Token) ⇒
-        trace(log, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
+        log.tylog(Level.INFO, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
         self ! OutputChunk(Vector(token))
         self ! StreamCompleted.success(traceId)
         context.become(materialized)
 
       case ev: StreamCompleted ⇒
         context.become(closing(ev))
-        trace(log, traceId, MaterializeSource, Variation.Failure(ev.error.get),
+        log.tylog(Level.INFO, traceId, MaterializeSource, Variation.Failure(ev.error.get),
           "controller failed to materialize source")
 
       case s: Subscription ⇒
@@ -318,11 +319,11 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         //start streaming
         subscription = new StreamSubscription(s)
         subscription.request(1)
-        trace(log, traceId, MaterializeSource, Variation.Success, msg)
+        log.tylog(Level.INFO, traceId, MaterializeSource, Variation.Success, msg)
         context.become(materialized)
 
       case handlerProps: Props ⇒
-        debug(log, "received props of {}", handlerProps.actorClass())
+        log.debug("received props of {}", handlerProps.actorClass())
         handler = context.actorOf(handlerProps)
         val pub = ActorPublisher[SonicMessage](handler)
         pub.subscribe(subs)

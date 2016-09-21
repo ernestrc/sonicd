@@ -10,7 +10,7 @@ class TestController(implicitSender: ActorRef) extends Actor with ClientLogging 
   }
 
   override def receive: Receive = {
-    case anyElse ⇒ warning(log, "extraneous message recv {}", anyElse)
+    case anyElse ⇒ log.warning( "extraneous message recv {}", anyElse)
   }
 }
 

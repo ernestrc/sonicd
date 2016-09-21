@@ -29,10 +29,10 @@ object Sonicd extends App with AkkaSystem with AkkaService with AkkaApi with Son
   tcpIoService.tell(Tcp.Bind(tcpService,
     new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT), options = Nil, pullMode = true), tcpService)
 
-  info(log, "STARTING SONIC SERVICE V.{} ({} {}) on interface {}; http port: {}; tcp port: {}",
+  log.info( "STARTING SONIC SERVICE V.{} ({} {}) on interface {}; http port: {}; tcp port: {}",
     BuildInfo.version, BuildInfo.commit, BuildInfo.builtAt, SonicdConfig.INTERFACE,
     SonicdConfig.HTTP_PORT, SonicdConfig.TCP_PORT)
 
-  info(log, "ssl config: {} with default protocol: {}", config, config.protocol)
+  log.info( "ssl config: {} with default protocol: {}", config, config.protocol)
 
 }

@@ -11,6 +11,7 @@ import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
 import build.unstable.sonicd.{BuildInfo, SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json._
 
 import scala.collection.immutable.Seq
@@ -84,14 +85,14 @@ class PrestoPublisher(traceId: String, query: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    debug(log, "stopping presto publisher of '{}'", traceId)
+    log.debug("stopping presto publisher of '{}'", traceId)
     retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
     context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting presto publisher of '{}'", traceId)
+    log.debug("starting presto publisher of '{}'", traceId)
     context watch supervisor
   }
 
@@ -125,7 +126,7 @@ class PrestoPublisher(traceId: String, query: String,
       case ColMeta(name, "array") ⇒ (name, JsArray.empty)
       case ColMeta(name, "json" | "map") ⇒ (name, JsObject(Map.empty[String, JsValue]))
       case ColMeta(name, anyElse) ⇒
-        warning(log, "could not map type {}", anyElse)
+        log.warning("could not map type {}", anyElse)
         (name, JsString(""))
     })
   }
@@ -175,7 +176,7 @@ class PrestoPublisher(traceId: String, query: String,
       tryPullUpstream()
 
     case r: QueryResults ⇒
-      debug(log, "received query results of query '{}'", r.id)
+      log.debug("received query results of query '{}'", r.id)
       lastQueryResults = Some(r)
       //extract type metadata
       if (!bufferedMeta && r.columns.isDefined) {
@@ -201,13 +202,13 @@ class PrestoPublisher(traceId: String, query: String,
 
         case "FINISHED" ⇒
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
-          trace(log, traceId, callType, Variation.Success, r.stats.state)
+          log.tylog(Level.INFO, traceId, callType, Variation.Success, r.stats.state)
           context.become(terminating(done = StreamCompleted.success))
 
         case "FAILED" ⇒
           val error = r.error.get
           val e = new Exception(error.message)
-          trace(log, traceId, callType, Variation.Failure(e),
+          log.tylog(Level.INFO, traceId, callType, Variation.Failure(e),
             "query status is FAILED: {}", error)
 
           //retry
@@ -222,25 +223,25 @@ class PrestoPublisher(traceId: String, query: String,
                 }))
 
           } else {
-            debug(log, "error_code: {}; error_type: {}; skipping retry", error.errorCode, error.errorType)
+            log.debug("error_code: {}; error_type: {}; skipping retry", error.errorCode, error.errorType)
             context.become(terminating(StreamCompleted.error(e)))
           }
 
         case state ⇒
           val msg = s"unexpected query state from presto $state"
           val e = new Exception(msg)
-          trace(log, traceId, callType, Variation.Failure(e), msg)
+          log.tylog(Level.INFO, traceId, callType, Variation.Failure(e), msg)
           context.become(terminating(StreamCompleted.error(e)))
       }
       tryPushDownstream()
 
     case Status.Failure(e) ⇒
-      trace(log, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
+      log.tylog(Level.INFO, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
       context.become(terminating(StreamCompleted.error(e)))
   }
 
   def runStatement(callType: CallType, post: HttpRequestCommand, sender: ActorRef) {
-    trace(log, traceId, callType, Variation.Attempt,
+    log.tylog(Level.INFO, traceId, callType, Variation.Attempt,
       "send query to supervisor in path {}", supervisor.path)
     supervisor.tell(post, sender)
   }

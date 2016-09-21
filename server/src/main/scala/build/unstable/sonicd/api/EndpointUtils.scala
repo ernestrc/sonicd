@@ -4,10 +4,9 @@ import java.util.UUID
 
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{Directive1, RouteResult}
-import akka.http.scaladsl.unmarshalling.FromRequestUnmarshaller
-import akka.stream.ActorMaterializer
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 
 trait EndpointUtils extends SonicdLogging {
 
@@ -18,26 +17,27 @@ trait EndpointUtils extends SonicdLogging {
     }
   }
 
+  // should take Level when fixed: https://github.com/ernestrc/tylog/issues/1
   def instrumentRoute(callType: CallType, traceIdMaybe: Option[TraceID]): Directive1[TraceID] = {
 
     val traceId = traceIdMaybe.getOrElse(UUID.randomUUID().toString)
 
-    trace(log, traceId, callType, Variation.Attempt, "")
+    log.tylog(Level.DEBUG, traceId, callType, Variation.Attempt, "")
 
     mapRouteResultPF {
       case r: RouteResult.Complete ⇒
-        trace(log, traceId, callType, Variation.Success, "")
+        log.tylog(Level.DEBUG, traceId, callType, Variation.Success, "")
         r
       case r@RouteResult.Rejected(rejections) ⇒
         val e = new Exception(rejections.foldLeft("")((acc, r) ⇒ acc + "; " + r.toString))
-        trace(log, traceId, callType, Variation.Failure(e), "")
+        log.tylog(Level.DEBUG, traceId, callType, Variation.Failure(e), "")
         r
     }.tflatMap { _ ⇒
       provide(traceId)
     }
   }
 
-  def instrumentRoute(callType: CallType): Directive1[TraceID] = {
+  def instrumentRoute(level: Level, callType: CallType): Directive1[TraceID] = {
     extractTraceHeader.tflatMap { case Tuple1(traceIdMaybe) ⇒
       instrumentRoute(callType, traceIdMaybe)
     }

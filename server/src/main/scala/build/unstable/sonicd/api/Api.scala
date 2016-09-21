@@ -30,10 +30,10 @@ trait AkkaApi extends Api {
 
   implicit val rejectionHandler: RejectionHandler.Builder = RejectionHandler.newBuilder().handle {
     case rej@MalformedRequestContentRejection(msg, _) ⇒
-      warning(log, "malformed request: {}", rej)
+      log.warning( "malformed request: {}", rej)
       completeWithMessage("there was a problem when unmarshalling payload: " + msg)
     case rej: Rejection ⇒
-      warning(log, "rejected: {}", rej)
+      log.warning( "rejected: {}", rej)
       completeWithMessage("rejected")
   }
 

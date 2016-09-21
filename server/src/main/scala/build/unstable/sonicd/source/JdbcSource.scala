@@ -10,6 +10,7 @@ import build.unstable.sonic._
 import build.unstable.sonicd.source.JdbcConnectionsHandler.JdbcHandle
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json._
 
 import scala.collection.mutable.ListBuffer
@@ -43,7 +44,6 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
 }
 
 object JdbcPublisher {
-
   val IS_SQL_SELECT = "^(\\s*?)(?i)select\\s*?.*?\\s*?(?i)from(.*)*?".r
 }
 
@@ -65,13 +65,13 @@ class JdbcPublisher(query: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    info(log, "stopping jdbc publisher of '{}'", ctx.traceId)
+    log.info("stopping jdbc publisher of '{}'", ctx.traceId)
     if (handle != null & !isDone) {
       try {
         handle.stmt.cancel()
-        debug(log, "successfully canceled query '{}'", ctx.traceId)
+        log.debug("successfully canceled query '{}'", ctx.traceId)
       } catch {
-        case e: Exception ⇒ warning(log, "could not cancel query '{}': {}", ctx.traceId, e.getMessage)
+        case e: Exception ⇒ log.warning("could not cancel query '{}': {}", ctx.traceId, e.getMessage)
       }
     }
     connections ! handle
@@ -79,7 +79,7 @@ class JdbcPublisher(query: String,
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    info(log, "starting jdbc publisher of '{}' on '{}'", ctx.traceId, dbUrl)
+    log.info("starting jdbc publisher of '{}' on '{}'", ctx.traceId, dbUrl)
   }
 
 
@@ -93,7 +93,7 @@ class JdbcPublisher(query: String,
 
   // FIXME
   def isSelect(query: String): Boolean = {
-    warning(log, "could not determinte if statement is select: implementation missing")
+    log.warning("could not determinte if statement is select: implementation missing")
     false //JdbcPublisher.IS_SQL_SELECT.pattern.matcher(query).matches
   }
 
@@ -121,14 +121,14 @@ class JdbcPublisher(query: String,
 
   def waitingForHandle: Receive = {
     case j@JdbcHandle(conn, stmt) ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Success, "received jdbc handle")
+      log.tylog(Level.DEBUG, ctx.traceId, GetJdbcHandle, Variation.Success, "received jdbc handle")
       handle = j
       val executor = context.actorOf(executorProps(conn, stmt))
       context.watch(executor)
       context.become(streaming(executor))
 
     case r: StreamCompleted ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
+      log.tylog(Level.DEBUG, ctx.traceId, GetJdbcHandle, Variation.Failure(r.error.get), "could not get jdbc handle")
       onNext(r)
       onCompleteThenStop()
   }
@@ -141,7 +141,7 @@ class JdbcPublisher(query: String,
 
     //first time client requests
     case Request(n) ⇒
-      trace(log, ctx.traceId, GetJdbcHandle, Variation.Attempt, "")
+      log.tylog(Level.DEBUG, ctx.traceId, GetJdbcHandle, Variation.Attempt, "")
       connections ! JdbcConnectionsHandler.GetJdbcHandle(isSelect(query), driver, dbUrl, user, password, ctx)
       log.debug("waiting for handle of {}", dbUrl)
       context.become(waitingForHandle, discardOld = false)
@@ -160,11 +160,11 @@ class JdbcExecutor(query: String,
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting jdbc executor of '{}'", ctx.traceId)
+    log.debug("starting jdbc executor of '{}'", ctx.traceId)
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping jdbc executor of {}", ctx.traceId)
+    log.debug("stopping jdbc executor of {}", ctx.traceId)
     //close resources
     try {
       rs.close()
@@ -205,15 +205,15 @@ class JdbcExecutor(query: String,
   def execute(u: String): Boolean = {
     try {
       stmtN += 1
-      trace(log, ctx.traceId, ExecuteStatement,
+      log.tylog(Level.INFO, ctx.traceId, ExecuteStatement,
         Variation.Attempt, "running statement n {}", stmtN)
       val isResultSet = stmt.execute(u)
-      trace(log, ctx.traceId, ExecuteStatement,
+      log.tylog(Level.INFO, ctx.traceId, ExecuteStatement,
         Variation.Success, "finished running statement n {}", stmtN)
       isResultSet
     } catch {
       case e: Exception ⇒
-        trace(log, ctx.traceId, ExecuteStatement,
+        log.tylog(Level.INFO, ctx.traceId, ExecuteStatement,
           Variation.Failure(e), "error when running statement n {}", stmtN)
         throw e
     }
@@ -278,16 +278,16 @@ class JdbcExecutor(query: String,
   override def receive: Actor.Receive = {
     case Request(n) ⇒
 
-      trace(log, ctx.traceId, RunInitializationStatements, Variation.Attempt,
+      log.tylog(Level.DEBUG, ctx.traceId, RunInitializationStatements, Variation.Attempt,
         "running {} initialization statements", initializationStmts.size)
       initializationStmts.foreach { s ⇒
         stmt.execute(s.replace(";", ""))
       }
-      trace(log, ctx.traceId, RunInitializationStatements,
+      log.tylog(Level.DEBUG, ctx.traceId, RunInitializationStatements,
         Variation.Success, "finished initialization statements")
 
       val statements = splitBatch(query)
-      debug(log, "split query into {} statements", statements.size)
+      log.debug("split query into {} statements", statements.size)
 
       if (statements.isEmpty) {
         terminate(StreamCompleted.error(new Exception("nothing to run")))
@@ -320,14 +320,17 @@ class JdbcExecutor(query: String,
         context.become(streaming())
       } else {
         if (canWrite && !conn.getAutoCommit) {
-          debug(log, "user has write access and auto-commit is false. Committing now...")
+          log.debug("user has write access and auto-commit is false. Committing now...")
           conn.commit()
-        } else if (!canWrite && !conn.getAutoCommit){
-          warning(log, "user tried to run update statements but this token doesn't grant write access")
-        } else if (canWrite){
-          debug(log, "user has write access and auto-commit was true")
-        } else if (!canWrite){
-          log.error("user ran update statements successfully without write access")
+        } else if (!canWrite && !conn.getAutoCommit) {
+          log.warning("user tried to run update statements but this token doesn't grant write access")
+        } else if (canWrite) {
+          log.debug("user has write access and auto-commit was true")
+        } else if (!canWrite) {
+          // should never happen
+          val e = new Exception("user ran update statements successfully without write access")
+          log.error(e, "this is very bad")
+          throw e
         }
         context.parent ! TypeMetadata(Vector.empty) //n at least will be 1
         if (n - 1 > 0) terminate(StreamCompleted.success)
@@ -342,21 +345,21 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    info(log, "starting jdbc connection handler")
+    log.info("starting jdbc connection handler")
   }
 
   override def receive: Actor.Receive = {
     case JdbcHandle(conn, stmt) ⇒
       try {
         stmt.close()
-        debug(log, "closed statement {} of connection {}", stmt, conn)
+        log.debug("closed statement {} of connection {}", stmt, conn)
       } catch {
         case e: Exception ⇒
       }
 
       try {
         conn.close()
-        debug(log, "closed connection {}", conn)
+        log.debug("closed connection {}", conn)
       } catch {
         case e: Exception ⇒
       }
@@ -366,15 +369,15 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
         val conn: Connection = {
           //register driver
           Class.forName(driver)
-          debug(log, "registered driver {}", driver)
+          log.debug("registered driver {}", driver)
           val c = DriverManager.getConnection(url, user, password)
-          debug(log, "created new connection {}", c)
+          log.debug("created new connection {}", c)
           try {
             c.setAutoCommit(false)
           } catch {
             case e: Exception ⇒
               if (c.getAutoCommit) {
-                warning(log, "{} doesn't support setting auto-commit to false: {}", driver, e.getMessage)
+                log.warning("{} doesn't support setting auto-commit to false: {}", driver, e.getMessage)
               }
           }
           c
@@ -383,7 +386,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
         //try to set streaming properties for each driver
         try {
           if (driver == "org.postgresql.Driver" && isQuery) {
-            debug(log, "setting streaming properties for PostgreSQL")
+            log.debug("setting streaming properties for PostgreSQL")
             stmt = conn.createStatement(
               ResultSet.TYPE_FORWARD_ONLY,
               ResultSet.CONCUR_READ_ONLY,
@@ -391,29 +394,29 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
             )
             stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
           } else if (driver == "com.mysql.jdbc.Driver" && isQuery) {
-            debug(log, "setting streaming properties for MySQL")
+            log.debug("setting streaming properties for MySQL")
             stmt = conn.createStatement(
               ResultSet.TYPE_FORWARD_ONLY,
               ResultSet.CONCUR_READ_ONLY
             )
             stmt.setFetchSize(Integer.MIN_VALUE)
           } else if (isQuery) {
-            debug(log, "setting streaming properties for driver")
+            log.debug("setting streaming properties for driver")
             stmt = conn.createStatement()
             stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
           } else {
             stmt = conn.createStatement()
           }
-          debug(log, "successfully set streaming properties")
+          log.debug("successfully set streaming properties")
         } catch {
           case e: Exception ⇒
-            warning(log, "could not set streaming properties for driver '{}'", driver)
+            log.warning("could not set streaming properties for driver '{}'", driver)
             stmt = conn.createStatement()
         }
         sender() ! JdbcHandle(conn, stmt)
       } catch {
         case e: Exception ⇒
-          error(log, e, "error when preparing connection/statement")
+          log.error(e, "error when preparing connection/statement")
           sender() ! StreamCompleted.error(ctx.traceId, e)
       }
   }

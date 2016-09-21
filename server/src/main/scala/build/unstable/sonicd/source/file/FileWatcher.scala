@@ -17,12 +17,12 @@ class FileWatcher(dir: Path, workerProps: Props) extends Actor with SonicdLoggin
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting file watcher of directory {}", dir)
+    log.debug( "starting file watcher of directory {}", dir)
     worker ! FileWatcherWorker.DoWatch
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping file watcher of directory {}", dir)
+    log.debug( "stopping file watcher of directory {}", dir)
   }
 
   val subscribers = mutable.Map.empty[ActorRef, Option[PathMatcher]]
@@ -46,19 +46,19 @@ class FileWatcher(dir: Path, workerProps: Props) extends Actor with SonicdLoggin
     case Watch(Some(fileFilter), ctx) ⇒
       val subscriber = sender()
       val filter = s"glob:${dir.toString + "/" + fileFilter}"
-      debug(log, "file watcher {} subscribed query {} to files that match {}", self.path, ctx.traceId, filter)
+      log.debug( "file watcher {} subscribed query {} to files that match {}", self.path, ctx.traceId, filter)
       val matcher = FileSystems.getDefault.getPathMatcher(filter)
       context watch subscriber
       subscribers.update(subscriber, Some(matcher))
 
     case Watch(None, ctx) ⇒
       val subscriber = sender()
-      debug(log, "file watcher {} subscribed query {} to all files of {}", self.path, ctx.traceId, dir)
+      log.debug( "file watcher {} subscribed query {} to all files of {}", self.path, ctx.traceId, dir)
       subscribers.update(subscriber, None)
 
     case Terminated(ref) ⇒ subscribers.remove(ref)
 
-    case msg ⇒ warning(log, "extraneous message received {}", msg)
+    case msg ⇒ log.warning( "extraneous message received {}", msg)
   }
 }
 
@@ -99,7 +99,7 @@ object FileWatcher extends SonicdLogging {
                             dirFilter: Path ⇒ Boolean = (p: Path) ⇒ true): Glob =
     fps.headOption match {
       case Some(fp) ⇒
-        debug(log, "expanding file path {} ", fp)
+        log.debug( "expanding file path {} ", fp)
         val path = fp.getPath
 
         lazy val newGlob = Glob(res.folders + fp.toPath, res.fileFilterMaybe)
@@ -137,15 +137,15 @@ object FileWatcher extends SonicdLogging {
 class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting file watcher worker of folder {}", dir)
+    log.debug( "starting file watcher worker of folder {}", dir)
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping file watcher worker of '{}'", dir)
+    log.debug( "stopping file watcher worker of '{}'", dir)
     try {
       watcher.close()
       key.cancel()
-      debug(log, "closed watcher object {}", watcher)
+      log.debug( "closed watcher object {}", watcher)
     } catch {
       case e: Exception ⇒
     }
@@ -175,7 +175,7 @@ class FileWatcherWorker(dir: Path) extends Actor with SonicdLogging {
       val ev = watch()
       if (ev.nonEmpty) context.parent ! FileWatcher.WatchResults(ev)
       else self ! DoWatch
-    case msg ⇒ warning(log, "extraneous message received {}", msg)
+    case msg ⇒ log.warning( "extraneous message received {}", msg)
   }
 }
 

@@ -51,16 +51,16 @@ trait LocalFilePublisher {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting file stream publisher of '{}'", ctx.traceId)
+    log.debug( "starting file stream publisher of '{}'", ctx.traceId)
   }
 
   override def postStop(): Unit = {
-    debug(log, "stopping file stream publisher of '{}'", ctx.traceId)
+    log.debug( "stopping file stream publisher of '{}'", ctx.traceId)
   }
 
   @throws[Exception](classOf[Exception])
   override def postRestart(reason: Throwable): Unit = {
-    error(log, reason, "restarted file stream publisher")
+    log.error( reason, "restarted file stream publisher")
   }
 
   //in case this publisher never gets subscribed to
@@ -86,7 +86,7 @@ trait LocalFilePublisher {
 
     if (tail) {
       val bytes = file.length()
-      debug(log, "tail mode enabled. skipping {} bytes for {}", bytes, fileName)
+      log.debug( "tail mode enabled. skipping {} bytes for {}", bytes, fileName)
       channel.channel.position(bytes)
     }
 
@@ -94,7 +94,7 @@ trait LocalFilePublisher {
     Some(channel)
   } catch {
     case e: AccessDeniedException ⇒
-      warning(log, "access denied on {}", fileName)
+      log.warning( "access denied on {}", fileName)
       None
   }
 
@@ -212,7 +212,7 @@ trait LocalFilePublisher {
 
   final def common: Receive = {
     case Cancel ⇒
-      debug(log, "client canceled")
+      log.debug( "client canceled")
       onComplete()
       context.stop(self)
   }
@@ -242,19 +242,19 @@ trait LocalFilePublisher {
           files.get(ev.fileName).map {
             case (_, p) ⇒ p
           }.orElse {
-            debug(log, "file {} was modified and but it was not being monitored yet", ev.fileName)
+            log.debug( "file {} was modified and but it was not being monitored yet", ev.fileName)
             newFile(ev.file, ev.fileName)
           }.foreach { chan ⇒
             stream(query, chan)
           }
       }
 
-    case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
+    case anyElse ⇒ log.warning( "extraneous message {}", anyElse)
   }
 
   final def receive: Receive = common orElse {
     case req: Request ⇒
-      debug(log, "running file query {}", rawQuery)
+      log.debug( "running file query {}", rawQuery)
 
       try {
         val parsed = parseQuery(rawQuery)
@@ -267,7 +267,7 @@ trait LocalFilePublisher {
               FileSystems.getDefault.getPathMatcher(s"glob:${folder.toString + "/" + fileFilter}")
             )
             if (file.isFile && (matcher.isEmpty || matcher.get.matches(file.toPath))) {
-              info(log, "matched file {}", file.toPath)
+              log.info( "matched file {}", file.toPath)
               val fileName = file.getName
               newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
                 .foreach { reader ⇒
@@ -284,10 +284,10 @@ trait LocalFilePublisher {
 
       } catch {
         case e: Exception ⇒
-          error(log, e, "error setting up watch")
+          log.error( e, "error setting up watch")
           terminate(StreamCompleted.error(ctx.traceId, e))
       }
-    case anyElse ⇒ warning(log, "extraneous message {}", anyElse)
+    case anyElse ⇒ log.warning( "extraneous message {}", anyElse)
   }
 }
 

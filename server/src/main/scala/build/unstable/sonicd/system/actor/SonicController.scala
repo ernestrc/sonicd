@@ -10,6 +10,7 @@ import build.unstable.sonic._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
@@ -18,12 +19,12 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    info(log, "starting Sonic Controller {}", self.path)
+    log.info("starting Sonic Controller {}", self.path)
   }
 
   @throws[Exception](classOf[Exception])
   override def postRestart(reason: Throwable): Unit = {
-    error(log, reason, "RESTARTED CONTROLLER")
+    log.error(reason, "RESTARTED CONTROLLER")
   }
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy(loggingEnabled = true) {
@@ -44,14 +45,14 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       val source = query.getSourceClass.getConstructors()(0)
         .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
 
-      debug(log, "successfully instantiated source {} for query with id '{}'", source, queryId)
+      log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
       if (isAuthorized(user, source.securityLevel, clientAddress)) {
         handler ! source.publisher
       } else handler ! StreamCompleted.error(q.traceId.get, new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
-        error(log, e, "error when preparing stream materialization")
+        log.error(e, "error when preparing stream materialization")
         handler ! StreamCompleted.error(q.traceId.get, e)
     }
   }
@@ -86,13 +87,13 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       prepareMaterialization(handler, query, Some(user), clientAddress)
 
     case NewQuery(query, clientAddress) ⇒
-      debug(log, "client from {} posted new query {}", clientAddress, query)
+      log.debug("client from {} posted new query {}", clientAddress, query)
       val handler = sender()
 
       query.auth match {
         case Some(token) ⇒
 
-          trace(log, query.traceId.get, ValidateToken,
+          log.tylog(Level.INFO, query.traceId.get, ValidateToken,
             Variation.Attempt, "sending token {} for validation", token)
 
           authService.ask(
@@ -101,17 +102,17 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
             .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
             .andThen {
               case Success(res) ⇒
-                trace(log, query.traceId.get, ValidateToken, Variation.Success,
+                log.tylog(Level.INFO, query.traceId.get, ValidateToken, Variation.Success,
                   "validated token {} for user {}", token, res.user)
               case Failure(e) ⇒
-                trace(log, query.traceId.get, ValidateToken, Variation.Failure(e),
+                log.tylog(Level.INFO, query.traceId.get, ValidateToken, Variation.Failure(e),
                   "token validation for token {} failed", token)
             }.pipeTo(self)
 
         case None ⇒ prepareMaterialization(handler, query, None, clientAddress)
       }
 
-    case m ⇒ warning(log, "oops! It looks like I received the wrong message: {}", m)
+    case m ⇒ log.warning("oops! It looks like I received the wrong message: {}", m)
 
   }
 }
@@ -124,7 +125,5 @@ object SonicController {
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
       s"to access this source from ${clientAddress.getOrElse("unknown address")}")
       .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}. Please login first"))
-
-  case object GetHandlers
 
 }

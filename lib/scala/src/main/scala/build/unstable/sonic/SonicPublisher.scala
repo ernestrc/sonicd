@@ -4,10 +4,11 @@ import java.util.UUID
 
 import akka.actor.{ActorRef, Terminated}
 import akka.io.Tcp
-import akka.stream.actor.{ActorPublisherMessage, ActorPublisher}
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.util.ByteString
-import build.unstable.sonic.SonicPublisher.{StreamException, Ack}
+import build.unstable.sonic.SonicPublisher.{Ack, StreamException}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -31,18 +32,18 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
 
   @scala.throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    debug(log, "stopped sonic publisher of '{}'", traceId)
+    log.debug("stopped sonic publisher of '{}'", traceId)
     if (firstSent && !firstReceived) {
       val msg = "server never sent any messages"
       val e = new Exception(msg)
-      trace(log, traceId, EstablishCommunication, Variation.Failure(e), msg)
+      log.tylog(Level.DEBUG, traceId, EstablishCommunication, Variation.Failure(e), msg)
     }
     super.postStop()
   }
 
   @scala.throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting sonic publisher of '{}'", traceId)
+    log.debug("starting sonic publisher of '{}'", traceId)
     supervisor ! SonicSupervisor.RegisterPublisher(traceId)
   }
 
@@ -88,7 +89,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
       // log if first message
       if (!firstReceived) {
         firstReceived = true
-        trace(log, traceId, EstablishCommunication, Variation.Success, "received first msg from server")
+        log.tylog(Level.DEBUG, traceId, EstablishCommunication, Variation.Success, "received first msg from server")
       }
       frame()
     }
@@ -98,7 +99,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
     try frame()
     catch {
       case e: Exception ⇒
-        error(log, e, "error framing incoming bytes")
+        log.error(e, "error framing incoming bytes")
         context.become(terminating(StreamCompleted.error(traceId, e)))
     }
   }
@@ -163,12 +164,12 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
       tryPushDownstream()
       connection ! ResumeReading
 
-    case anyElse ⇒ warning(log, "received unexpected {} when in idle state", anyElse)
+    case anyElse ⇒ log.warning("received unexpected {} when in idle state", anyElse)
 
   }
 
   def connected: Receive = commonBehaviour orElse {
-    trace(log, traceId, EstablishCommunication, Variation.Attempt, "sending first msg {}", cmd)
+    log.tylog(Level.DEBUG, traceId, EstablishCommunication, Variation.Attempt, "sending first msg {}", cmd)
     connection ! Tcp.Register(self)
     val bytes = Sonic.lengthPrefixEncode(cmd.toBytes)
     val write = Tcp.Write(bytes, Ack)
@@ -183,7 +184,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
         tryPushDownstream()
         context.become(materialized)
 
-      case anyElse ⇒ warning(log, "received unexpected {} when in connnected state", anyElse)
+      case anyElse ⇒ log.warning("received unexpected {} when in connnected state", anyElse)
     }
   }
 
@@ -192,7 +193,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
   def idle: Receive = commonBehaviour orElse {
 
     case f@Tcp.CommandFailed(_: Connect) ⇒
-      trace(log, traceId, CreateTcpConnection,
+      log.tylog(Level.DEBUG, traceId, CreateTcpConnection,
         Variation.Failure(new Exception(f.cmd.failureMessage.toString)), "failed to obtain new tcp connection")
       context.become(terminating(StreamCompleted.error(traceId, new Exception(f.cmd.failureMessage.toString))))
 
@@ -201,14 +202,14 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
       onCompleteThenStop()
 
     case Tcp.Connected(_, _) ⇒
-      trace(log, traceId, CreateTcpConnection, Variation.Success, "received tcp connection")
+      log.tylog(Level.DEBUG, traceId, CreateTcpConnection, Variation.Success, "received tcp connection")
       connection = sender()
       context watch connection
       context.become(connected)
 
     case ActorPublisherMessage.Request(_) ⇒ //ignore for now
 
-    case anyElse ⇒ warning(log, "received unexpected {} when in idle state", anyElse)
+    case anyElse ⇒ log.warning("received unexpected {} when in idle state", anyElse)
   }
 
   override def receive: Receive = idle

@@ -6,11 +6,11 @@ import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.pattern._
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
-import build.unstable.sonic.JsonProtocol
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonicd.source.http.HttpSupervisor._
 import build.unstable.sonicd.{Sonicd, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json._
 
 import scala.concurrent.Future
@@ -60,51 +60,51 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
   case class HttpCommandSuccess(t: Traceable)
 
   def to[S: JsonFormat](traceId: String)(response: HttpResponse): Future[S] = {
-    trace(log, traceId, DownloadHttpBody, Variation.Attempt,
+    log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Attempt,
       "download http body of response with status {} headers {}", response._1, response._2)
     response.entity.toStrict(httpEntityTimeout)
       .map(_.data.decodeString("UTF-8"))
       .andThen {
         case Success(body) ⇒
           val msg = if (debug) s"decoded utf8 body: $body" else ""
-          trace(log, traceId, DownloadHttpBody, Variation.Success, msg)
-          trace(log, traceId, ParseHttpBody, Variation.Attempt, "")
-        case Failure(e) ⇒ trace(log, traceId, DownloadHttpBody, Variation.Failure(e), "failed to download entity")
+          log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Success, msg)
+          log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Attempt, "")
+        case Failure(e) ⇒ log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Failure(e), "failed to download entity")
       }.map(_.parseJson.convertTo[S]).andThen {
-      case Success(parsed) ⇒ trace(log, traceId, ParseHttpBody, Variation.Success, "parsed http body")
-      case Failure(e) ⇒ trace(log, traceId, ParseHttpBody, Variation.Attempt,
+      case Success(parsed) ⇒ log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Success, "parsed http body")
+      case Failure(e) ⇒ log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Attempt,
         "error when parsing http body with {}", format.getClass)
     }
   }
 
   def doRequest[S: JsonFormat](traceId: String, request: HttpRequest)
                               (mapSuccess: (String) ⇒ (HttpResponse) ⇒ Future[S]): Future[S] = {
-    trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Attempt,
+    log.tylog(Level.DEBUG, traceId, HttpReq(request.method.value, masterUrl), Variation.Attempt,
       "sending {} http request to {}{}", request.method.value, masterUrl, request._2)
     Source.single(request.copy(headers = request.headers ++: extraHeaders) → traceId)
       .via(connectionPool)
       .runWith(Sink.head)
       .flatMap {
         case t@(Success(response), _) if response.status.isSuccess() =>
-          trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Success, "")
+          log.tylog(Level.DEBUG, traceId, HttpReq(request.method.value, masterUrl), Variation.Success, "")
           mapSuccess(traceId)(response)
         case (Success(response), _) ⇒
-          trace(log, traceId, HttpReq(request.method.value, masterUrl), Variation.Success,
+          log.tylog(Level.DEBUG, traceId, HttpReq(request.method.value, masterUrl), Variation.Success,
             "http request succeded but response status is {}", response._1)
           val parsed = response.entity.toStrict(httpEntityTimeout)
           parsed.recoverWith {
             case e: Exception ⇒
               val er = new HttpException(s"request to $masterUrl failed unexpectedly", response.status.value)
-              error(log, er, s"failed parsing entity from failed request")
+              log.error(er, s"failed parsing entity from failed request")
               Future.failed(er)
           }.flatMap { en ⇒
             val entityMsg = en.data.decodeString("UTF-8")
             val er = new HttpException(entityMsg, response.status.value)
-            error(log, er, "unsuccessful response from server")
+            log.error(er, "unsuccessful response from server")
             Future.failed(er)
           }
         case (Failure(e), _) ⇒
-          trace(log, traceId, HttpReq(request.method.value, masterUrl),
+          log.tylog(Level.DEBUG, traceId, HttpReq(request.method.value, masterUrl),
             Variation.Failure(e), "http request failed ")
           Future.failed(e)
       }
@@ -146,8 +146,8 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
         cancelRequestFromResult(res.asInstanceOf[T]).map { cancelUri ⇒
           cancelQuery(traceId, cancelUri).andThen {
             case Success(wasCanceled) if wasCanceled ⇒ log.debug("successfully canceled query '{}'", traceId)
-            case s: Success[_] ⇒ log.error("could not cancel query '{}': response was not 200 OK", traceId)
-            case Failure(e) ⇒ error(log, e, "error canceling query '{}'", traceId)
+            case s: Success[_] ⇒ log.warning("could not cancel query {}: response was not 200 OK: {}", traceId, s.value)
+            case Failure(e) ⇒ log.error(e, "error canceling query '{}'", traceId)
           }
         }
       }.getOrElse(log.debug("could not remove query of publisher: {}: not queryresults found", ref))
@@ -159,7 +159,7 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
       pub ! r
 
     case HttpRequestCommand(traceId, s) ⇒
-      debug(log, "{} supervising query '{}'", self.path, s)
+      log.debug("{} supervising query '{}'", self.path, s)
       val pub = sender()
       context.watch(pub)
       runStatement(traceId, s)
@@ -167,6 +167,6 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
 
     case f: Status.Failure ⇒ sender() ! f
 
-    case anyElse ⇒ warning(log, "recv unexpected msg: {}", anyElse)
+    case anyElse ⇒ log.warning("recv unexpected msg: {}", anyElse)
   }
 }

@@ -6,6 +6,7 @@ import build.unstable.sonic.{ApiKey, ApiUser, Authenticate}
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
+import org.slf4j.event.Level
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
@@ -23,16 +24,16 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
   def validateToken(token: Token, traceId: String): Try[ApiUser] = {
     Try {
       try {
-        trace(log, traceId, JWTVerifyToken, Variation.Attempt, "verifying token {}", token)
+        log.tylog(Level.DEBUG, traceId, JWTVerifyToken, Variation.Attempt, "verifying token {}", token)
         val verifiedClaims = verifier.verify(token)
-        trace(log, traceId, JWTVerifyToken, Variation.Success, "token is valid {}", token)
+        log.tylog(Level.DEBUG, traceId, JWTVerifyToken, Variation.Success, "token is valid {}", token)
         verifiedClaims
       } catch {
         case e: com.auth0.jwt.JWTExpiredException ⇒
-          trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token {} expired", token)
+          log.tylog(Level.DEBUG, traceId, JWTVerifyToken, Variation.Failure(e), "token {} expired", token)
           throw new TokenExpired(e)
         case NonFatal(e) ⇒
-          trace(log, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
+          log.tylog(Level.DEBUG, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
           throw new TokenVerificationFailed(e)
       }
     }.flatMap(ApiUser.fromJWTClaims)
@@ -47,15 +48,15 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
 
         signOpts.setExpirySeconds(seconds.toSeconds.toInt)
         val claims = apiKey.toJWTClaims(user)
-        trace(log, traceId, JWTSignToken, Variation.Attempt,
+        log.tylog(Level.DEBUG, traceId, JWTSignToken, Variation.Attempt,
           "signing token for {} with api key {} with expiration {}(s)", user, key, seconds)
         try {
           val token = signer.sign(claims, signOpts)
-          trace(log, traceId, JWTSignToken, Variation.Success, "signed new token {}", token)
+          log.tylog(Level.DEBUG, traceId, JWTSignToken, Variation.Success, "signed new token {}", token)
           token
         } catch {
           case NonFatal(e) ⇒
-            trace(log, traceId, JWTSignToken, Variation.Failure(e), "failed to sign token for key {} and user {}", key, user)
+            log.tylog(Level.DEBUG, traceId, JWTSignToken, Variation.Failure(e), "failed to sign token for key {} and user {}", key, user)
             throw e
         }
       }
@@ -83,7 +84,7 @@ object AuthenticationActor {
   class AuthenticationException(msg: String) extends Exception(msg)
 
   class TokenVerificationFailed(inner: Throwable) extends Exception("token verification failed", inner)
-  
+
   class TokenExpired(cause: com.auth0.jwt.JWTExpiredException)
     extends Exception("token expired. generate a new one and try again", cause)
 

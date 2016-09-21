@@ -8,13 +8,11 @@ import akka.stream._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.stream.scaladsl._
 import akka.util.Timeout
-import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.{SonicMessage, StreamCompleted}
 import build.unstable.sonicd.api.EndpointUtils
 import build.unstable.sonicd.system.actor.WsHandler
 import ch.megard.akka.http.cors.CorsDirectives
-
-import scala.concurrent.Future
+import org.slf4j.event.Level
 
 class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
                    (implicit val mat: ActorMaterializer, system: ActorSystem)
@@ -26,8 +24,8 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
 
     val wsHandler = system.actorOf(Props(classOf[WsHandler], controller, authService, clientAddress.toOption))
     Flow.fromSinkAndSource[SonicMessage, SonicMessage](
-    Sink.fromSubscriber(ActorSubscriber(wsHandler)),
-    Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))
+      Sink.fromSubscriber(ActorSubscriber(wsHandler)),
+      Source.fromPublisher[SonicMessage](ActorPublisher(wsHandler))
     ).recover {
       case e: Exception ⇒ StreamCompleted.error("no-trace-id", e)
     }
@@ -86,16 +84,6 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
                   }
                 }
               }
-            }
-          }
-        }
-      }
-    } ~ get {
-      path("subscribe" / Segment) { streamId ⇒
-        instrumentRoute(HandleSubscribe) { traceId ⇒
-          parameterMap { params ⇒
-            complete {
-              Future.failed(new Exception("not implemented yet"))
             }
           }
         }

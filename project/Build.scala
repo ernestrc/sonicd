@@ -18,7 +18,7 @@ object Build extends sbt.Build {
     organization := "build.unstable",
     version := sonicdV,
     scalaVersion := scalaV,
-    licenses +=("MIT", url("https://opensource.org/licenses/MIT")),
+    licenses += ("MIT", url("https://opensource.org/licenses/MIT")),
     resolvers += Resolver.bintrayRepo("ernestrc", "maven"),
     scalacOptions := Seq(
       "-unchecked",
@@ -49,7 +49,7 @@ object Build extends sbt.Build {
     .settings(
       libraryDependencies ++= {
         Seq(
-          "build.unstable" %% "tylog" % "0.2.4",
+          "build.unstable" %% "tylog" % "0.3.0",
           "io.spray" %% "spray-json" % "1.3.2",
           "com.typesafe.akka" %% "akka-actor" % akkaV,
           "com.typesafe.akka" %% "akka-slf4j" % akkaV,
@@ -85,7 +85,8 @@ object Build extends sbt.Build {
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
           "com.auth0" % "java-jwt" % "2.1.0",
           "ch.megard" %% "akka-http-cors" % "0.1.2",
-          "ch.qos.logback" % "logback-classic" % "1.0.13",
+          "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
+          "ch.qos.logback" % "logback-classic" % "1.1.7",
           "com.h2database" % "h2" % "1.3.175" % "test"
         )
       }
@@ -98,8 +99,9 @@ object Build extends sbt.Build {
     .settings(
       libraryDependencies ++= {
         Seq(
-          "build.unstable" %% "tylog-core" % "0.1.3",
-          "ch.qos.logback" % "logback-classic" % "1.0.13"
+          "build.unstable" %% "tylog" % "0.3.0",
+          "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
+          "ch.qos.logback" % "logback-classic" % "1.1.7"
         )
       }
     ).dependsOn(core)

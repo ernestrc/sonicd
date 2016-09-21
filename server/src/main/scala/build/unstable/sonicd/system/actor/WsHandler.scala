@@ -13,12 +13,13 @@ import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.model.StreamSubscription
 import build.unstable.tylog.Variation
 import org.reactivestreams._
+import org.slf4j.event.Level
 
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
 class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
-with ActorSubscriber with SonicdLogging with Stash {
+  with ActorSubscriber with SonicdLogging with Stash {
 
   import akka.stream.actor.ActorPublisherMessage._
   import akka.stream.actor.ActorSubscriberMessage._
@@ -29,24 +30,24 @@ with ActorSubscriber with SonicdLogging with Stash {
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case e: Exception ⇒
-      log.error("error in publisher", e)
+      log.error(e, "error in publisher")
       self ! StreamCompleted.error(traceId, e)
       Stop
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    debug(log, "starting ws handler in path {}", self.path)
+    log.debug("starting ws handler in path {}", self.path)
   }
 
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    debug(log, "stopped ws handler in path '{}'", self.path)
+    log.debug("stopped ws handler in path '{}'", self.path)
   }
 
   override def unhandled(message: Any): Unit = {
-    warning(log, "message not handled {}", message)
+    log.warning("message not handled {}", message)
     super.unhandled(message)
   }
 
@@ -78,7 +79,7 @@ with ActorSubscriber with SonicdLogging with Stash {
   val subs = new Subscriber[SonicMessage] {
 
     override def onError(t: Throwable): Unit = {
-      log.error("publisher called onError of wsHandler", t)
+      log.error(t, "publisher called onError of wsHandler")
       self ! StreamCompleted.error(traceId, t)
     }
 
@@ -112,15 +113,16 @@ with ActorSubscriber with SonicdLogging with Stash {
 
     case UpstreamCompleted ⇒
       val msg = "completed stream without done msg"
-      log.error(msg)
-      context.become(completing(StreamCompleted.error(traceId, new ProtocolException(msg))))
+      val e = new ProtocolException(msg)
+      log.error(e, msg)
+      context.become(completing(StreamCompleted.error(traceId, e)))
 
     case msg@OnError(NonFatal(e)) ⇒
-      warning(log, "ws stream error {}", e)
+      log.warning("ws stream error {}", e)
       context.become(completing(StreamCompleted.error(traceId, e)))
 
     case msg@OnError(e) ⇒
-      error(log, e, "ws stream fatal error")
+      log.error(e, "ws stream fatal error")
       onErrorThenStop(e)
 
   }
@@ -172,10 +174,10 @@ with ActorSubscriber with SonicdLogging with Stash {
           onNext(msg)
           pendingToStream -= 1L
         }
-        else warning(log, "dropping message {}: wsHandler is not active", msg)
+        else log.warning("dropping message {}: wsHandler is not active", msg)
       } catch {
         case e: Exception ⇒
-          error(log, e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
+          log.error(e, "error onNext: pending: {}; demand: {}", pendingToStream, totalDemand)
           context.become(completing(StreamCompleted.error(traceId, e)))
       }
   }
@@ -186,7 +188,7 @@ with ActorSubscriber with SonicdLogging with Stash {
     case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒
       val msg = "client completed/canceled stream while waiting for source materialization"
       val e = new Exception(msg)
-      trace(log, traceId, waitingFor, Variation.Failure(e), msg)
+      log.tylog(Level.INFO, traceId, waitingFor, Variation.Failure(e), msg)
       // we dont need to worry about cancelling subscription here
       // because terminating this actor will stop the source actor
       onComplete()
@@ -196,17 +198,17 @@ with ActorSubscriber with SonicdLogging with Stash {
 
     //auth cmd failed
     case Failure(e) ⇒
-      trace(log, traceId, waitingFor, Variation.Failure(e), "")
+      log.tylog(Level.INFO, traceId, waitingFor, Variation.Failure(e), "")
       context.become(completing(StreamCompleted.error(traceId, e)))
 
     //auth cmd succeded
     case Success(token: AuthenticationActor.Token) ⇒
-      trace(log, traceId, waitingFor, Variation.Success, "received new token '{}'", token)
+      log.tylog(Level.INFO, traceId, waitingFor, Variation.Success, "received new token '{}'", token)
       onNext(OutputChunk(Vector(token)))
       context.become(completing(StreamCompleted.success(traceId)))
 
     case s: Subscription ⇒
-      trace(log, traceId, waitingFor, Variation.Success, "materialized source and subscribed to it")
+      log.tylog(Level.INFO, traceId, waitingFor, Variation.Success, "materialized source and subscribed to it")
       subscription = new StreamSubscription(s)
       requestTil()
       context.become(materialized)
@@ -218,7 +220,7 @@ with ActorSubscriber with SonicdLogging with Stash {
       pub.subscribe(subs)
 
     case msg: StreamCompleted ⇒
-      trace(log, traceId, waitingFor, Variation.Failure(msg.error.get), "error materializing source")
+      log.tylog(Level.INFO, traceId, waitingFor, Variation.Failure(msg.error.get), "error materializing source")
       context.become(completing(msg))
 
   }
@@ -245,13 +247,13 @@ with ActorSubscriber with SonicdLogging with Stash {
       withTraceId match {
         case q: Query ⇒
           waitingFor = MaterializeSource
-          trace(log, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing query {}", q)
+          log.tylog(Level.INFO, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing query {}", q)
 
           controller ! SonicController.NewQuery(q, clientAddress)
 
         case a: Authenticate ⇒
           waitingFor = GenerateToken
-          trace(log, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing authenticate cmd {}", a)
+          log.tylog(Level.INFO, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing authenticate cmd {}", a)
 
           authService ! a
       }
@@ -259,8 +261,8 @@ with ActorSubscriber with SonicdLogging with Stash {
 
     case OnNext(msg) ⇒
       val msg = "first message should be a SonicCommand"
-      log.error(msg)
       val e = new ProtocolException(msg)
+      log.error(e, msg)
       context.become(completing(StreamCompleted.error(traceId, e)))
 
   }

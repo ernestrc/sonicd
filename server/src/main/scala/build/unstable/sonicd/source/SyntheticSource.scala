@@ -50,7 +50,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
     _query
       .recoverWith {
         case e: Exception ⇒
-          warning(log, "could not parse query to determine test target size and size parameter was not passed")
+          log.warning( "could not parse query to determine test target size and size parameter was not passed")
           Try(size.get)
       }.toOption
   }.map(_ + preTarget)
@@ -67,7 +67,7 @@ class SyntheticPublisher(queryId: Long, seed: Option[Int], size: Option[Int], pr
   // pass query or size '28'
   val shouldThrowExpectedException = _query.isSuccess && _query.get == 28
 
-  if (shouldThrowExpectedException) warning(log, "this source will throw an expected exception")
+  if (shouldThrowExpectedException) log.warning( "this source will throw an expected exception")
 
   // if string is empty, value is 0 or bool is true, randomize values
   // otherwise use the value provided in the schema
