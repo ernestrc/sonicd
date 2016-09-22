@@ -56,14 +56,14 @@ trait AuthDirectives {
   def tokenFromHeaderAuthentication(authService: ActorRef, t: Timeout, traceId: String): Directive1[ApiUser] =
     headerValueByName("SONICD-AUTH").flatMap { token ⇒
       onSuccess {
-        log.tylog(Level.INFO, traceId, ValidateToken, Variation.Attempt, "sending token {} for validation", token)
+        log.tylog(Level.INFO, traceId, AuthenticateUser, Variation.Attempt, "sending token {} for validation", token)
         authService.ask(AuthenticationActor.ValidateToken(token, traceId))(t)
           .mapTo[Try[ApiUser]]
           .andThen {
             case Success(res) ⇒
-              log.tylog(Level.INFO, traceId, ValidateToken, Variation.Success, "validated token {}", token)
+              log.tylog(Level.INFO, traceId, AuthenticateUser, Variation.Success, "validated token {}", token)
             case Failure(e) ⇒
-              log.tylog(Level.INFO, traceId, ValidateToken, Variation.Failure(e), "token validation for token {} failed", token)
+              log.tylog(Level.INFO, traceId, AuthenticateUser, Variation.Failure(e), "token validation for token {} failed", token)
           }(mat.executionContext)
       }.flatMap {
         case Success(u) ⇒ provide(u)

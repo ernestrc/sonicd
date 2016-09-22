@@ -16,7 +16,7 @@ trait SonicdLogging extends TypedLogging {
 
   case object MaterializeSource extends CallType
 
-  case object ValidateToken extends CallType
+  case object AuthenticateUser extends CallType
 
   case object GenerateToken extends CallType
   

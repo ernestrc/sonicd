@@ -7,7 +7,6 @@ import java.util.UUID
 import akka.actor.{ActorSystem, Cancellable, Props}
 import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
-import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.util.ByteString
 import spray.json.{JsArray, JsString}
@@ -79,5 +78,4 @@ object Sonic {
         })
     }
   }
-
 }

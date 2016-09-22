@@ -10,6 +10,7 @@ import build.unstable.sonic._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
+import org.slf4j.MDC
 import org.slf4j.event.Level
 
 import scala.util.control.NonFatal
@@ -80,36 +81,37 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
 
   override def receive: Receive = {
 
-    case TokenValidationResult(Failure(e), q, handler, _) ⇒
-      handler ! StreamCompleted.error(q.traceId.get, e)
+    case TokenValidationResult(Failure(e), query, handler, _) ⇒
+      log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Failure(e), "token validation failed")
+      handler ! StreamCompleted.error(query.traceId.get, e)
 
     case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
+      MDC.put("user", user.user)
+      MDC.put("mode", user.mode.toString)
+      MDC.put("source", query.clazzName)
+      log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "validated token successfully")
       prepareMaterialization(handler, query, Some(user), clientAddress)
 
     case NewQuery(query, clientAddress) ⇒
       log.debug("client from {} posted new query {}", clientAddress, query)
       val handler = sender()
 
+      log.tylog(Level.INFO, query.traceId.get, AuthenticateUser,
+        Variation.Attempt, "authenticating with auth: {}", query.auth)
+
       query.auth match {
         case Some(token) ⇒
-
-          log.tylog(Level.INFO, query.traceId.get, ValidateToken,
-            Variation.Attempt, "sending token {} for validation", token)
-
           authService.ask(
             AuthenticationActor.ValidateToken(token, query.traceId.get))(authenticationTimeout)
             .mapTo[Try[ApiUser]]
             .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
-            .andThen {
-              case Success(res) ⇒
-                log.tylog(Level.INFO, query.traceId.get, ValidateToken, Variation.Success,
-                  "validated token {} for user {}", token, res.user)
-              case Failure(e) ⇒
-                log.tylog(Level.INFO, query.traceId.get, ValidateToken, Variation.Failure(e),
-                  "token validation for token {} failed", token)
+            .recover {
+              case e: Exception ⇒ TokenValidationResult(Failure(e), query, handler, clientAddress)
             }.pipeTo(self)
 
-        case None ⇒ prepareMaterialization(handler, query, None, clientAddress)
+        case None ⇒
+          log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "user presented no auth token")
+          prepareMaterialization(handler, query, None, clientAddress)
       }
 
     case m ⇒ log.warning("oops! It looks like I received the wrong message: {}", m)

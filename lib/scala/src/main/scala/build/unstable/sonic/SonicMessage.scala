@@ -248,7 +248,7 @@ class Query(val id: Option[Long],
         "object or an alias (string) that will be extracted by sonicd server")
   }
 
-  private[unstable] def clazzName: String = config.fields.getOrElse("class",
+  private[unstable] lazy val clazzName: String = config.fields.getOrElse("class",
     throw new Exception(s"missing key 'class' in config")).convertTo[String]
 
   override def toString: String = s"Query(id=$id,trace_id=$traceId)"
