@@ -188,7 +188,6 @@ class SonicdSourceSpec(_system: ActorSystem)
       //client cancels
       pub ! ActorPublisherMessage.Request(1)
       expectNoMsg(220.millis)
-
       pub ! ActorPublisherMessage.Cancel
 
       val b2 = Sonic.lengthPrefixEncode(CancelStream.toBytes)
@@ -212,10 +211,8 @@ class SonicdSourceSpec(_system: ActorSystem)
 
       expectMsg(Tcp.ResumeReading)
 
-      expectMsg(done)
-
-      //expect publisher to be in idle state
-      //TODO
+      //stream completed
+      expectTerminated(pub)
     }
     /*
     "bubble up exception correctly if connection dies unexpectedly" in {

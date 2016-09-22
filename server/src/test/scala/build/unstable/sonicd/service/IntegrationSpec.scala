@@ -4,6 +4,7 @@ import java.net.{InetAddress, InetSocketAddress}
 import java.sql.DriverManager
 
 import akka.Done
+import akka.actor.Cancellable
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.io.Tcp
@@ -217,26 +218,20 @@ with JsonProtocol with SonicdLogging {
       assert(thrown.getMessage.contains(traceID))
     }
 
-    /*
     "should bubble exception thrown by the tcp stage" in {
+      val client = Sonic.Client(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1))(system)
 
-      val future: Future[Vector[SonicMessage]] =
-        SonicSource.run(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
+      val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
 
-      val stream: Future[DoneWithQueryExecution] =
-        SonicSource.stream(new InetSocketAddress(SonicdConfig.INTERFACE, SonicdConfig.TCP_PORT + 1), syntheticQuery)
-          .to(Sink.ignore).run()
+      val (cancellable, future2) = client.stream(syntheticQuery).toMat(Sink.ignore)(Keep.both).run()
 
-      val thrown = intercept[java.net.ConnectThrowable] {
+      intercept[StreamException] {
         Await.result(future, 20.seconds)
-      }
-      assert(thrown.getMessage.contains("Could not establish connection to"))
+      }.getCause.getMessage.contains("Connect") shouldBe true
 
-      val sThrown = intercept[java.net.ConnectThrowable] {
-        Await.result(stream, 20.seconds)
-      }
-      assert(sThrown.getMessage.contains("Could not establish connection to"))
-
-    }*/
+      intercept[StreamException] {
+        Await.result(future2, 20.seconds)
+      }.getCause.getMessage.contains("Connect") shouldBe true
+    }
   }
 }

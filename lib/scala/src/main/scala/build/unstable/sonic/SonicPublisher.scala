@@ -122,6 +122,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
   /* BEHAVIOUR */
 
   def terminating(ev: StreamCompleted): Receive = {
+    log.debug("terminating with {}", ev)
     tryPushDownstream()
     done = Some(ev)
     if (buffer.isEmpty && isActive && totalDemand > 0) {
@@ -132,6 +133,8 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
         onNext(ev)
         onCompleteThenStop()
       }
+    } else if (!isActive) {
+      context.stop(self)
     }
 
     {
@@ -141,6 +144,7 @@ class SonicPublisher(supervisor: ActorRef, command: SonicCommand, isClient: Bool
 
   def commonBehaviour: Receive = {
     case ActorPublisherMessage.Cancel ⇒
+      log.info("client cancelled query {}", traceId)
       val write = Tcp.Write(Sonic.lengthPrefixEncode(CancelStream.toBytes), Ack)
       connection ! write
       context.become({
