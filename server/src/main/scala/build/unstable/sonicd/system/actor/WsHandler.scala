@@ -142,7 +142,9 @@ class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Opti
 
     if (isActive && totalDemand > 0) {
       onNext(done)
-      stashCommands orElse recv orElse commonBehaviour
+      stashCommands orElse recv orElse commonBehaviour orElse {
+        case Request(_) ⇒ //ignore
+      }
     } else stashCommands orElse recv orElse commonBehaviour orElse {
       case Request(n) =>
         onNext(done)
@@ -184,6 +186,7 @@ class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Opti
 
   // 2
   def waiting(traceId: String): Receive = stashCommands orElse commonBehaviour orElse {
+    case r: Request ⇒ //ignore for now
 
     case ActorPublisherMessage.Cancel | ActorSubscriberMessage.OnComplete ⇒
       val msg = "client completed/canceled stream while waiting for source materialization"
@@ -227,6 +230,8 @@ class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Opti
 
   // 1
   def receive: Receive = commonBehaviour orElse {
+    case r: Request ⇒ //ignore for now
+
     case ActorPublisherMessage.Cancel ⇒
       log.debug("client completed stream before sending a command")
       context.stop(self)

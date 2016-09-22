@@ -20,6 +20,7 @@ object Build extends sbt.Build {
     scalaVersion := scalaV,
     licenses += ("MIT", url("https://opensource.org/licenses/MIT")),
     resolvers += Resolver.bintrayRepo("ernestrc", "maven"),
+    publishArtifact in (Compile, packageDoc) := false,
     scalacOptions := Seq(
       "-unchecked",
       "-Xlog-free-terms",

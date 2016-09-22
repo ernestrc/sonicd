@@ -86,11 +86,17 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       handler ! StreamCompleted.error(query.traceId.get, e)
 
     case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
-      MDC.put("user", user.user)
-      MDC.put("mode", user.mode.toString)
-      MDC.put("source", query.clazzName)
-      log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "validated token successfully")
-      prepareMaterialization(handler, query, Some(user), clientAddress)
+      try {
+        MDC.put("user", user.user)
+        MDC.put("mode", user.mode.toString)
+        MDC.put("source", query.clazzName)
+        log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "validated token successfully")
+        prepareMaterialization(handler, query, Some(user), clientAddress)
+      } catch {
+        case e: Exception ⇒
+          log.error(e, "error when preparing stream materialization")
+          handler ! StreamCompleted.error(query.traceId.getOrElse("no-trace-id"), e)
+      }
 
     case NewQuery(query, clientAddress) ⇒
       log.debug("client from {} posted new query {}", clientAddress, query)
