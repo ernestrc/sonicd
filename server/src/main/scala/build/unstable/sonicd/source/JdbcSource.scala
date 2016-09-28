@@ -44,7 +44,7 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
 
 object JdbcPublisher {
 
-  val IS_SQL_SELECT = "^(\\s*?)(?i)select\\s*?.*?\\s*?(?i)from(.*)*?".r
+  val IS_SQL_SELECT = "(\\s*?)(?i)SELECT\\s.*(?i)FROM\\s.*".r
 }
 
 class JdbcPublisher(query: String,
@@ -91,11 +91,7 @@ class JdbcPublisher(query: String,
 
   /* HELPERS */
 
-  // FIXME
-  def isSelect(query: String): Boolean = {
-    warning(log, "could not determinte if statement is select: implementation missing")
-    false //JdbcPublisher.IS_SQL_SELECT.pattern.matcher(query).matches
-  }
+  def isSelect(query: String): Boolean = JdbcPublisher.IS_SQL_SELECT.pattern.matcher(query).matches
 
 
   /* STATE */
