@@ -37,6 +37,7 @@ object Fixture {
   val file = new File("/tmp/sonicd_specs/recursive/tmp.txt")
   val file2 = new File("/tmp/sonicd_specs/recursive/rec2/tmp.txt")
   val file3 = new File("/tmp/sonicd_specs/logback.xml")
+  val file4 = new File("/tmp/sonicd_specs/logback2.xml")
 
   def getEvent(k: Kind[Path], path: Path) = new WatchEvent[Path] {
     override def count(): Int = 1

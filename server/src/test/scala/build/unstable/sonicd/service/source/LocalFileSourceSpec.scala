@@ -7,16 +7,19 @@ import java.nio.charset.Charset
 import java.nio.file._
 
 import akka.actor._
-import akka.stream.actor.ActorPublisher
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{JsonProtocol, RequestContext, Query}
+import build.unstable.sonic.{JsonProtocol, OutputChunk, Query, RequestContext}
 import JsonProtocol._
+import akka.stream.actor.ActorPublisherMessage.Cancel
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.LocalFileStreamPublisher
 import build.unstable.sonicd.source.file.FileWatcher
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpecLike}
 import spray.json._
+
+import scala.concurrent.duration._
 
 class LocalFileSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
@@ -29,7 +32,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
     super.beforeAll()
     tmp.mkdir()
     file3.createNewFile()
-    doWrite("prev\nprev2\n")
+    file4.createNewFile()
+    doWrite3("prev\nprev2\n")
 
     conf.createNewFile()
     conf2.createNewFile()
@@ -39,12 +43,14 @@ class LocalFileSourceSpec(_system: ActorSystem)
   }
 
   override protected def afterAll(): Unit = {
-    f.close()
+    channel3.close()
+    channel4.close()
     confChannel.close()
     confChannel2.close()
 
     tmp.delete()
     try file3.delete() finally {}
+    try file4.delete() finally {}
     TestKit.shutdownActorSystem(system)
     conf.delete()
     conf2.delete()
@@ -73,14 +79,22 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val fetchConfig = getConfig(tmp.toPath.toAbsolutePath.toString, tail = false)
   val tailConfig = getConfig(tmp.toPath.toAbsolutePath.toString, tail = true)
 
-  lazy val f =
+  lazy val channel3 =
     Files.newByteChannel(file3.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
-  val dirPath = tmp.toPath
-  val filePath = file3.toPath
+  lazy val channel4 =
+    Files.newByteChannel(file4.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
 
-  val MODIFY = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, filePath.getFileName)
-  val CREATE = getEvent(StandardWatchEventKinds.ENTRY_CREATE, filePath.getFileName)
-  val DELETE = getEvent(StandardWatchEventKinds.ENTRY_DELETE, filePath.getFileName)
+  val dirPath = tmp.toPath
+  val filePath3 = file3.toPath
+  val filePath4 = file4.toPath
+
+  val MODIFY3 = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, filePath3.getFileName)
+  val CREATE3 = getEvent(StandardWatchEventKinds.ENTRY_CREATE, filePath3.getFileName)
+  val DELETE3 = getEvent(StandardWatchEventKinds.ENTRY_DELETE, filePath3.getFileName)
+
+  val MODIFY4 = getEvent(StandardWatchEventKinds.ENTRY_MODIFY, filePath4.getFileName)
+  val CREATE4 = getEvent(StandardWatchEventKinds.ENTRY_CREATE, filePath4.getFileName)
+  val DELETE4 = getEvent(StandardWatchEventKinds.ENTRY_DELETE, filePath4.getFileName)
 
   def newPublisher(q: String,
                    config: JsValue,
@@ -93,13 +107,15 @@ class LocalFileSourceSpec(_system: ActorSystem)
     ref
   }
 
-  def doWrite(buf: String, channel: SeekableByteChannel = f) = {
+  def doWrite(buf: String, channel: SeekableByteChannel) = {
     channel.write(ByteBuffer.wrap(buf.getBytes(Charset.defaultCharset())))
   }
 
+  def doWrite4(buf: String) = doWrite(buf, channel4)
+  def doWrite3(buf: String) = doWrite(buf, channel3)
+
 
   "LocalFileSourceSpec" should {
-  /*
     "tail files" in {
       val pub = newPublisher("{}", tailConfig)
       pub ! ActorPublisherMessage.Request(1)
@@ -108,12 +124,38 @@ class LocalFileSourceSpec(_system: ActorSystem)
       expectMsgType[FileWatcher.Watch]
 
       //write data
-      doWrite("test\n")
+      doWrite4("test\n")
 
-      pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY)
+      pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY4)
 
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(Vector("test")))
+
+      doWrite3("test\ntest")
+
+      pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY3)
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(Vector("test")))
+
+
+      doWrite3("\ntest\n")
+
+      pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY3)
+
+      pub ! ActorPublisherMessage.Request(2)
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+
+
+      doWrite4("test\ntest\ntest\n")
+
+      pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY4)
+
+      pub ! ActorPublisherMessage.Request(3)
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
       expectMsg(OutputChunk(Vector("test")))
 
       pub ! Cancel
@@ -131,7 +173,14 @@ class LocalFileSourceSpec(_system: ActorSystem)
       expectMsg(OutputChunk(Vector("prev2")))
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(Vector("test")))
-      pub ! ActorPublisherMessage.Request(1)
+      pub ! ActorPublisherMessage.Request(20)
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+      expectMsg(OutputChunk(Vector("test")))
+
       expectDone(pub)
     }
 
@@ -148,9 +197,9 @@ class LocalFileSourceSpec(_system: ActorSystem)
         expectMsgType[FileWatcher.Watch]
 
         //write data
-        doWrite("test\n")
+        doWrite("test\n", confChannel)
 
-        pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY)
+        pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY3)
         expectNoMsg()
 
         pub ! Cancel
@@ -165,7 +214,6 @@ class LocalFileSourceSpec(_system: ActorSystem)
         expectDone(pub)
       }
     }
-    */
   }
 }
 

@@ -23,9 +23,9 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 /**
- * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
- * Subclasses need to implement `parseUTF8Data`
- */
+  * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
+  * Subclasses need to implement `parseUTF8Data`
+  */
 trait LocalFilePublisher {
   this: Actor with ActorPublisher[SonicMessage] with SonicdLogging ⇒
 
@@ -51,16 +51,16 @@ trait LocalFilePublisher {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug( "starting file stream publisher of '{}'", ctx.traceId)
+    log.debug("starting file stream publisher of '{}'", ctx.traceId)
   }
 
   override def postStop(): Unit = {
-    log.debug( "stopping file stream publisher of '{}'", ctx.traceId)
+    log.debug("stopping file stream publisher of '{}'", ctx.traceId)
   }
 
   @throws[Exception](classOf[Exception])
   override def postRestart(reason: Throwable): Unit = {
-    log.error( reason, "restarted file stream publisher")
+    log.error(reason, "restarted file stream publisher")
   }
 
   //in case this publisher never gets subscribed to
@@ -86,7 +86,7 @@ trait LocalFilePublisher {
 
     if (tail) {
       val bytes = file.length()
-      log.debug( "tail mode enabled. skipping {} bytes for {}", bytes, fileName)
+      log.debug("tail mode enabled. skipping {} bytes for {}", bytes, fileName)
       channel.channel.position(bytes)
     }
 
@@ -94,7 +94,7 @@ trait LocalFilePublisher {
     Some(channel)
   } catch {
     case e: AccessDeniedException ⇒
-      log.warning( "access denied on {}", fileName)
+      log.warning("access denied on {}", fileName)
       None
   }
 
@@ -109,11 +109,11 @@ trait LocalFilePublisher {
   }
 
   /**
-   * {
-   * "select" : ["field1", "field2"],
-   * "filter" : { "field1" : "value1" }
-   * }
-   */
+    * {
+    * "select" : ["field1", "field2"],
+    * "filter" : { "field1" : "value1" }
+    * }
+    */
   def parseQuery(raw: String): FileQuery = {
     val r = raw.parseJson.asJsObject(s"Query must be a valid JSON object: $raw").fields
 
@@ -149,10 +149,10 @@ trait LocalFilePublisher {
   }
 
   /**
-   * streams until demand is 0 or there is no more data to be read
-   *
-   * @return whether there is no more data to read
-   */
+    * streams until demand is 0 or there is no more data to be read
+    *
+    * @return whether there is no more data to read
+    */
   @tailrec
   final def stream(query: FileQuery,
                    channel: BufferedFileByteChannel): Boolean = {
@@ -192,8 +192,11 @@ trait LocalFilePublisher {
 
       //problem parsing the data
     } else if (totalDemand > 0 && read.nonEmpty) {
+      log.warning("skipping line: error parsing line: {}: {}", data.failed.get, raw)
       stream(query, channel)
     } else {
+      // if totalDemand is 0, then read must not be applied
+      // or we will skip the line
       totalDemand == 0
     }
   }
@@ -212,7 +215,7 @@ trait LocalFilePublisher {
 
   final def common: Receive = {
     case Cancel ⇒
-      log.debug( "client canceled")
+      log.debug("client canceled")
       onComplete()
       context.stop(self)
   }
@@ -220,7 +223,8 @@ trait LocalFilePublisher {
   final def streaming(query: FileQuery): Receive = common orElse {
 
     case req: Request ⇒
-      val dataLeft = files.nonEmpty && files.forall(kv ⇒ stream(query, kv._2._2))
+      var dataLeft = false
+      files.foreach(file ⇒ dataLeft ||= stream(query, file._2._2))
       if (!tail && !dataLeft) terminate(StreamCompleted.success(ctx.traceId))
 
     case done: StreamCompleted ⇒
@@ -242,19 +246,19 @@ trait LocalFilePublisher {
           files.get(ev.fileName).map {
             case (_, p) ⇒ p
           }.orElse {
-            log.debug( "file {} was modified and but it was not being monitored yet", ev.fileName)
+            log.debug("file {} was modified and but it was not being monitored yet", ev.fileName)
             newFile(ev.file, ev.fileName)
           }.foreach { chan ⇒
             stream(query, chan)
           }
       }
 
-    case anyElse ⇒ log.warning( "extraneous message {}", anyElse)
+    case anyElse ⇒ log.warning("extraneous message {}", anyElse)
   }
 
   final def receive: Receive = common orElse {
     case req: Request ⇒
-      log.debug( "running file query {}", rawQuery)
+      log.debug("running file query {}", rawQuery)
 
       try {
         val parsed = parseQuery(rawQuery)
@@ -267,7 +271,7 @@ trait LocalFilePublisher {
               FileSystems.getDefault.getPathMatcher(s"glob:${folder.toString + "/" + fileFilter}")
             )
             if (file.isFile && (matcher.isEmpty || matcher.get.matches(file.toPath))) {
-              log.info( "matched file {}", file.toPath)
+              log.info("matched file {}", file.toPath)
               val fileName = file.getName
               newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
                 .foreach { reader ⇒
@@ -284,10 +288,10 @@ trait LocalFilePublisher {
 
       } catch {
         case e: Exception ⇒
-          log.error( e, "error setting up watch")
+          log.error(e, "error setting up watch")
           terminate(StreamCompleted.error(ctx.traceId, e))
       }
-    case anyElse ⇒ log.warning( "extraneous message {}", anyElse)
+    case anyElse ⇒ log.warning("extraneous message {}", anyElse)
   }
 }
 
@@ -313,8 +317,8 @@ object LocalFilePublisher {
     }
 
     /**
-     * Returns None if reached EOF
-     */
+      * Returns None if reached EOF
+      */
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None

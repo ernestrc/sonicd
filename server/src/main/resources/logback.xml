@@ -40,7 +40,7 @@
     </appender>
 
     <appender name="ASYNC" class="net.logstash.logback.appender.LoggingEventAsyncDisruptorAppender">
-        <waitStrategyType>yielding</waitStrategyType>
+        <waitStrategyType>sleeping</waitStrategyType>
         <appender-ref ref="JSON"/>
     </appender>
 
