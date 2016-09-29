@@ -9,7 +9,7 @@ import java.nio.file._
 import akka.actor._
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{JsonProtocol, OutputChunk, Query, RequestContext}
+import build.unstable.sonic._
 import JsonProtocol._
 import akka.stream.actor.ActorPublisherMessage.Cancel
 import build.unstable.sonicd.model._
@@ -128,7 +128,11 @@ class LocalFileSourceSpec(_system: ActorSystem)
 
       pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY4)
 
+      expectStreamStarted()
+
+      pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
+
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(Vector("test")))
 
@@ -164,9 +168,13 @@ class LocalFileSourceSpec(_system: ActorSystem)
 
     "fetch files" in {
       val pub = newPublisher("{}", fetchConfig)
-      pub ! ActorPublisherMessage.Request(1)
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectStreamStarted()
+
+      pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
+
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(Vector("prev")))
       pub ! ActorPublisherMessage.Request(1)
@@ -176,10 +184,15 @@ class LocalFileSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(20)
       expectMsg(OutputChunk(Vector("test")))
       expectMsg(OutputChunk(Vector("test")))
+
+      expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
       expectMsg(OutputChunk(Vector("test")))
       expectMsg(OutputChunk(Vector("test")))
       expectMsg(OutputChunk(Vector("test")))
       expectMsg(OutputChunk(Vector("test")))
+
+      expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
 
       expectDone(pub)
     }
@@ -200,6 +213,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
         doWrite("test\n", confChannel)
 
         pub ! FileWatcher.PathWatchEvent(dirPath, MODIFY3)
+        expectStreamStarted()
+        pub ! ActorPublisherMessage.Request(1)
         expectNoMsg()
 
         pub ! Cancel
@@ -210,6 +225,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
       //fetch should complete with no data streamed
       {
         val pub = newPublisher("{}", naughtyConfig2)
+        pub ! ActorPublisherMessage.Request(1)
+        expectStreamStarted()
         pub ! ActorPublisherMessage.Request(1)
         expectDone(pub)
       }

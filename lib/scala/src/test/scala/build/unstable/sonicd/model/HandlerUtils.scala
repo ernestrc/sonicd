@@ -3,7 +3,7 @@ package build.unstable.sonicd.model
 import akka.actor.ActorRef
 import akka.io.Tcp
 import akka.testkit.TestKitBase
-import build.unstable.sonic.{Sonic, StreamCompleted, QueryProgress, TypeMetadata}
+import build.unstable.sonic._
 
 trait HandlerUtils {
   this: TestKitBase ⇒
@@ -23,6 +23,10 @@ trait HandlerUtils {
 
   def expectTypeMetadata(): TypeMetadata = {
     expectMsgAnyClassOf(classOf[TypeMetadata])
+  }
+
+  def expectStreamStarted(): StreamStarted = {
+    expectMsgAnyClassOf(classOf[StreamStarted])
   }
 
   def expectDone(pub: ActorRef, success: Boolean = true): StreamCompleted = {

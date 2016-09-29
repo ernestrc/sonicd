@@ -18,7 +18,6 @@ import spray.json._
 
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.Try
 
@@ -73,9 +72,10 @@ trait LocalFilePublisher {
 
   /* HELPERS */
 
-  def terminate(done: StreamCompleted) = {
-    onNext(done)
-    onCompleteThenStop()
+  def tryPushDownstream() {
+    while (isActive && totalDemand > 0 && buffer.nonEmpty) {
+      onNext(buffer.dequeue())
+    }
   }
 
   def newFile(file: File, fileName: String): Option[BufferedFileByteChannel] = try {
@@ -157,14 +157,11 @@ trait LocalFilePublisher {
   final def stream(query: FileQuery,
                    channel: BufferedFileByteChannel): Boolean = {
 
-    lazy val read = {
-      if (buffer.isEmpty) {
-        channel.readLine()
-      } else Option(buffer.remove(0))
-    }
-
+    lazy val read = channel.readLine()
     lazy val raw = read.get
     lazy val data = Try(parseUTF8Data(raw))
+
+    tryPushDownstream()
 
     if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
       val filteredMaybe = filter(data.get, query, channel.fileName)
@@ -178,23 +175,20 @@ trait LocalFilePublisher {
           Some(TypeMetadata(filteredMaybe.get.toVector))
         }
 
+        buffer.enqueue(OutputChunk(JsArray(select(meta, filteredMaybe.get))))
         onNext(meta.get)
-      }
-
-      filteredMaybe match {
-        case Some(filtered) if totalDemand > 0 ⇒
-          onNext(OutputChunk(JsArray(select(meta, filtered))))
-        case Some(fields) ⇒ buffer.append(raw)
-        case None ⇒
+      } else {
+        filteredMaybe match {
+          case Some(filtered) ⇒ onNext(OutputChunk(JsArray(select(meta, filtered))))
+          case None ⇒ //filtered out
+        }
       }
 
       stream(query, channel)
 
       //problem parsing the data
-    } else if (totalDemand > 0 && read.nonEmpty) {
-      log.warning("skipping line: error parsing line: {}: {}", data.failed.get, raw)
-      stream(query, channel)
-    } else {
+    } else if (totalDemand > 0 && read.nonEmpty) stream(query, channel)
+    else {
       // if totalDemand is 0, then read must not be applied
       // or we will skip the line
       totalDemand == 0
@@ -206,12 +200,24 @@ trait LocalFilePublisher {
 
   val (folders, watchers) = watchersPair.unzip
   val files = mutable.Map.empty[String, (File, BufferedFileByteChannel)]
-  val buffer = ListBuffer.empty[String]
+  val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
 
   /* BEHAVIOUR */
+
+  def terminating(done: StreamCompleted): Receive = {
+    tryPushDownstream()
+    if (buffer.isEmpty && isActive && totalDemand > 0) {
+      onNext(done)
+      onCompleteThenStop()
+    } else if (!isActive) context.stop(self)
+
+    {
+      case r: Request ⇒ terminating(done)
+    }
+  }
 
   final def common: Receive = {
     case Cancel ⇒
@@ -220,16 +226,22 @@ trait LocalFilePublisher {
       context.stop(self)
   }
 
-  final def streaming(query: FileQuery): Receive = common orElse {
+  final def streaming(query: FileQuery, totalInitialFiles: Int): Receive = common orElse {
 
     case req: Request ⇒
-      var dataLeft = false
-      files.foreach(file ⇒ dataLeft ||= stream(query, file._2._2))
-      if (!tail && !dataLeft) terminate(StreamCompleted.success(ctx.traceId))
+      var totalDataLeft = false
+      files.clone().foreach { file ⇒
+        val dataLeft = stream(query, file._2._2)
+        if (!dataLeft && !tail) {
+          buffer.enqueue(QueryProgress(QueryProgress.Running, 1, Some(totalInitialFiles), Some("files")))
+          files.remove(file._1)
+          log.debug("finished scanning {}", file._1)
+        }
+        totalDataLeft ||= dataLeft
+      }
+      if (!tail && !totalDataLeft) context.become(terminating(StreamCompleted.success(ctx)))
 
-    case done: StreamCompleted ⇒
-      if (totalDemand > 0) terminate(done)
-      else context.system.scheduler.scheduleOnce(100.millis, self, done)
+    case done: StreamCompleted ⇒ context.become(terminating(done))
 
     case ev@PathWatchEvent(_, event) ⇒
       event.kind() match {
@@ -263,33 +275,35 @@ trait LocalFilePublisher {
       try {
         val parsed = parseQuery(rawQuery)
 
-        folders.foreach { folder ⇒
+        val totalInitialFiles = folders.foldLeft(0) { (facc, folder) ⇒
           val list = folder.listFiles()
-          if (list != null) list.foreach { file ⇒
+          if (list != null) facc + list.foldLeft(0) { (acc, file) ⇒
 
             lazy val matcher = fileFilterMaybe.map(fileFilter ⇒
               FileSystems.getDefault.getPathMatcher(s"glob:${folder.toString + "/" + fileFilter}")
             )
             if (file.isFile && (matcher.isEmpty || matcher.get.matches(file.toPath))) {
-              log.info("matched file {}", file.toPath)
+              log.debug("matched file {}", file.toPath)
               val fileName = file.getName
               newFile(Paths.get(folder.toPath.toString, fileName).toFile, fileName)
-                .foreach { reader ⇒
+                .map { reader ⇒
                   files.update(fileName, file → reader)
-                }
-            }
-          }
+                  acc + 1
+                }.getOrElse(acc)
+            } else acc
+          } else facc
         }
+        log.info("matched {} initial files", totalInitialFiles)
 
         //watch only if we're tailing logs
         if (tail) watchers.foreach(_ ! FileWatcher.Watch(fileFilterMaybe, ctx))
         self ! req
-        context.become(streaming(parsed))
+        context.become(streaming(parsed, totalInitialFiles))
 
       } catch {
         case e: Exception ⇒
           log.error(e, "error setting up watch")
-          terminate(StreamCompleted.error(ctx.traceId, e))
+          context.become(terminating(StreamCompleted.error(ctx.traceId, e)))
       }
     case anyElse ⇒ log.warning("extraneous message {}", anyElse)
   }
