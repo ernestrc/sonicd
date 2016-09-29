@@ -105,6 +105,10 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       httpCmd.request._4.contentType shouldBe ContentTypes.`application/json`
       assert(httpCmd.request._2.toRelative.toString().endsWith("/_search"))
       assertPayload(httpCmd.request._4, querySize, 0)
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
+
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
@@ -117,6 +121,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       val httpCmd = expectMsgType[HttpRequestCommand]
 
       assert(httpCmd.request._2.toString().contains("_all"))
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
@@ -130,6 +137,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
       assert(httpCmd.request._2.toString().contains("complicatedType"))
       httpCmd.request._4.toString() should not contain "complicatedType"
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
@@ -143,6 +153,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
       assert(httpCmd.request._2.toString().contains("complicatedIndex"))
       httpCmd.request._4.toString() should not contain "complicatedIndex"
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
@@ -158,6 +171,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       //assert that size is one
       assertPayload(httpCmd.request._4, 5, 0)
 
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
+
       //complete stream
       completeSimpleStream(pub, 3)
       pub ! ActorPublisherMessage.Request(1)
@@ -172,6 +188,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
       //assert that from is correct
       assertPayload(httpCmd.request._4, querySize, 5)
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       //complete stream
       completeSimpleStream(pub)
@@ -228,6 +247,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       //query has totalHits 100 but returned was 10 (as requested with querySize)
       val totalHits = 100
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectStreamStarted()
+
       testNoQueryAhead(pub, querySize, totalHits)
       expectDone(pub)
     }
@@ -241,6 +263,8 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       //query has totalHits 100 but returned was 10 (as requested with querySize)
       val totalHits = 100
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectStreamStarted()
       testNoQueryAhead(pub, querySize, totalHits, userSetFrom = Some(userSetFrom))
       expectDone(pub)
     }
@@ -255,6 +279,8 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       //query has totalHits 100 but returned was 10 (as requested with querySize)
       val totalHits = 100
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectStreamStarted()
       testNoQueryAhead(pub, querySize, totalHits, Some(userSetSize))
       expectDone(pub)
     }
@@ -279,6 +305,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       val httpCmd1 = expectMsgType[HttpRequestCommand]
       assertPayload(httpCmd1.request._4, querySize, 0)
       pub ! result
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)

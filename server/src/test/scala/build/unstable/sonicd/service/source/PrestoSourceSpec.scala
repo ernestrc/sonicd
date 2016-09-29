@@ -462,7 +462,7 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectStreamStarted()
       pub ! ActorPublisherMessage.Request(1)
-      
+
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       val error = Presto.ErrorMessage("", 65540, "", "",

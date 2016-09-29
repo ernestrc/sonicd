@@ -178,7 +178,7 @@ class ElasticSearchPublisher(traceId: String,
 
   var target = limit
   var bufferedMeta: Boolean = false
-  val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
+  val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var nextSize = if (limit > 0) Math.min(limit, querySize) else querySize
   var nextFrom = query.extractedFrom.getOrElse(0L)
   var fetched = 0L
@@ -253,6 +253,7 @@ class ElasticSearchPublisher(traceId: String,
       log.tylog(Level.INFO, traceId, ExecuteStatement, Variation.Attempt,
         "send query to supervisor in path {}", supervisor.path)
       tryPullUpstream()
+      tryPushDownstream()
       context.become(materialized)
   }
 }
