@@ -114,6 +114,9 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       assertRequest(httpCmd.request, query1)
 
+      expectStreamStarted()
+
+      pub ! ActorPublisherMessage.Request(1)
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
@@ -127,6 +130,9 @@ class PrestoSourceSpec(_system: ActorSystem)
       val httpCmd = expectMsgType[HttpRequestCommand]
 
       assertRequest(httpCmd.request, query1)
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       val col1 = ColMeta("a", "boolean")
       val col2 = ColMeta("b", "bigint")
@@ -170,6 +176,9 @@ class PrestoSourceSpec(_system: ActorSystem)
       val pub = newPublisher(query1)
       pub ! ActorPublisherMessage.Request(1)
       expectMsgType[HttpRequestCommand]
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       val stats1 = StatementStats.apply("STARTING", true, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -262,6 +271,9 @@ class PrestoSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       val httpCmd = expectMsgType[HttpRequestCommand]
 
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
+
       expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
 
       pub ! QueryResults("", "", Some("http://cancel"), None, Some(defaultColumns),
@@ -281,6 +293,9 @@ class PrestoSourceSpec(_system: ActorSystem)
       val pub = newPublisher(query1, watermark = 5)
       pub ! ActorPublisherMessage.Request(1)
       expectMsgType[HttpRequestCommand]
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       val stats1 = StatementStats.apply("STARTING", true, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -355,6 +370,9 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectMsgType[HttpRequestCommand]
 
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
+
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       val error = Presto.ErrorMessage("", 1234, "", "", Presto.FailureInfo("", Vector.empty, None))
@@ -386,6 +404,9 @@ class PrestoSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(100)
 
       expectMsgType[HttpRequestCommand]
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
 
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
@@ -420,6 +441,8 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectMsgType[HttpRequestCommand]
 
+      expectStreamStarted()
+
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       val error = Presto.ErrorMessage("", 1224, "", "USER_ERROR",
@@ -436,6 +459,10 @@ class PrestoSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(100)
 
       expectMsgType[HttpRequestCommand]
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1)
+      
       expectQueryProgress(0, QueryProgress.Started, None, None)
 
       val error = Presto.ErrorMessage("", 65540, "", "",

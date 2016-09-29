@@ -15,6 +15,7 @@ import org.slf4j.event.Level
 import spray.json._
 
 import scala.collection.immutable.Seq
+import scala.collection.mutable
 import scala.concurrent.duration.{Duration, _}
 
 class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
@@ -147,7 +148,7 @@ class PrestoPublisher(traceId: String, query: String,
   /* STATE */
 
   var bufferedMeta: Boolean = false
-  val buffer = scala.collection.mutable.Queue.empty[SonicMessage]
+  val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var lastQueryResults: Option[QueryResults] = None
   var retryScheduled: Option[Cancellable] = None
   var retried = 0
