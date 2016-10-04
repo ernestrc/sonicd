@@ -7,12 +7,11 @@ import akka.http.scaladsl.server.Directives._
 import akka.stream._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.stream.scaladsl._
-import akka.util.Timeout
+import akka.util.{ByteString, Timeout}
 import build.unstable.sonic.{SonicMessage, StreamCompleted}
 import build.unstable.sonicd.api.EndpointUtils
 import build.unstable.sonicd.system.actor.WsHandler
 import ch.megard.akka.http.cors.CorsDirectives
-import org.slf4j.event.Level
 
 class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
                    (implicit val mat: ActorMaterializer, system: ActorSystem)
@@ -51,9 +50,15 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
     Flow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
 
-      val deserialize = Flow[Message].map {
-        case b: BinaryMessage.Strict ⇒ SonicMessage.fromBinary(b)
-        case m: TextMessage.Strict ⇒ SonicMessage.fromJson(m.text)
+      val deserialize = Flow[Message].flatMapConcat{
+        case b: BinaryMessage.Strict ⇒
+          Source.single(b).via(Flow[BinaryMessage.Strict].map(SonicMessage.fromBinary))
+        case b: BinaryMessage.Streamed ⇒
+          b.dataStream.via(Flow[ByteString].map(t ⇒ SonicMessage.fromBytes(t)))
+        case t: TextMessage.Strict ⇒
+          Source.single(t).via(Flow[TextMessage.Strict].map(t ⇒ SonicMessage.fromJson(t.text)))
+        case t: TextMessage.Streamed ⇒
+          t.textStream.via(Flow[String].map(SonicMessage.fromJson))
         case msg ⇒ throw new Exception(s"invalid msg: $msg")
       }
 
