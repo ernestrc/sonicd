@@ -43,8 +43,16 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
 
 }
 
-object JdbcPublisher {
+private [sonicd] object JdbcPublisher {
   val IS_SQL_SELECT = "(\\s*?)(?i)SELECT\\s.*(?i)FROM\\s.*".r
+  sealed trait Types
+  case object Str extends Types
+  case object Bool extends Types
+  case object Obj extends Types
+  case object Arr extends Types
+  case object Dec extends Types
+  case object Num extends Types
+  case object Else extends Types
 }
 
 class JdbcPublisher(query: String,
@@ -223,7 +231,7 @@ class JdbcExecutor(query: String,
 
   var stmtN = 0
   var rs: ResultSet = null
-  var classMeta: Vector[Class[_]] = null
+  var classMeta: Vector[JdbcPublisher.Types] = null
   var isDone = false
 
 
@@ -237,25 +245,29 @@ class JdbcExecutor(query: String,
         var pos = 1
         while (pos <= classMeta.size) {
           val typeHint = classMeta(pos - 1)
+          log.debug("inspecting jdbc type {} to find suitable JsValue type", typeHint)
           val value = typeHint match {
-            case clazz if clazz.isAssignableFrom(classOf[String]) ⇒
-              extractValue(rs.getString(pos))(JsString.apply)
-            case clazz if clazz.isAssignableFrom(classOf[Boolean]) ⇒
+            case JdbcPublisher.Str ⇒ extractValue(rs.getString(pos))(JsString.apply)
+            case JdbcPublisher.Bool ⇒
               extractValue(rs.getBoolean(pos))(JsBoolean.apply)
-            case clazz if clazz.isAssignableFrom(classOf[Double]) ⇒
-              extractValue(rs.getDouble(pos))(JsNumber.apply)
-            case clazz if clazz.isAssignableFrom(classOf[Long]) ⇒
-              extractValue(rs.getLong(pos))(JsNumber.apply)
-            case clazz if clazz.isAssignableFrom(classOf[java.sql.Array]) ⇒
+            case JdbcPublisher.Num ⇒ extractValue(rs.getLong(pos))(JsNumber.apply)
+            case JdbcPublisher.Dec ⇒ extractValue(rs.getDouble(pos))(JsNumber.apply)
+            case JdbcPublisher.Arr ⇒
               extractValue(rs.getArray(pos)) { value ⇒
                 JsArray(value
                   .getArray
                   .asInstanceOf[Array[AnyRef]]
                   .map(parseArrayVal).toVector)
               }
-            case clazz if classOf[AnyRef].isAssignableFrom(clazz) ⇒
-              extractValue(rs.getString(pos))(value ⇒ value.parseJson)
-            case clazz ⇒ extractValue(rs.getString(pos))(JsString.apply)
+            case JdbcPublisher.Obj ⇒
+              val str = rs.getString(pos)
+              try extractValue(str)(value ⇒ value.parseJson)
+              catch {
+                case e: Exception ⇒ extractValue(str)(JsString.apply)
+              }
+            case JdbcPublisher.Else ⇒
+              log.warning("could not assign jdbc class to JsValue: {}", typeHint)
+              extractValue(rs.getString(pos))(JsString.apply)
           }
           if (rs.wasNull) {
             data.append(JsNull)
@@ -292,21 +304,19 @@ class JdbcExecutor(query: String,
         val rsmd = rs.getMetaData
         val columnCount = rsmd.getColumnCount
 
-        import scala.language.existentials
-
         // The column count starts from 1
-        val m = (1 to columnCount).foldLeft(Vector.empty[(String, JsValue)] → Vector.empty[Class[_]]) {
+        val m = (1 to columnCount).foldLeft(Vector.empty[(String, JsValue)] → Vector.empty[JdbcPublisher.Types]) {
           case ((columns, met), i) ⇒
-            val (typeHint, clazz): (JsValue, Class[_]) = rsmd.getColumnClassName(i) match {
-              case "java.lang.String" ⇒ JsString("") → classOf[String]
-              case "java.lang.Boolean" ⇒ JsBoolean(true) → classOf[Boolean]
-              case "java.lang.Object" ⇒ JsObject.empty → classOf[AnyRef]
-              case "java.sql.Array" ⇒ JsArray.empty → classOf[java.sql.Array]
+            val (typeHint, clazz): (JsValue, JdbcPublisher.Types) = rsmd.getColumnClassName(i) match {
+              case "java.lang.String" ⇒ JsString("") → JdbcPublisher.Str
+              case "java.lang.Boolean" ⇒ JsBoolean(true) → JdbcPublisher.Bool
+              case "java.lang.Object" ⇒ JsObject.empty → JdbcPublisher.Obj
+              case "java.sql.Array" ⇒ JsArray.empty → JdbcPublisher.Arr
               case "java.lang.Double" | "java.lang.Float" | "java.math.BigDecimal" ⇒
-                JsNumber(0.0) → classOf[Double]
+                JsNumber(0.0) → JdbcPublisher.Dec
               case num if Try(classLoader.loadClass(num).getSuperclass.equals(classOf[Number])).getOrElse(false) ⇒
-                JsNumber(0) → classOf[Long]
-              case e ⇒ JsString(rsmd.getColumnClassName(i)) → classOf[Any]
+                JsNumber(0) → JdbcPublisher.Num
+              case e ⇒ JsString(rsmd.getColumnClassName(i)) → JdbcPublisher.Else
             }
             (columns :+ ((rsmd.getColumnLabel(i), typeHint)), met :+ clazz)
         }
