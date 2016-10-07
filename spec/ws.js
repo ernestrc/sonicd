@@ -165,4 +165,9 @@ describe('Sonicd ws', function() {
       authenticated.close();
     });
   });
+
+  describe('Sonicd ws with request pipelining activated', function() {
+    var pipelined = new Client(sonicdHost, { pipeline: true, maxConnections: 1 });
+    runSpecTests(pipelined, 'pipelined');
+  });
 });

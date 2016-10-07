@@ -3,8 +3,9 @@
 //var Client = require('sonicd').Client;
 var Client = require('../../lib/nodejs/lib.js').Client;
 var assert = require('assert');
+var host = process.env.SONICD_HOST || 'wss://0.0.0.0:443';
 
-var client = new Client('wss://0.0.0.0:443');
+var client = new Client(host);
 
 
 var query = {
@@ -28,7 +29,6 @@ client.run(query, function(err, res) {
     console.log(e);
   });
 
-  client.close();
   console.log('exec is done!');
 
 });
@@ -65,7 +65,6 @@ stream.on('error', function(err) {
 });
 
 
-
 var query2 = {
   query: '5',
   config: 'secured_test',
@@ -89,24 +88,27 @@ var API_KEY = '1234';
 var USER = 'serrallonga';
 
 //first we need to authenticate
-client.authenticate(USER, API_KEY, function(err) {
+client.authenticate(USER, API_KEY, function(err, token) {
   if (err) {
     throw err;
   }
 
+  query2.auth = token;
+  console.log(query2);
+
   client.run(query2, function(err, res) {
     if (err) {
-      console.log(err);
-      return;
+      throw err;
     }
 
     res.forEach(function(e) {
       console.log(e);
     });
 
-    client.close();
-
     console.log('secured exec is done!');
+
+    // close ws
+    client.close();
 
   });
 })
