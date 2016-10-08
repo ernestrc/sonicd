@@ -51,14 +51,10 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
       import GraphDSL.Implicits._
 
       val deserialize = Flow[Message].flatMapConcat{
-        case b: BinaryMessage.Strict ⇒
-          Source.single(b).via(Flow[BinaryMessage.Strict].map(SonicMessage.fromBinary))
-        case b: BinaryMessage.Streamed ⇒
-          b.dataStream.via(Flow[ByteString].map(t ⇒ SonicMessage.fromBytes(t)))
         case t: TextMessage.Strict ⇒
           Source.single(t).via(Flow[TextMessage.Strict].map(t ⇒ SonicMessage.fromJson(t.text)))
         case t: TextMessage.Streamed ⇒
-          t.textStream.via(Flow[String].map(SonicMessage.fromJson))
+          t.textStream.via(Flow[String].fold("")((acc, s) ⇒ acc + s).map(SonicMessage.fromJson))
         case msg ⇒ throw new Exception(s"invalid msg: $msg")
       }
 

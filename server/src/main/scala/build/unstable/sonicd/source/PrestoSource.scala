@@ -236,6 +236,7 @@ class PrestoPublisher(traceId: String, query: String,
       }
       tryPushDownstream()
 
+    // TODO sometimes master returns 500 on worker busy
     case Status.Failure(e) ⇒
       log.tylog(Level.INFO, traceId, callType, Variation.Failure(e), "something went wrong with the http request")
       context.become(terminating(StreamCompleted.error(e)))

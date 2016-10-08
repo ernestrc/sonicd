@@ -203,14 +203,10 @@ object SonicMessage {
       case None ⇒ throw new Exception("no 'e' event_type")
     }
   } catch {
-    case e: Exception ⇒ throw new Exception(s"sonic message deserialization error", e)
+    case e: Exception ⇒ throw new Exception(s"error deserializing sonic message", e)
   }
 
-  def fromBinary(m: BinaryMessage.Strict): SonicMessage =
-    fromJson(m.data.utf8String)
-
-  def fromBytes(b: ByteString): SonicMessage =
-    fromJson(b.decodeString("utf-8"))
+  def fromBytes(b: ByteString): SonicMessage = fromJson(b.utf8String)
 }
 
 class Query(val id: Option[Long],

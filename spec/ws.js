@@ -74,6 +74,27 @@ function runSpecTests(client, id) {
 
     util.expectError(client, query, done);
   });
+
+  it(id + ' - should stream a big payload correctly', function(done) {
+    this.timeout(4000);
+    var q = "";
+    var i = 0;
+    while (i < 10000) {
+      q += 'aweqefekwljflwekfjkelwfjlwekjfeklwjflwekjfeklwjfeklfejklfjewlkfejwklw';
+      i += 1;
+    }
+    
+    var query = {
+      query: q,
+      config: {
+        class: 'SyntheticSource',
+        'progress-delay': 0,
+        size: 5
+      }
+    };
+
+    util.testHappyPath(client, query, 5, done);
+  });
 }
 
 describe('Sonicd ws', function() {
