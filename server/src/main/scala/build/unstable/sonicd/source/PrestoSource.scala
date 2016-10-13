@@ -11,6 +11,7 @@ import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
 import build.unstable.sonicd.{BuildInfo, SonicdConfig, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.MDC
 import org.slf4j.event.Level
 import spray.json._
 
@@ -177,6 +178,9 @@ class PrestoPublisher(traceId: String, query: String,
       tryPullUpstream()
 
     case r: QueryResults ⇒
+
+      MDC.put("query_id", r.id)
+
       log.debug("received query results of query '{}'", r.id)
       lastQueryResults = Some(r)
       //extract type metadata
@@ -209,6 +213,7 @@ class PrestoPublisher(traceId: String, query: String,
         case "FAILED" ⇒
           val error = r.error.get
           val e = new Exception(error.message)
+
           log.tylog(Level.INFO, traceId, callType, Variation.Failure(e),
             "query status is FAILED: {}", error)
 
@@ -235,6 +240,8 @@ class PrestoPublisher(traceId: String, query: String,
           context.become(terminating(StreamCompleted.error(e)))
       }
       tryPushDownstream()
+
+      MDC.clear()
 
     // TODO sometimes master returns 500 on worker busy
     case Status.Failure(e) ⇒
