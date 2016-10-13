@@ -23,8 +23,8 @@ import scala.concurrent.duration._
 
 class LocalFileSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
-  with Matchers with BeforeAndAfterAll with ImplicitSender
-  with ImplicitSubscriber with HandlerUtils with BeforeAndAfterEach {
+    with Matchers with BeforeAndAfterAll with ImplicitSender
+    with ImplicitSubscriber with HandlerUtils with BeforeAndAfterEach {
 
   import Fixture._
 
@@ -112,6 +112,7 @@ class LocalFileSourceSpec(_system: ActorSystem)
   }
 
   def doWrite4(buf: String) = doWrite(buf, channel4)
+
   def doWrite3(buf: String) = doWrite(buf, channel3)
 
 
@@ -195,6 +196,96 @@ class LocalFileSourceSpec(_system: ActorSystem)
       expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
 
       expectDone(pub)
+    }
+
+    "filters files" in {
+      // normal value filter
+      {
+        val pub = newPublisher("""{"filter": {"raw": "prev"}}""", fetchConfig)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectStreamStarted()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectTypeMetadata()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsg(OutputChunk(Vector("prev")))
+        pub ! ActorPublisherMessage.Request(20)
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectDone(pub)
+      }
+
+      // startsWith filter
+      {
+        val pub = newPublisher("""{"filter": {"raw": "prev*"}}""", fetchConfig)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectStreamStarted()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectTypeMetadata()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsg(OutputChunk(Vector("prev")))
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsg(OutputChunk(Vector("prev2")))
+        pub ! ActorPublisherMessage.Request(20)
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectDone(pub)
+      }
+
+      // endsWith filter
+      {
+        val pub = newPublisher("""{"filter": {"raw": "*est"}}""", fetchConfig)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectStreamStarted()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectTypeMetadata()
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectMsg(OutputChunk(Vector("test")))
+        pub ! ActorPublisherMessage.Request(20)
+        expectMsg(OutputChunk(Vector("test")))
+        expectMsg(OutputChunk(Vector("test")))
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectMsg(OutputChunk(Vector("test")))
+        expectMsg(OutputChunk(Vector("test")))
+        expectMsg(OutputChunk(Vector("test")))
+        expectMsg(OutputChunk(Vector("test")))
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectDone(pub)
+      }
+
+      // is null filter
+      {
+        val pub = newPublisher("""{"filter": {"raw": null}}""", fetchConfig)
+
+        pub ! ActorPublisherMessage.Request(1)
+        expectStreamStarted()
+
+        pub ! ActorPublisherMessage.Request(20)
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectQueryProgress(1, QueryProgress.Running, Some(2), Some("files"))
+
+        expectDone(pub)
+      }
     }
 
     "block streaming of sensitive config files" in {

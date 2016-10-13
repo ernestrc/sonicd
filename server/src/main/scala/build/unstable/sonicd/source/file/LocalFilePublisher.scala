@@ -28,8 +28,6 @@ import scala.util.Try
 trait LocalFilePublisher {
   this: Actor with ActorPublisher[SonicMessage] with SonicdLogging ⇒
 
-  import context.dispatcher
-
 
   /* ABSTRACT */
 
@@ -98,13 +96,35 @@ trait LocalFilePublisher {
       None
   }
 
-  def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (o: Map[String, JsValue]) ⇒ {
-    val filterFields = filter
-    val oFields = o
-    filterFields.forall {
-      case (key, j: JsObject) if oFields.isDefinedAt(key) && oFields(key).isInstanceOf[JsObject] ⇒
-        matchObject(j.fields)(oFields(key).asInstanceOf[JsObject].fields)
-      case (key, value) ⇒ oFields.isDefinedAt(key) && oFields(key) == value
+  def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (data: Map[String, JsValue]) ⇒ {
+    filter.forall {
+      case (key, j: JsObject) if data.isDefinedAt(key) && data(key).isInstanceOf[JsObject] ⇒
+        matchObject(j.fields)(data(key).asInstanceOf[JsObject].fields)
+
+      case (key, JsString(s)) if data.isDefinedAt(key) && data(key).isInstanceOf[JsString] && s.startsWith("*") ⇒
+        data(key).convertTo[String].endsWith(s.tail)
+
+      case (key, JsString(s)) if data.isDefinedAt(key) && data(key).isInstanceOf[JsString] && s.endsWith("*") ⇒
+        data(key).convertTo[String].endsWith(s.tail)
+
+      case (key, value) ⇒ data.isDefinedAt(key) && data(key) == value
+    }
+
+    filter.forall { case ((key, matchValue)) ⇒
+      lazy val value = data(key)
+      lazy val valueIsString = value.isInstanceOf[JsString]
+      lazy val matchIsString = matchValue.isInstanceOf[JsString]
+      lazy val valueString = value.convertTo[String]
+      lazy val matchString = matchValue.convertTo[String]
+      // data is not defined and match filter is null
+      (!data.isDefinedAt(key) && matchValue == JsNull) || (data.isDefinedAt(key) && (
+        // * at the beginning of the query so value endsWith
+        (matchIsString && valueIsString && matchString.startsWith("*") && valueString.endsWith(matchString.substring(1, matchString.length))) ||
+          // * at the end of the query so value startsWith
+          (matchIsString && valueIsString && matchString.endsWith("*") && valueString.startsWith(matchString.substring(0, matchString.length - 1))) ||
+          // equality match
+          (value == matchValue)
+        ))
     }
   }
 
@@ -121,12 +141,12 @@ trait LocalFilePublisher {
       v.convertTo[Vector[String]]
     }
 
-    val f = r.get("filter").map { fo ⇒
+    val valueFilter = r.get("filter").map { fo ⇒
       val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}").fields
       matchObject(fObj)
     }.getOrElse((o: Map[String, JsValue]) ⇒ true)
 
-    FileQuery(raw, select, f)
+    FileQuery(raw, select, valueFilter)
   }
 
   def select(meta: Option[TypeMetadata], fields: Map[String, JsValue]): Vector[JsValue] = {
@@ -336,7 +356,10 @@ object LocalFilePublisher {
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
+      while ( {
+        char = readChar();
+        char.isDefined
+      } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 
