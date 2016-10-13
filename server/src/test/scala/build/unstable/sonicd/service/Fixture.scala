@@ -20,7 +20,7 @@ object Fixture {
   // in memory db
   val H2Driver = "org.h2.Driver"
 
-  val testUser = ApiUser("serrallonga", 10, ApiKey.Mode.ReadWrite, None)
+  val testUser = ApiUser("serrallonga", 10, AuthConfig.Mode.ReadWrite, None)
 
   val testCtx = RequestContext("1", Some(testUser))
 

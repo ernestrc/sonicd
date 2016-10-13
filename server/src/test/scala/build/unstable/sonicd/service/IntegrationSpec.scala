@@ -4,7 +4,6 @@ import java.net.{InetAddress, InetSocketAddress}
 import java.sql.DriverManager
 
 import akka.Done
-import akka.actor.Cancellable
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.io.Tcp
@@ -14,6 +13,7 @@ import akka.util.Timeout
 import build.unstable.sonic.SonicPublisher.StreamException
 import build.unstable.sonic._
 import build.unstable.sonicd.api.AkkaApi
+import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.system.AkkaService
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
@@ -133,7 +133,7 @@ with JsonProtocol with SonicdLogging {
     }
 
     "accept a query of a source that requires authentication if user is authenticated with at least the sources security level" in {
-      val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 5, None, None).toJWTClaims("bandit"))
+      val token = SonicdAuth(signer.sign(ApiKey("1234", AuthConfig.Mode.Read, 5, None, None).toJWTClaims("bandit")))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
 
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
@@ -143,7 +143,7 @@ with JsonProtocol with SonicdLogging {
     }
 
     "reject a query of a source that requires authentication if user is authenticated with a lower authorization level" in {
-      val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 4, None, None).toJWTClaims("bandit"))
+      val token = SonicdAuth(signer.sign(ApiKey("1234", AuthConfig.Mode.Read, 4, None, None).toJWTClaims("bandit")))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
 
@@ -155,8 +155,8 @@ with JsonProtocol with SonicdLogging {
     }
 
     "accept a query of a source that requires authentication and has a whitelist of ips and user ip is in the list" in {
-      val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 6,
-        Some(InetAddress.getByName("127.0.0.1") :: Nil), None).toJWTClaims("bandit"))
+      val token: AuthConfig = SonicdAuth(signer.sign(ApiKey("1234", AuthConfig.Mode.Read, 6,
+        Some(InetAddress.getByName("127.0.0.1") :: Nil), None).toJWTClaims("bandit")))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
 
@@ -165,8 +165,8 @@ with JsonProtocol with SonicdLogging {
     }
 
     "reject a query of a source that requires authentication and has a whitelist of ips but user ip is not in the list" in {
-      val token = signer.sign(ApiKey("1234", ApiKey.Mode.Read, 6,
-        Some(InetAddress.getByName("192.168.1.17") :: Nil), None).toJWTClaims("bandit"))
+      val token = SonicdAuth(signer.sign(ApiKey("1234", AuthConfig.Mode.Read, 6,
+        Some(InetAddress.getByName("192.168.1.17") :: Nil), None).toJWTClaims("bandit")))
       val syntheticQuery = Query("10", JsString("secure_server_config"), Some(token))
       val future: Future[Vector[SonicMessage]] = client.run(syntheticQuery)
 

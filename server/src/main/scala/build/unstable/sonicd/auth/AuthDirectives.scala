@@ -1,4 +1,4 @@
-package build.unstable.sonicd.api.auth
+package build.unstable.sonicd.auth
 
 import akka.actor.ActorRef
 import akka.http.scaladsl.server.Directive.SingleValueModifiers

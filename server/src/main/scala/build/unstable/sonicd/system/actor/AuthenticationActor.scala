@@ -1,12 +1,16 @@
 package build.unstable.sonicd.system.actor
 
+import java.net.InetAddress
+
 import akka.actor.Actor
 import akka.http.scaladsl.model.DateTime
-import build.unstable.sonic.{ApiKey, ApiUser, Authenticate}
+import build.unstable.sonic.{ApiUser, AuthConfig, Authenticate}
 import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonicd.auth.ApiKey
 import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
 import org.slf4j.event.Level
+import spray.json._
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
@@ -36,7 +40,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
           log.tylog(Level.DEBUG, traceId, JWTVerifyToken, Variation.Failure(e), "token is not valid {}", token)
           throw new TokenVerificationFailed(e)
       }
-    }.flatMap(ApiUser.fromJWTClaims)
+    }.flatMap(fromJWTClaims)
   }
 
   def createToken(key: String, user: String, traceId: String): Try[Token] = {
@@ -74,6 +78,20 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
 }
 
 object AuthenticationActor {
+  import build.unstable.sonic.JsonProtocol._
+
+  def fromJWTClaims(verifiedClaims: java.util.Map[String, AnyRef]): Try[ApiUser] = Try {
+    AuthConfig.Mode(verifiedClaims.get("mode").asInstanceOf[String]).flatMap { mode ⇒
+      Try {
+        ApiUser(
+          verifiedClaims.get("user").asInstanceOf[String],
+          verifiedClaims.get("authorization").asInstanceOf[String].toInt,
+          mode,
+          Option(verifiedClaims.get("from").asInstanceOf[String]).map(_.parseJson.convertTo[List[InetAddress]])
+        )
+      }
+    }
+  }.flatten
 
   type Token = String
 

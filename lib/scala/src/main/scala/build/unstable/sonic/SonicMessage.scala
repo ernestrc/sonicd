@@ -2,11 +2,12 @@ package build.unstable.sonic
 
 import java.nio.charset.Charset
 
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
+import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.util.ByteString
 import build.unstable.sonic.JsonProtocol._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import spray.json._
+import AuthConfig._
 
 import scala.util.Try
 
@@ -196,8 +197,8 @@ object SonicMessage {
       case Some(`query`) ⇒
         val p = pay.get.asJsObject.fields
         val traceId = p.get("trace_id").flatMap(_.convertTo[Option[String]])
-        val token = p.get("auth").flatMap(_.convertTo[Option[String]])
-        new Query(None, traceId, token, vari.get, p("config"))
+        val auth = p.get("auth") map(_.convertTo[AuthConfig])
+        new Query(None, traceId, auth, vari.get, p("config"))
       case Some(`completed`) ⇒ StreamCompleted(pay.get.asJsObject.fields("trace_id").convertTo[String], vari.map(fromStackTrace))
       case Some(e) ⇒ throw new Exception(s"unexpected event type '$e'")
       case None ⇒ throw new Exception("no 'e' event_type")
@@ -211,7 +212,7 @@ object SonicMessage {
 
 class Query(val id: Option[Long],
             val traceId: Option[String],
-            val auth: Option[String],
+            val auth: Option[AuthConfig],
             val query: String,
             _config: JsValue)
   extends SonicCommand {
@@ -224,7 +225,7 @@ class Query(val id: Option[Long],
     val fields = scala.collection.mutable.Map(
       "config" → _config
     )
-    auth.foreach(j ⇒ fields.update("auth", JsString(j)))
+    auth.foreach(j ⇒ fields.update("auth", j.toJson))
     traceId.foreach(t ⇒ fields.update("trace_id", JsString(t)))
     Some(JsObject(fields.toMap))
   }
@@ -263,24 +264,24 @@ class Query(val id: Option[Long],
 object Query {
 
   /**
-   * Build a Query from a fully specified source configuration 'config'
-   */
-  def apply(query: String, config: JsObject, authToken: Option[String]): Query =
-    new Query(None, None, authToken, query, config)
+    * Build a Query from a fully specified source configuration 'config'
+    */
+  def apply(query: String, config: JsObject, auth: Option[AuthConfig]): Query =
+  new Query(None, None, auth, query, config)
 
-  def apply(query: String, config: JsObject, traceId: String, authToken: Option[String]): Query =
-    new Query(None, Some(traceId), authToken, query, config)
+  def apply(query: String, config: JsObject, traceId: String, auth: Option[AuthConfig]): Query =
+    new Query(None, Some(traceId), auth, query, config)
 
   /**
-   * Build a Query from a configuration alias 'config' for the sonicd server to
-   * load from its configuration
-   */
-  def apply(query: String, config: JsString, authToken: Option[String]): Query =
-    new Query(None, None, authToken, query, config)
+    * Build a Query from a configuration alias 'config' for the sonicd server to
+    * load from its configuration
+    */
+  def apply(query: String, config: JsString, auth: Option[AuthConfig]): Query =
+  new Query(None, None, auth, query, config)
 
-  def apply(query: String, config: JsString, traceId: String, authToken: Option[String]): Query =
-    new Query(None, Some(traceId), authToken, query, config)
+  def apply(query: String, config: JsString, traceId: String, auth: Option[AuthConfig]): Query =
+    new Query(None, Some(traceId), auth, query, config)
 
-  def unapply(query: Query): Option[(Option[Long], Option[String], String)] =
+  def unapply(query: Query): Option[(Option[Long], Option[AuthConfig], String)] =
     Some((query.id, query.auth, query.query))
 }

@@ -5,7 +5,8 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{ApiKey, ApiUser, Authenticate}
+import build.unstable.sonic.{AuthConfig, Authenticate}
+import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import com.auth0.jwt.JWTSigner
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
@@ -14,7 +15,7 @@ import scala.concurrent.duration.{FiniteDuration, _}
 import scala.util.Try
 
 class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
-with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
+  with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   def this() = this(ActorSystem("AuthenticationActorSpec"))
 
@@ -22,8 +23,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
     TestKit.shutdownActorSystem(system)
   }
 
-  val apiKeys = ApiKey("1", ApiKey.Mode.Read, 1, Some(List(InetAddress.getByName("localhost"))), None) ::
-    ApiKey("2", ApiKey.Mode.ReadWrite, 3, None, None) :: Nil
+  val apiKeys = ApiKey("1", AuthConfig.Mode.Read, 1, Some(List(InetAddress.getByName("localhost"))), None) ::
+    ApiKey("2", AuthConfig.Mode.ReadWrite, 3, None, None) :: Nil
   val tokenExpiration: FiniteDuration = 10.seconds
   val secret = "super-secret"
 
@@ -31,7 +32,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
                secret: String = secret,
                tokenExpiration: FiniteDuration = tokenExpiration): TestActorRef[AuthenticationActor] = {
     TestActorRef[AuthenticationActor](Props(classOf[AuthenticationActor], apiKeys, secret, tokenExpiration)
-    .withDispatcher(CallingThreadDispatcher.Id))
+      .withDispatcher(CallingThreadDispatcher.Id))
   }
 
   "Authentication actor" should {
@@ -44,10 +45,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
       val token = tokenMaybe.get
 
       val verified = actor.underlyingActor.verifier.verify(token)
-      val user = ApiUser.fromJWTClaims(verified)
+      val user = AuthenticationActor.fromJWTClaims(verified)
 
       assert(user.get.authorization == 1)
-      assert(user.get.mode == ApiKey.Mode.Read)
+      assert(user.get.mode == AuthConfig.Mode.Read)
       assert(user.get.user == "pepito")
       assert(user.get.allowedIps.get == List(InetAddress.getByName("localhost")))
     }

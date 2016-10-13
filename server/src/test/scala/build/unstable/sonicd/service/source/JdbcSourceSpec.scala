@@ -7,6 +7,7 @@ import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
+import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor, JdbcPublisher}
@@ -94,7 +95,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery("INSERT INTO test_commit (id) VALUES ('1234')")()
       //try to delete all data
       val pub = newPublisher("delete from test_commit;",
-        RequestContext("a", Some(ApiUser("", 1, ApiKey.Mode.Read, None))))
+        RequestContext("a", Some(ApiUser("", 1, AuthConfig.Mode.Read, None))))
       pub ! ActorPublisherMessage.Request(1)
       expectTypeMetadata()
       pub ! ActorPublisherMessage.Request(1)

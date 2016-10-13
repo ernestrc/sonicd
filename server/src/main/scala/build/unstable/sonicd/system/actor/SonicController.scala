@@ -13,6 +13,7 @@ import build.unstable.tylog.Variation
 import org.slf4j.MDC
 import org.slf4j.event.Level
 
+import scala.concurrent.Future
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -106,7 +107,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
         Variation.Attempt, "authenticating with auth: {}", query.auth)
 
       query.auth match {
-        case Some(token) ⇒
+        case Some(SonicdAuth(token)) ⇒
           authService.ask(
             AuthenticationActor.ValidateToken(token, query.traceId.get))(authenticationTimeout)
             .mapTo[Try[ApiUser]]
@@ -114,6 +115,21 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
             .recover {
               case e: Exception ⇒ TokenValidationResult(Failure(e), query, handler, clientAddress)
             }.pipeTo(self)
+
+        // if no provider is passed, then use sonicds auth
+        case Some(auth) ⇒
+          val providerClass = auth.provider
+          val result = try {
+            val provider = providerClass.getConstructors()(0).newInstance().asInstanceOf[ExternalAuthProvider]
+            provider.validate(auth, context.system, query.traceId.get)
+              .map(tu ⇒ TokenValidationResult(Success(tu), query, handler, clientAddress))
+          } catch {
+            case e: Exception ⇒ Future.failed(e)
+          }
+
+          result.recover {
+            case e: Exception ⇒ TokenValidationResult(Failure(e), query, handler, clientAddress)
+          }.pipeTo(self)
 
         case None ⇒
           log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "user presented no auth token")
