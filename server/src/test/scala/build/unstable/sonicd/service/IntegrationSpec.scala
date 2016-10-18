@@ -10,8 +10,10 @@ import akka.io.Tcp
 import akka.stream.scaladsl.{Keep, Sink}
 import akka.testkit.TestKit
 import akka.util.Timeout
-import build.unstable.sonic.SonicPublisher.StreamException
+import build.unstable.sonic.client.SonicPublisher.StreamException
 import build.unstable.sonic._
+import build.unstable.sonic.client.Sonic
+import build.unstable.sonic.model._
 import build.unstable.sonicd.api.AkkaApi
 import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.system.AkkaService

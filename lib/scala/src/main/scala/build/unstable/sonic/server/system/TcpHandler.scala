@@ -1,4 +1,4 @@
-package build.unstable.sonicd.system.actor
+package build.unstable.sonic.server.system
 
 import java.net.InetAddress
 import java.util.UUID
@@ -9,20 +9,20 @@ import akka.io.Tcp
 import akka.stream.actor.ActorPublisher
 import akka.util.ByteString
 import build.unstable.sonic.Exceptions.ProtocolException
-import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
-import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.model.StreamSubscription
+import build.unstable.sonic.client.Sonic
+import build.unstable.sonic.model._
+import build.unstable.sonic.server.ServerLogging
 import build.unstable.tylog.Variation
 import org.reactivestreams.{Subscriber, Subscription}
 import org.slf4j.event.Level
+import build.unstable.sonic.JsonProtocol._
 
 import scala.collection.mutable.ListBuffer
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
 class TcpSupervisor(controller: ActorRef, authService: ActorRef)
-  extends Actor with SonicdLogging {
+  extends Actor with ServerLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -68,7 +68,7 @@ object TcpHandler {
 
 class TcpHandler(controller: ActorRef, authService: ActorRef,
                  connection: ActorRef, clientAddress: InetAddress)
-  extends Actor with SonicdLogging with Stash {
+  extends Actor with ServerLogging with Stash {
 
   import TcpHandler._
   import akka.io.Tcp._
@@ -224,7 +224,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
             log.tylog(Level.INFO, withTraceId.traceId.get, MaterializeSource,
               Variation.Attempt, "deserialized query {}", withTraceId)
 
-            controller ! SonicController.NewQuery(q, Some(clientAddress))
+            controller ! NewQuery(q, Some(clientAddress))
 
           case a: Authenticate ⇒
             log.tylog(Level.INFO, withTraceId.traceId.get, GenerateToken,
@@ -303,7 +303,7 @@ class TcpHandler(controller: ActorRef, authService: ActorRef,
         context.become(closing(StreamCompleted.error(traceId, e)))
 
       //auth cmd succeeded
-      case Success(token: AuthenticationActor.Token) ⇒
+      case Success(token: String) ⇒
         log.tylog(Level.INFO, traceId, GenerateToken, Variation.Success, "successfully generated new token {}", token)
         self ! OutputChunk(Vector(token))
         self ! StreamCompleted.success(traceId)

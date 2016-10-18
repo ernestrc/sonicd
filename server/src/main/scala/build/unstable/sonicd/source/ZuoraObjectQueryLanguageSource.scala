@@ -13,7 +13,8 @@ import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.ByteString
 import build.unstable.sonic
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
+import build.unstable.sonic.{model, _}
+import build.unstable.sonic.model._
 import build.unstable.sonicd.source.ZuoraService._
 import build.unstable.sonicd.{Sonicd, SonicdConfig}
 import spray.json._
@@ -25,7 +26,7 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
 
-class ZuoraObjectQueryLanguageSource(query: sonic.Query, actorContext: ActorContext, context: RequestContext)
+class ZuoraObjectQueryLanguageSource(query: model.Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(query, actorContext, context) {
 
   val MIN_FETCH_SIZE = 100

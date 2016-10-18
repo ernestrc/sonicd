@@ -1,7 +1,7 @@
 package build.unstable.sonicd.model
 
 import akka.testkit.ImplicitSender
-import build.unstable.sonic.SonicMessage
+import build.unstable.sonic.model.SonicMessage
 import org.reactivestreams.{Subscriber, Subscription}
 
 trait ImplicitSubscriber extends Subscriber[SonicMessage] {

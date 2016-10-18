@@ -6,9 +6,9 @@ import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
-import build.unstable.sonic._
+import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.system.actor.SonicController.{NewQuery, UnauthorizedException}
+import build.unstable.sonicd.system.actor.SonicdController.UnauthorizedException
 import build.unstable.tylog.Variation
 import org.slf4j.MDC
 import org.slf4j.event.Level
@@ -17,7 +17,7 @@ import scala.concurrent.Future
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
-class SonicController(authService: ActorRef, authenticationTimeout: Timeout) extends Actor with SonicdLogging {
+class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) extends Actor with SonicdLogging {
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -109,7 +109,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
       query.auth match {
         case Some(SonicdAuth(token)) ⇒
           authService.ask(
-            AuthenticationActor.ValidateToken(token, query.traceId.get))(authenticationTimeout)
+            ValidateToken(token, query.traceId.get))(authenticationTimeout)
             .mapTo[Try[ApiUser]]
             .map(tu ⇒ TokenValidationResult(tu, query, handler, clientAddress))
             .recover {
@@ -141,9 +141,7 @@ class SonicController(authService: ActorRef, authenticationTimeout: Timeout) ext
   }
 }
 
-object SonicController {
-
-  case class NewQuery(query: Query, clientAddress: Option[InetAddress])
+object SonicdController {
 
   class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +

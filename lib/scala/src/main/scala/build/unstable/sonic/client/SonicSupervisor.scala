@@ -1,4 +1,4 @@
-package build.unstable.sonic
+package build.unstable.sonic.client
 
 import java.net.InetSocketAddress
 

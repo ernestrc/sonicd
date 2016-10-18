@@ -11,6 +11,7 @@ import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
+import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
 import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel

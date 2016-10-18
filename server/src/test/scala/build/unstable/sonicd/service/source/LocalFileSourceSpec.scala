@@ -12,6 +12,7 @@ import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, Test
 import build.unstable.sonic._
 import JsonProtocol._
 import akka.stream.actor.ActorPublisherMessage.Cancel
+import build.unstable.sonic.model.{OutputChunk, Query, QueryProgress, RequestContext}
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.LocalFileStreamPublisher

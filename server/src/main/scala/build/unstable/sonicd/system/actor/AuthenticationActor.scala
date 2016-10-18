@@ -4,8 +4,8 @@ import java.net.InetAddress
 
 import akka.actor.Actor
 import akka.http.scaladsl.model.DateTime
-import build.unstable.sonic.{ApiUser, AuthConfig, Authenticate}
-import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonic.model.{ApiUser, AuthConfig, Authenticate, ValidateToken}
+import build.unstable.sonic.server.ServerLogging
 import build.unstable.sonicd.auth.ApiKey
 import build.unstable.tylog.Variation
 import com.auth0.jwt.{JWTSigner, JWTVerifier}
@@ -18,7 +18,7 @@ import scala.util.{Failure, Try}
 
 class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
                           globalTokenDuration: FiniteDuration)
-  extends Actor with SonicdLogging {
+  extends Actor with ServerLogging {
 
   import AuthenticationActor._
 
@@ -94,8 +94,6 @@ object AuthenticationActor {
   }.flatten
 
   type Token = String
-
-  case class ValidateToken(token: Token, traceId: String)
 
   case class AuthorizationConfirmed(id: String, user: ApiUser, until: DateTime)
 

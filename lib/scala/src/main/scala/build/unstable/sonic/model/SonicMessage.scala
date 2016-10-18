@@ -1,13 +1,13 @@
-package build.unstable.sonic
+package build.unstable.sonic.model
 
 import java.nio.charset.Charset
 
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.util.ByteString
 import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic._
 import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import spray.json._
-import AuthConfig._
 
 import scala.util.Try
 

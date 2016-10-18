@@ -7,6 +7,7 @@ import akka.actor.{Actor, ActorContext, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
+import build.unstable.sonic.model.{DataSource, Query, RequestContext, SonicMessage}
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.{FileWatcher, FileWatcherWorker, LocalFilePublisher}
 import spray.json._

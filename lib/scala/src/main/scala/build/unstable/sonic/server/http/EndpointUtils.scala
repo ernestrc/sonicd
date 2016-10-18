@@ -1,14 +1,14 @@
-package build.unstable.sonicd.api
+package build.unstable.sonic.server.http
 
 import java.util.UUID
 
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{Directive1, RouteResult}
-import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonic.server.ServerLogging
 import build.unstable.tylog.Variation
 import org.slf4j.event.Level
 
-trait EndpointUtils extends SonicdLogging {
+trait EndpointUtils extends ServerLogging {
 
   def extractTraceHeader: Directive1[Option[TraceID]] = {
     extractRequest.tflatMap {

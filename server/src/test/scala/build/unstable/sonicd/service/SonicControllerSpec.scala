@@ -5,18 +5,16 @@ import java.net.InetAddress
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.Timeout
-import build.unstable.sonic.AuthConfig.Mode
-import build.unstable.sonic._
+import build.unstable.sonic.model.AuthConfig.Mode
+import build.unstable.sonic.model._
 import build.unstable.sonicd.auth.ApiKey
-import build.unstable.sonicd.system.actor.AuthenticationActor.ValidateToken
-import build.unstable.sonicd.system.actor.SonicController.NewQuery
-import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController}
+import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicdController}
 import com.auth0.jwt.JWTSigner
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
 
+import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
 
 class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
   with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
@@ -27,8 +25,8 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
     TestKit.shutdownActorSystem(system)
   }
 
-  def newActor: TestActorRef[SonicController] =
-    TestActorRef[SonicController](Props(classOf[SonicController], self, 1.seconds: Timeout)
+  def newActor: TestActorRef[SonicdController] =
+    TestActorRef[SonicdController](Props(classOf[SonicdController], self, 1.seconds: Timeout)
       .withDispatcher(CallingThreadDispatcher.Id))
 
   val signer = new JWTSigner("secret")

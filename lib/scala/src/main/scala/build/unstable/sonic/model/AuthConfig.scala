@@ -1,5 +1,6 @@
-package build.unstable.sonic
+package build.unstable.sonic.model
 
+import build.unstable.sonic.JsonProtocol
 import spray.json._
 
 import scala.util.{Failure, Success, Try}

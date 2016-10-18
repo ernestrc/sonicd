@@ -1,7 +1,7 @@
 package build.unstable.sonicd.auth
 
-import build.unstable.sonic.AuthConfig
 import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.model.AuthConfig
 import spray.json._
 
 package object auth {

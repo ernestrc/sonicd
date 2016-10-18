@@ -5,12 +5,14 @@ import java.net.InetSocketAddress
 import akka.actor.{ActorContext, Props}
 import build.unstable.sonic._
 import JsonProtocol._
+import build.unstable.sonic.client.SonicPublisher
+import build.unstable.sonic.model.{DataSource, Query, RequestContext, SonicCommand}
 import spray.json.JsObject
 
 class SonicSource(q: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(q, actorContext, context) {
 
-  import Sonic._
+  import build.unstable.sonic.client.Sonic._
 
   val host: String = getConfig[String]("host")
   val port: Int = getOption[Int]("port").getOrElse(8889)

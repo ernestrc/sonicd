@@ -1,4 +1,4 @@
-package build.unstable.sonicd.system.actor
+package build.unstable.sonic.server.system
 
 import java.net.InetAddress
 import java.util.UUID
@@ -8,9 +8,8 @@ import akka.actor._
 import akka.stream.actor._
 import build.unstable.sonic.Exceptions.ProtocolException
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
-import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.model.StreamSubscription
+import build.unstable.sonic.model._
+import build.unstable.sonic.server.ServerLogging
 import build.unstable.tylog.Variation
 import org.reactivestreams._
 import org.slf4j.event.Level
@@ -19,7 +18,7 @@ import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
 class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Option[InetAddress]) extends ActorPublisher[SonicMessage]
-  with ActorSubscriber with SonicdLogging with Stash {
+  with ActorSubscriber with ServerLogging with Stash {
 
   import akka.stream.actor.ActorPublisherMessage._
   import akka.stream.actor.ActorSubscriberMessage._
@@ -205,7 +204,7 @@ class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Opti
       context.become(completing(StreamCompleted.error(traceId, e)))
 
     //auth cmd succeded
-    case Success(token: AuthenticationActor.Token) ⇒
+    case Success(token: String) ⇒
       log.tylog(Level.INFO, traceId, waitingFor, Variation.Success, "received new token '{}'", token)
       onNext(OutputChunk(Vector(token)))
       context.become(completing(StreamCompleted.success(traceId)))
@@ -254,7 +253,7 @@ class WsHandler(controller: ActorRef, authService: ActorRef, clientAddress: Opti
           waitingFor = MaterializeSource
           log.tylog(Level.INFO, withTraceId.traceId.get, waitingFor, Variation.Attempt, "processing query {}", q)
 
-          controller ! SonicController.NewQuery(q, clientAddress)
+          controller ! NewQuery(q, clientAddress)
 
         case a: Authenticate ⇒
           waitingFor = GenerateToken

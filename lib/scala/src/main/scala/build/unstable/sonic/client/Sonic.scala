@@ -1,4 +1,4 @@
-package build.unstable.sonic
+package build.unstable.sonic.client
 
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
@@ -9,6 +9,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.util.ByteString
+import build.unstable.sonic.model._
 import spray.json.{JsArray, JsString}
 
 import scala.concurrent.Future

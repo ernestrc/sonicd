@@ -8,6 +8,8 @@ import akka.actor.{Actor, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
 import build.unstable.sonic._
+import build.unstable.sonic.client.Sonic
+import build.unstable.sonic.model.{ApiUser, AuthConfig, RequestContext, SonicMessage}
 import build.unstable.sonicd.source.SyntheticPublisher
 import build.unstable.sonicd.source.file.FileWatcherWorker
 

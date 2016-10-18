@@ -7,9 +7,9 @@ import akka.io.Tcp
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import akka.util.ByteString
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
-import build.unstable.sonicd.system.actor.SonicController.NewQuery
-import build.unstable.sonicd.system.actor.TcpHandler
+import build.unstable.sonic.client.Sonic
+import build.unstable.sonic.model._
+import build.unstable.sonic.server.system.TcpHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.duration._

@@ -4,7 +4,7 @@ import java.io.File
 import java.nio.file._
 
 import akka.actor._
-import build.unstable.sonic.RequestContext
+import build.unstable.sonic.model.RequestContext
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.FileWatcher.{PathWatchEvent, Watch, WatchResults}
 import build.unstable.sonicd.source.file.FileWatcherWorker.DoWatch

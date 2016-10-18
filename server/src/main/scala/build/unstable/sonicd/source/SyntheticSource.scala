@@ -5,6 +5,7 @@ import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import build.unstable.sonic._
 import JsonProtocol._
+import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import spray.json._
 

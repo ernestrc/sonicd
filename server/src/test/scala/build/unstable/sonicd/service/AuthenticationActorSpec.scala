@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorSystem, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{AuthConfig, Authenticate}
+import build.unstable.sonic.model.{AuthConfig, Authenticate, ValidateToken}
 import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.system.actor.AuthenticationActor
 import com.auth0.jwt.JWTSigner
@@ -66,7 +66,7 @@ class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
       val actor = newActor()
       val token = actor.underlyingActor.signer.sign(apiKeys.head.toJWTClaims("serrallonga"))
 
-      actor ! AuthenticationActor.ValidateToken(token, "1")
+      actor ! ValidateToken(token, "1")
       val res = expectMsgType[Try[AuthenticationActor.Token]]
       res.get
     }
@@ -74,7 +74,7 @@ class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
     "verify token and return failure if token is not JWT" in {
       val actor = newActor()
 
-      actor ! AuthenticationActor.ValidateToken("invalidToken", "2")
+      actor ! ValidateToken("invalidToken", "2")
       val res = expectMsgType[Try[AuthenticationActor.Token]]
       assert(res.isFailure)
 
@@ -94,7 +94,7 @@ class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
         //expire token
         Thread.sleep(1000)
 
-        actor ! AuthenticationActor.ValidateToken(token, "2")
+        actor ! ValidateToken(token, "2")
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 
@@ -112,7 +112,7 @@ class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
         //expire token
         Thread.sleep(1000)
 
-        actor ! AuthenticationActor.ValidateToken(token, "2")
+        actor ! ValidateToken(token, "2")
         val res = expectMsgType[Try[AuthenticationActor.Token]]
         assert(res.isFailure)
 

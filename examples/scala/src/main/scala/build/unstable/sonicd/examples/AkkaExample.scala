@@ -9,6 +9,8 @@ import akka.stream.scaladsl.{Keep, Sink}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.util.Timeout
 import build.unstable.sonic._
+import build.unstable.sonic.client.Sonic
+import build.unstable.sonic.model.{Query, SonicMessage}
 import spray.json._
 
 import scala.concurrent.duration._

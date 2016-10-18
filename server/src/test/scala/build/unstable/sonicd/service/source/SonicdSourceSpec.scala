@@ -8,9 +8,11 @@ import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic.SonicPublisher.StreamException
-import build.unstable.sonic.SonicSupervisor.RegisterPublisher
+import build.unstable.sonic.client.SonicPublisher.StreamException
+import build.unstable.sonic.client.SonicSupervisor.RegisterPublisher
 import build.unstable.sonic._
+import build.unstable.sonic.client.{Sonic, SonicPublisher}
+import build.unstable.sonic.model._
 import build.unstable.sonicd.model._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._

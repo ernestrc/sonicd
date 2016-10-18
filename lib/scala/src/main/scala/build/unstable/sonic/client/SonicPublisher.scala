@@ -1,4 +1,4 @@
-package build.unstable.sonic
+package build.unstable.sonic.client
 
 import java.util.UUID
 
@@ -6,7 +6,8 @@ import akka.actor.{ActorRef, Terminated}
 import akka.io.Tcp
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.util.ByteString
-import build.unstable.sonic.SonicPublisher.{Ack, StreamException}
+import build.unstable.sonic.client.SonicPublisher.{Ack, StreamException}
+import build.unstable.sonic.model._
 import build.unstable.tylog.Variation
 import org.slf4j.event.Level
 

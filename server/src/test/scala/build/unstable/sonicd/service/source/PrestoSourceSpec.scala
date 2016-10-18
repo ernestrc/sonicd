@@ -8,6 +8,7 @@ import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
+import build.unstable.sonic.model.{OutputChunk, Query, QueryProgress, RequestContext}
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.Presto.{ColMeta, QueryResults, StatementStats}

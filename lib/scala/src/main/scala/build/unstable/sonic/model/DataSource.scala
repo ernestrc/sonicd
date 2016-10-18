@@ -1,8 +1,8 @@
-package build.unstable.sonic
+package build.unstable.sonic.model
 
 import akka.actor._
-import build.unstable.sonic.DataSource.ConfigurationException
-import JsonProtocol._
+import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.model.DataSource.ConfigurationException
 import spray.json._
 
 object DataSource {

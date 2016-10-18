@@ -1,16 +1,15 @@
-package build.unstable.sonicd.api.endpoint
+package build.unstable.sonic.server.http
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.model.RemoteAddress
-import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
+import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.http.scaladsl.server.Directives._
 import akka.stream._
 import akka.stream.actor.{ActorPublisher, ActorSubscriber}
 import akka.stream.scaladsl._
-import akka.util.{ByteString, Timeout}
-import build.unstable.sonic.{SonicMessage, StreamCompleted}
-import build.unstable.sonicd.api.EndpointUtils
-import build.unstable.sonicd.system.actor.WsHandler
+import akka.util.Timeout
+import build.unstable.sonic.model.{SonicMessage, StreamCompleted}
+import build.unstable.sonic.server.system.WsHandler
 import ch.megard.akka.http.cors.CorsDirectives
 
 class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout: Timeout, actorTimeout: Timeout)
@@ -50,7 +49,7 @@ class QueryEndpoint(controller: ActorRef, authService: ActorRef, responseTimeout
     Flow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
 
-      val deserialize = Flow[Message].flatMapConcat{
+      val deserialize = Flow[Message].flatMapConcat {
         case t: TextMessage.Strict ⇒
           Source.single(t).via(Flow[TextMessage.Strict].map(t ⇒ SonicMessage.fromJson(t.text)))
         case t: TextMessage.Streamed ⇒

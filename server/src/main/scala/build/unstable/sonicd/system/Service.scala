@@ -3,9 +3,10 @@ package build.unstable.sonicd.system
 import akka.actor.{ActorRef, Props}
 import akka.io.{IO, Tcp}
 import akka.routing.RoundRobinPool
-import build.unstable.sonic.DataSource
+import build.unstable.sonic.model.DataSource
+import build.unstable.sonic.server.system.{TcpHandler, TcpSupervisor, WsHandler}
 import build.unstable.sonicd.SonicdConfig
-import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicController, TcpSupervisor}
+import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicdController}
 
 /**
  * Trait that declares the actors that make up our service
@@ -17,13 +18,13 @@ trait Service {
     */
   val tcpIoService: ActorRef
 
-  /** listens for new connections and creates instances of [[build.unstable.sonicd.system.actor.TcpHandler]] */
+  /** listens for new connections and creates instances of [[TcpHandler]] */
   val tcpService: ActorRef
 
   /**
    * instantiates [[DataSource]] subclasses in
-   * response to Query commands. Monitors [[build.unstable.sonicd.system.actor.TcpHandler]] and
-   * [[build.unstable.sonicd.system.actor.WsHandler]]. Handles resource authorization
+   * response to Query commands. Monitors [[TcpHandler]] and
+   * [[WsHandler]]. Handles resource authorization
    */
   val controllerService: ActorRef
 
@@ -47,7 +48,7 @@ trait AkkaService extends Service {
 
   val tcpIoService: ActorRef = IO(Tcp)
 
-  val controllerService: ActorRef = system.actorOf(Props(classOf[SonicController],
+  val controllerService: ActorRef = system.actorOf(Props(classOf[SonicdController],
     authenticationService, SonicdConfig.ACTOR_TIMEOUT), "controller")
 
   val tcpService = system.actorOf(Props(classOf[TcpSupervisor], controllerService, authenticationService), "tcpSupervisor")

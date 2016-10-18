@@ -2,19 +2,18 @@ package build.unstable.sonicd.service
 
 import java.net.InetAddress
 
-import akka.actor.{PoisonPill, ActorRef, ActorSystem, Props}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
 import akka.stream.actor.ActorPublisherMessage.Request
 import akka.stream.actor.ActorSubscriberMessage.OnNext
-import akka.stream.actor.{ActorSubscriberMessage, ActorPublisher, ActorPublisherMessage}
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage, ActorSubscriberMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
+import build.unstable.sonic.model._
+import build.unstable.sonic.server.system.WsHandler
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.system.actor.SonicController.NewQuery
-import build.unstable.sonicd.system.actor.WsHandler
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-import scala.util.{Success, Failure}
+import scala.util.{Failure, Success}
 
 class WsHandlerSpec(_system: ActorSystem) extends TestKit(_system)
 with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender
