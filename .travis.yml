@@ -16,3 +16,4 @@ script: scripts/test.sh
 after_success:
   - docker login -e="$DOCKER_EMAIL" -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWORD";
     docker push xarxa6/sonicd:`git rev-parse --short HEAD`;
+    docker push xarxa6/sonicd:latest;
