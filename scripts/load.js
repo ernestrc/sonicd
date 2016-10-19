@@ -1,11 +1,26 @@
 /* eslint-env node, mocha */
 
-var Client = require('../lib/nodejs/lib.js').Client;
+var Client = require('sonic-js').Client;
 var assert = require('chai').assert;
 var process = require('process');
 var sonicdHost = process.env.SONICD_HOST || 'wss://0.0.0.0:443';
-var util = require('./util');
 
+var testHappyPathSingle = function (client, query, n, done) {
+  client.run(query, function(err, data, traceId) {
+    if (query.traceId) {
+      assert(typeof traceId !== 'undefined', 'traceId was undefined');
+    }
+    if (err) {
+      done(err);
+      return;
+    }
+    if (data.length !== n) {
+      done(new Error('data was not ' + n));
+      return;
+    }
+    done();
+  });
+}
 
 describe('ws sonicd', function() {
 
@@ -52,7 +67,7 @@ describe('ws sonicd', function() {
 
     for (var i = 0, len = connections; i < len; i++) {
       try {
-        util.testHappyPathSingle(client, query, messages, count);
+        testHappyPathSingle(client, query, messages, count);
       } catch (e) {
         errs.push(e);
       }

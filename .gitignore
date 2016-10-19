@@ -8,7 +8,6 @@ target/
 ./src
 server/lib
 perf/*
-spec/node_modules
 server/src/main/resources/sonicd-spark-sql.jar
 server/src/main/resources/application.conf
 examples/nodejs/node_modules
@@ -17,3 +16,4 @@ lib/nodejs/node_modules
 scripts/certs
 npm-debug.log
 lib/rust/src/_io
+node_modules
