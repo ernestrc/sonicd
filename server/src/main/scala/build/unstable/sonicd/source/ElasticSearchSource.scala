@@ -70,7 +70,7 @@ object ElasticSearch {
 }
 
 class ElasticSearchSource(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends DataSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) {
 
   def elasticsearchSupervisorProps(nodeUrl: String, masterPort: Int): Props =
     Props(classOf[ElasticSearchSupervisor], nodeUrl, masterPort)

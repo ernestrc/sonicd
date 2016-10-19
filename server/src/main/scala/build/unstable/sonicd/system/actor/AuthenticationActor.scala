@@ -14,7 +14,7 @@ import spray.json._
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
-import scala.util.{Failure, Try}
+import scala.util.{Failure, Success, Try}
 
 class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
                           globalTokenDuration: FiniteDuration)
@@ -72,8 +72,10 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
     case v: ValidateToken ⇒ sender() ! validateToken(v.token, v.traceId)
 
     case cmd@Authenticate(user, key, traceId) ⇒
-      sender() ! createToken(key, user, traceId.get)
-
+      sender() ! (createToken(key, user, traceId.get) match {
+        case Success(token) ⇒ token
+        case f: Failure[_] ⇒ f
+      })
   }
 }
 

@@ -6,7 +6,6 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.source.http.HttpSupervisor
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
@@ -21,7 +20,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.{Duration, _}
 
 class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends DataSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) {
 
   def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
     Props(classOf[PrestoSupervisor], masterUrl, masterPort)

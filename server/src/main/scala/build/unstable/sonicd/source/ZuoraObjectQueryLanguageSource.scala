@@ -27,7 +27,7 @@ import scala.util.{Failure, Success, Try}
 import scala.xml.parsing.XhtmlParser
 
 class ZuoraObjectQueryLanguageSource(query: model.Query, actorContext: ActorContext, context: RequestContext)
-  extends DataSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) {
 
   val MIN_FETCH_SIZE = 100
 

@@ -6,19 +6,18 @@ import java.nio.file.Path
 import akka.actor._
 import akka.stream.actor.ActorPublisher
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
-import build.unstable.sonic.model.{DataSource, Query, RequestContext, SonicMessage}
+import build.unstable.sonic.model.{Query, RequestContext, SonicMessage}
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.file.{FileWatcher, FileWatcherWorker, LocalFilePublisher}
 import spray.json._
 
 /**
- * Watches JSON files in 'path' local to Sonicd instance and exposes contents as a stream.
- *
- * Takes an optional 'tail' parameter to configure if only new data should be streamed.
- */
+  * Watches JSON files in 'path' local to Sonicd instance and exposes contents as a stream.
+  *
+  * Takes an optional 'tail' parameter to configure if only new data should be streamed.
+  */
 class LocalJsonStreamSource(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends DataSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) {
 
   val publisher: Props = {
     val path = getConfig[String]("path")

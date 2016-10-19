@@ -23,14 +23,14 @@ docker run -d -p 9111:9111 -p 10001:10001 -v ${CONFIG_DIR}:/etc/sonicd/ -v ${JDB
 ```
 
 # Install CLI
-Sonicd also provides a CLI to run ad hoc queries. If you have the rust toolchain installed already, then simply `cargo install sonicd`, otherwise install rustup first with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/).
+Sonicd also provides a CLI to run ad hoc queries. If you have the rust toolchain installed already, then simply `cargo install sonic`, otherwise install rustup first with `curl https://sh.rustup.rs -sSf | sh` or check [https://www.rustup.rs/](https://www.rustup.rs/).
 
 # Examples
 Check [examples](examples) folder. For an example in Rust check the [cli](cli).
 
 # Client libraries
 - [NodeJS](https://github.com/xarxa6/sonic-js) [![npm version](https://badge.fury.io/js/sonic-js.svg)](https://badge.fury.io/js/sonic-js)
-- [Rust](https://github.com/xarxa6/sonic-rs) [![crates.io](http://meritbadge.herokuapp.com/sonicd)](https://crates.io/crates/sonic)
+- [Rust](https://github.com/xarxa6/sonic-rs) [![crates.io](http://meritbadge.herokuapp.com/sonic)](https://crates.io/crates/sonic)
 - [Scala/Java (Akka Streams)](https://github.com/xarxa6/sonic-scala) [ ![Bintray](https://api.bintray.com/packages/ernestrc/maven/sonicd-core/images/download.svg)](https://bintray.com/ernestrc/maven/sonicd-core/_latestVersion)
 
 # Contribute

@@ -6,7 +6,6 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.Request
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.source.JdbcConnectionsHandler.JdbcHandle
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
@@ -19,7 +18,7 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 class JdbcSource(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends DataSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) {
 
   val jdbcConnectionsProps: Props =
     Props(classOf[JdbcConnectionsHandler]).withDispatcher("akka.actor.jdbc-dispatcher")

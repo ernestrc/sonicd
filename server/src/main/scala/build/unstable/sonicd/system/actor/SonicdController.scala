@@ -6,18 +6,22 @@ import akka.actor.SupervisorStrategy.Restart
 import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.system.actor.SonicdController.UnauthorizedException
 import build.unstable.tylog.Variation
+import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import org.slf4j.MDC
 import org.slf4j.event.Level
+import spray.json._
 
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
 class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) extends Actor with SonicdLogging {
+
+  import SonicdController._
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
@@ -41,9 +45,9 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
   def getSourceClass(query: Query): Try[Class[_]] = {
     val clazzLoader = this.getClass.getClassLoader
 
-    Try(clazzLoader.loadClass(query.clazzName))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.clazzName)))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.clazzName)))
+    Try(clazzLoader.loadClass(query.sonicdSourceClass))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.sonicdSourceClass)))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.sonicdSourceClass)))
   }
 
   def prepareMaterialization(handler: ActorRef, q: Query,
@@ -53,18 +57,20 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
       val source = getSourceClass(query)
-        .getOrElse(throw new Exception(s"could not find ${query.clazzName} in the classpath")).getConstructors()(0)
+        .getOrElse(throw new Exception(s"could not find ${query.sonicdSourceClass} in the classpath")).getConstructors()(0)
         .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
 
       log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
-      if (isAuthorized(user, source.securityLevel, clientAddress)) {
+      val securityLevel = query.sonicdConfig.fields.get("security").map(_.convertTo[Int])
+
+      if (isAuthorized(user, securityLevel, clientAddress)) {
         handler ! source.publisher
-      } else handler ! StreamCompleted.error(q.traceId.get, new UnauthorizedException(user, clientAddress))
+      } else handler ! Failure(new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
         log.error(e, "error when preparing stream materialization")
-        handler ! StreamCompleted.error(q.traceId.get, e)
+        handler ! Failure(e)
     }
   }
 
@@ -91,24 +97,26 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
   override def receive: Receive = {
 
-    case TokenValidationResult(Failure(e), query, handler, _) ⇒
+    case TokenValidationResult(f@Failure(e), query, handler, _) ⇒
       log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Failure(e), "token validation failed")
-      handler ! StreamCompleted.error(query.traceId.get, e)
+      handler ! f
 
     case TokenValidationResult(Success(user), query, handler, clientAddress) ⇒
       try {
         MDC.put("user", user.user)
         MDC.put("mode", user.mode.toString)
-        MDC.put("source", query.clazzName)
+        MDC.put("source", query.sonicdSourceClass)
         log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "validated token successfully")
         prepareMaterialization(handler, query, Some(user), clientAddress)
       } catch {
         case e: Exception ⇒
           log.error(e, "error when preparing stream materialization")
-          handler ! StreamCompleted.error(query.traceId.getOrElse("no-trace-id"), e)
+          handler ! Failure(e)
       }
 
-    case NewQuery(query, clientAddress) ⇒
+    case NewCommand(a: Authenticate, _) ⇒ authService forward a
+
+    case NewCommand(query: Query, clientAddress) ⇒
       log.debug("client from {} posted new query {}", clientAddress, query)
       val handler = sender()
 
@@ -151,6 +159,27 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 }
 
 object SonicdController {
+
+  implicit class SonicdQuery(query: Query) {
+
+    //CAUTION: leaking this value outside of sonicd-server is a major security risk
+    private[unstable] lazy val sonicdConfig: JsObject = query.config match {
+      case o: JsObject ⇒ o
+      case JsString(alias) ⇒ Try {
+        ConfigFactory.load().getObject(s"sonicd.source.$alias")
+          .render(ConfigRenderOptions.concise()).parseJson.asJsObject
+      }.recover {
+        case e: Exception ⇒ throw new Exception(s"could not load query config '$alias'", e)
+      }.get
+      case _ ⇒
+        throw new Exception("'config' key in query config can only be either a full config " +
+          "object or an alias (string) that will be extracted by sonicd server")
+    }
+
+    private[unstable] lazy val sonicdSourceClass: String = sonicdConfig.fields.getOrElse("class",
+      throw new Exception(s"missing key 'class' in config")).convertTo[String]
+
+  }
 
   class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
