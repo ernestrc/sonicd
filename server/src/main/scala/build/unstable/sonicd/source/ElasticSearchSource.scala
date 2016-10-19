@@ -6,7 +6,6 @@ import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
 import akka.util.ByteString
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.source.ElasticSearch.ESQuery
 import build.unstable.sonicd.source.http.HttpSupervisor

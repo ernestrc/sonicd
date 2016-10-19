@@ -5,8 +5,7 @@ import java.nio.file.StandardWatchEventKinds
 
 import akka.actor.{ActorSystem, PoisonPill, Props}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonicd.model.{HandlerUtils, ImplicitSubscriber, TestController}
-import build.unstable.sonicd.service.{Fixture, ImplicitRedirectActor}
+import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.file.FileWatcher.{PathWatchEvent, Watch}
 import build.unstable.sonicd.source.file.{FileWatcher, FileWatcherWorker}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
@@ -16,7 +15,7 @@ class FileWatcherSpec(_system: ActorSystem)
   with Matchers with BeforeAndAfterAll with ImplicitSender
   with ImplicitSubscriber with HandlerUtils {
 
-  import Fixture._
+  import build.unstable.sonicd.model.Fixture._
 
   override protected def afterAll(): Unit = {
     TestKit.shutdownActorSystem(system)

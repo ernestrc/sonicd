@@ -12,7 +12,7 @@ object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.11"
-  val sonicdV = "0.6.3"
+  val sonicdV = "0.6.4"
 
   val commonSettings = Seq(
     organization := "build.unstable",
@@ -20,7 +20,7 @@ object Build extends sbt.Build {
     scalaVersion := scalaV,
     licenses += ("MIT", url("https://opensource.org/licenses/MIT")),
     resolvers += Resolver.bintrayRepo("ernestrc", "maven"),
-    publishArtifact in (Compile, packageDoc) := false,
+    publishArtifact in(Compile, packageDoc) := false,
     scalacOptions := Seq(
       "-unchecked",
       "-Xlog-free-terms",
@@ -45,24 +45,6 @@ object Build extends sbt.Build {
       oldStrategy(x)
   }
 
-  val core: Project = Project("sonicd-core", file("lib/scala"))
-    .settings(commonSettings: _*)
-    .settings(
-      libraryDependencies ++= {
-        Seq(
-          "build.unstable" %% "tylog" % "0.3.0",
-          "io.spray" %% "spray-json" % "1.3.2",
-          "com.typesafe.akka" %% "akka-actor" % akkaV,
-          "com.typesafe.akka" %% "akka-slf4j" % akkaV,
-          "com.typesafe.akka" %% "akka-stream" % akkaV,
-          "com.typesafe.akka" %% "akka-http-spray-json-experimental" % akkaV,
-          "ch.megard" %% "akka-http-cors" % "0.1.2",
-          "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
-          "org.scalatest" %% "scalatest" % "2.2.5" % "test"
-        )
-      }
-    )
-
   val server: Project = Project("sonicd-server", file("server"))
     .settings(Revolver.settings: _*)
     .settings(commonSettings: _*)
@@ -84,26 +66,15 @@ object Build extends sbt.Build {
       libraryDependencies ++= {
         Seq(
           //core
+          "build.unstable" %% "sonic-core" % sonicdV,
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
           "com.auth0" % "java-jwt" % "2.1.0",
           "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
           "ch.qos.logback" % "logback-classic" % "1.1.7",
-          "com.h2database" % "h2" % "1.3.175" % "test"
+          "com.h2database" % "h2" % "1.3.175" % "test",
+          "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
+          "org.scalatest" %% "scalatest" % "2.2.5" % "test"
         )
       }
     )
-    .dependsOn(core % "compile->compile;test->test")
-
-  val examples = Project("sonicd-examples", file("examples/scala"))
-    .settings(Revolver.settings: _*)
-    .settings(commonSettings: _*)
-    .settings(
-      libraryDependencies ++= {
-        Seq(
-          "build.unstable" %% "tylog" % "0.3.0",
-          "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
-          "ch.qos.logback" % "logback-classic" % "1.1.7"
-        )
-      }
-    ).dependsOn(core)
 }

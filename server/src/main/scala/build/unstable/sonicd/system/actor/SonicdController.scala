@@ -38,13 +38,22 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
   /* HELPERS */
 
+  def getSourceClass(query: Query): Try[Class[_]] = {
+    val clazzLoader = this.getClass.getClassLoader
+
+    Try(clazzLoader.loadClass(query.clazzName))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.clazzName)))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.clazzName)))
+  }
+
   def prepareMaterialization(handler: ActorRef, q: Query,
                              user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {
       handled += 1L
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
-      val source = query.getSourceClass.getConstructors()(0)
+      val source = getSourceClass(query)
+        .getOrElse(throw new Exception(s"could not find ${query.clazzName} in the classpath")).getConstructors()(0)
         .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
 
       log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)

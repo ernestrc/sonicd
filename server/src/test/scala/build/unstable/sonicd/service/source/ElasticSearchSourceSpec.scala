@@ -5,11 +5,10 @@ import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import JsonProtocol._
 import build.unstable.sonic.model.{OutputChunk, Query, RequestContext, TypeMetadata}
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
 import build.unstable.sonicd.source.{ElasticSearch, ElasticSearchPublisher}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}

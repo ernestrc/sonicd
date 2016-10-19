@@ -6,11 +6,8 @@ import akka.actor.{ActorContext, ActorRef, ActorSystem, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model._
-import build.unstable.sonicd.auth.ApiKey
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.{JdbcConnectionsHandler, JdbcExecutor, JdbcPublisher}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._

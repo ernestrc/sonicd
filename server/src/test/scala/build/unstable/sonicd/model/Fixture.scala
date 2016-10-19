@@ -1,4 +1,4 @@
-package build.unstable.sonicd.service
+package build.unstable.sonicd.model
 
 import java.io.File
 import java.nio.file.WatchEvent.Kind
@@ -7,15 +7,15 @@ import java.nio.file.{Path, WatchEvent}
 import akka.actor.{Actor, ActorRef, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.CallingThreadDispatcher
-import build.unstable.sonic._
-import build.unstable.sonic.client.Sonic
-import build.unstable.sonic.model.{ApiUser, AuthConfig, RequestContext, SonicMessage}
-import build.unstable.sonicd.source.SyntheticPublisher
+import build.unstable.sonic.model._
+import build.unstable.sonic.scaladsl.Sonic
+import build.unstable.sonic.server.source.SyntheticPublisher
 import build.unstable.sonicd.source.file.FileWatcherWorker
+import spray.json._
 
 object Fixture {
 
-  import build.unstable.sonicd.model.Fixture._
+  val syntheticQuery = Query("1", """{"class": "SyntheticSource"}""".parseJson.asJsObject, "1", None)
 
   val queryBytes = Sonic.lengthPrefixEncode(syntheticQuery.toBytes)
 

@@ -7,14 +7,13 @@ import java.nio.charset.Charset
 import java.nio.file._
 
 import akka.actor._
+import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
-import JsonProtocol._
-import akka.stream.actor.ActorPublisherMessage.Cancel
 import build.unstable.sonic.model.{OutputChunk, Query, QueryProgress, RequestContext}
 import build.unstable.sonicd.model._
-import build.unstable.sonicd.service.Fixture
 import build.unstable.sonicd.source.LocalFileStreamPublisher
 import build.unstable.sonicd.source.file.FileWatcher
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpecLike}

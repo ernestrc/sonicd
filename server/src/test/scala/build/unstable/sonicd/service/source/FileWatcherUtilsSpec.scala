@@ -2,7 +2,7 @@ package build.unstable.sonicd.service.source
 
 import java.io.File
 
-import build.unstable.sonicd.service.Fixture
+import build.unstable.sonicd.model.Fixture
 import build.unstable.sonicd.source.file.FileWatcher
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Matchers, WordSpec}
 

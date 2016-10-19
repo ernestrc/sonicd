@@ -8,6 +8,7 @@ import akka.util.Timeout
 import build.unstable.sonic.model.AuthConfig.Mode
 import build.unstable.sonic.model._
 import build.unstable.sonicd.auth.ApiKey
+import build.unstable.sonicd.model.Fixture
 import build.unstable.sonicd.system.actor.{AuthenticationActor, SonicdController}
 import com.auth0.jwt.JWTSigner
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
@@ -35,7 +36,7 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
     "handle new queries and monitor handler" in {
       val c = newActor
 
-      c ! NewQuery(build.unstable.sonicd.model.Fixture.syntheticQuery, None)
+      c ! NewQuery(Fixture.syntheticQuery, None)
       expectMsgType[Props]
 
       c.underlyingActor.handled shouldBe 1

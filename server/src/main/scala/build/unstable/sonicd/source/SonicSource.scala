@@ -3,16 +3,14 @@ package build.unstable.sonicd.source
 import java.net.InetSocketAddress
 
 import akka.actor.{ActorContext, Props}
-import build.unstable.sonic._
-import JsonProtocol._
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.client.SonicPublisher
 import build.unstable.sonic.model.{DataSource, Query, RequestContext, SonicCommand}
+import build.unstable.sonic.scaladsl.Sonic._
 import spray.json.JsObject
 
 class SonicSource(q: Query, actorContext: ActorContext, context: RequestContext)
   extends DataSource(q, actorContext, context) {
-
-  import build.unstable.sonic.client.Sonic._
 
   val host: String = getConfig[String]("host")
   val port: Int = getOption[Int]("port").getOrElse(8889)
