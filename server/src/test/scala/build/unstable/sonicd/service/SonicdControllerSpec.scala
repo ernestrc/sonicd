@@ -16,8 +16,9 @@ import spray.json._
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.Failure
 
-class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
+class SonicdControllerSpec(_system: ActorSystem) extends TestKit(_system)
   with WordSpecLike with Matchers with BeforeAndAfterAll with ImplicitSender {
 
   def this() = this(ActorSystem("SonicControllerSpec"))
@@ -36,12 +37,18 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
     "handle new queries and monitor handler" in {
       val c = newActor
 
-      c ! NewQuery(Fixture.syntheticQuery, None)
+      c ! NewCommand(Fixture.syntheticQuery, None)
       expectMsgType[Props]
 
       c.underlyingActor.handled shouldBe 1
       // feature removed: c.underlyingActor.handlers(1) shouldBe self.path
+    }
 
+    "handle new auth cmds" in {
+      val c = newActor
+
+      c ! NewCommand(Authenticate("","", None), None)
+      expectMsgType[Authenticate]
     }
 
     "authorize queries with external auth providers " in {
@@ -53,7 +60,7 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
       }
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-      c ! NewQuery(syntheticQuery, None)
+      c ! NewCommand(syntheticQuery, None)
 
       expectMsgType[Props]
 
@@ -69,11 +76,9 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
       }
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-      c ! NewQuery(syntheticQuery, None)
+      c ! NewCommand(syntheticQuery, None)
 
-      val done = expectMsgType[StreamCompleted]
-
-      done.error.isDefined shouldBe true
+      val done = expectMsgType[Failure[_]]
     }
 
     "authorize queries on sources with security" in {
@@ -84,7 +89,7 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
       val auth = SonicdAuth(signer.sign(claims))
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-      c ! NewQuery(syntheticQuery, None)
+      c ! NewCommand(syntheticQuery, None)
       val cmd = expectMsgType[ValidateToken]
       assert(cmd.token == auth.token)
 
@@ -104,14 +109,14 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
         val auth = SonicdAuth(signer.sign(claims))
         val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-        c ! NewQuery(syntheticQuery, None)
+        c ! NewCommand(syntheticQuery, None)
         val cmd = expectMsgType[ValidateToken]
         assert(cmd.token == auth.token)
 
         lastSender ! user
-        val done = expectMsgType[StreamCompleted]
+        val done = expectMsgType[Failure[_]]
 
-        done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
+        done.exception.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
         // feature removed: assert(c.underlyingActor.handlers.isEmpty)
@@ -122,11 +127,11 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
         val config = """{"class" : "SyntheticSource", "security" : 2}""".parseJson.asJsObject
         val syntheticQuery = Query("10", config, None).copy(trace_id = Some("1234"))
 
-        c ! NewQuery(syntheticQuery, None)
+        c ! NewCommand(syntheticQuery, None)
 
-        val done = expectMsgType[StreamCompleted]
+        val done = expectMsgType[Failure[_]]
 
-        done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
+        done.exception.isInstanceOf[AuthenticationActor.AuthenticationException]
 
         c.underlyingActor.handled shouldBe 1
         // feature removed: assert(c.underlyingActor.handlers.isEmpty)
@@ -142,14 +147,14 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
       val auth = SonicdAuth(signer.sign(claims))
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-      c ! NewQuery(syntheticQuery, Some(InetAddress.getByName("localhost")))
+      c ! NewCommand(syntheticQuery, Some(InetAddress.getByName("localhost")))
       val cmd = expectMsgType[ValidateToken]
       assert(cmd.token == auth.token)
 
       lastSender ! user
-      val done = expectMsgType[StreamCompleted]
+      val done = expectMsgType[Failure[_]]
 
-      done.error.get.isInstanceOf[AuthenticationActor.AuthenticationException]
+      done.exception.isInstanceOf[AuthenticationActor.AuthenticationException]
 
       c.underlyingActor.handled shouldBe 1
       // feature removed: assert(c.underlyingActor.handlers.isEmpty)
@@ -164,7 +169,7 @@ class SonicControllerSpec(_system: ActorSystem) extends TestKit(_system)
       val auth = SonicdAuth(signer.sign(claims))
       val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
 
-      c ! NewQuery(syntheticQuery, Some(allowedIps.head))
+      c ! NewCommand(syntheticQuery, Some(allowedIps.head))
       val cmd = expectMsgType[ValidateToken]
       assert(cmd.token == auth.token)
 

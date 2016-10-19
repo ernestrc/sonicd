@@ -40,9 +40,7 @@ class AuthenticationActorSpec(_system: ActorSystem) extends TestKit(_system)
       val actor = newActor()
 
       actor ! Authenticate("pepito", "1", Some("1"))
-      val tokenMaybe = expectMsgType[Try[String]]
-
-      val token = tokenMaybe.get
+      val token = expectMsgType[String]
 
       val verified = actor.underlyingActor.verifier.verify(token)
       val user = AuthenticationActor.fromJWTClaims(verified)

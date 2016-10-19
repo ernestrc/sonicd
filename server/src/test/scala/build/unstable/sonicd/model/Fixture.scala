@@ -26,7 +26,7 @@ object Fixture {
 
   val testCtx = RequestContext("1", Some(testUser))
 
-  val syntheticPubProps = Props(classOf[SyntheticPublisher], 1L, None, Some(1), 10, "1", false, None, testCtx)
+  val syntheticPubProps = Props(classOf[SyntheticPublisher], None, Some(1), 10, "1", false, None, testCtx)
     .withDispatcher(CallingThreadDispatcher.Id)
 
   val zombiePubProps = Props[Zombie].withDispatcher(CallingThreadDispatcher.Id)

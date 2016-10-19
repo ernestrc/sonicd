@@ -18,7 +18,6 @@ class SyntheticSource(query: Query, actorContext: ActorContext, context: Request
     //user pre-defined schema
     val schema = getOption[JsObject]("schema")
 
-    Props(classOf[SyntheticPublisher], seed, size,
-      progress, query.query, indexed, schema, context)
+    Props(classOf[SyntheticPublisher], seed, size, progress, query.query, indexed, schema, context)
   }
 }
