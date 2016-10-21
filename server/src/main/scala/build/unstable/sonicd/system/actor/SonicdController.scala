@@ -7,6 +7,7 @@ import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
 import build.unstable.sonic.JsonProtocol._
+import build.unstable.sonic.cluster.RequestEndpoint
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
@@ -96,6 +97,7 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
   /* BEHAVIOUR */
 
   override def receive: Receive = {
+    case RequestEndpoint(address) ⇒
 
     case TokenValidationResult(f@Failure(e), query, handler, _) ⇒
       log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Failure(e), "token validation failed")

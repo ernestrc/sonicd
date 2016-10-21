@@ -18,7 +18,7 @@ trait System {
  * the JVM termination hook to shutdown the ActorSystem on JVM exit.
  */
 trait AkkaSystem extends System {
-  implicit val system = ActorSystem("sonicd")
+  implicit val system = ActorSystem("sonic")
 
   val matSettings: ActorMaterializerSettings = ActorMaterializerSettings(system)
 

@@ -12,7 +12,7 @@ object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.11"
-  val sonicdV = "0.6.7"
+  val sonicdV = "0.6.8-SNAPSHOT"
 
   val commonSettings = Seq(
     organization := "build.unstable",
@@ -68,6 +68,7 @@ object Build extends sbt.Build {
           //core
           "build.unstable" %% "sonic-core" % sonicdV,
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "com.typesafe.akka" %% "akka-cluster" % akkaV,
           "com.auth0" % "java-jwt" % "2.1.0",
           "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
           "ch.qos.logback" % "logback-classic" % "1.1.7",
