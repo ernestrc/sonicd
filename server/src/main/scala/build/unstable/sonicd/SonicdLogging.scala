@@ -21,6 +21,7 @@ trait SonicdLogging extends TypedLogging {
 
   case class HttpReq(method: String, endpoint: String) extends CallType
 
+  case class MaterializeBroadcastHub(id: String) extends CallType
 
   case object DownloadHttpBody extends CallType
 
