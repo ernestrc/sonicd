@@ -11,13 +11,16 @@ import akka.stream.scaladsl.{BroadcastHub, Keep, Sink, Source}
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.source.Kafka.GetBroadcastHub
+import build.unstable.sonicd.source.SonicdSource.MissingConfigurationException
 import build.unstable.sonicd.source.json.JsonUtils
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
-import build.unstable.tylog.Variation
+import build.unstable.tylog
+import build.unstable.tylog.{TypedLogging, Variation}
 import com.typesafe.config._
 import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.serialization.Deserializer
+import org.apache.kafka.common.serialization._
+import org.slf4j.MDC
 import org.slf4j.event.Level
 import spray.json._
 
@@ -27,9 +30,18 @@ import scala.util.control.NonFatal
 import scala.util.{Failure, Try}
 
 class KafkaSource(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends SonicdSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) with TypedLogging {
 
   import Kafka._
+
+  // if a custom json format is specified, it must be fully specified concrete subclass of RootJsonFormat[S]
+  // where S is the value deserialized by Kafka's Deserializer[S] specified in config
+  // and must have a constructor that takes no a arguments
+  def getJsonFormat(config: String): Option[RootJsonFormat[_]] = {
+    getOption[Class[_]](config).map { clazz ⇒
+      clazz.getConstructors()(0).newInstance().asInstanceOf[RootJsonFormat[_]]
+    }
+  }
 
   val settingsMap = getConfig[Map[String, JsValue]]("settings")
   val keyDeserializerClass = getConfig[String]("key-deserializer")
@@ -43,17 +55,33 @@ class KafkaSource(query: Query, actorContext: ActorContext, context: RequestCont
   val keyDeserializer = Kafka.loadDeserializer(keyDeserializerClass)
   val valueDeserializer = Kafka.loadDeserializer(valueDeserializerClass)
 
+  val keyJsonFormat = getJsonFormat(Kafka.keyJsonFormatConfig).orElse(Kafka.loadJsonFormat(keyDeserializer))
+    .getOrElse(throw new Exception(s"could not infer json format from $keyDeserializerClass",
+      new MissingConfigurationException(Kafka.keyJsonFormatConfig)))
+  val valueJsonFormat = getJsonFormat(Kafka.valueJsonFormatConfig).orElse(Kafka.loadJsonFormat(valueDeserializer))
+    .getOrElse(throw new Exception(s"could not infer json format from $valueDeserializerClass",
+      new MissingConfigurationException(Kafka.valueJsonFormatConfig)))
+
   var consumerSettings = ConsumerSettings(settings, keyDeserializer, valueDeserializer)
-  // TODO test that if auto-commit is true, groupId is set
-  val groupId = settingsMap.get(ConsumerConfig.GROUP_ID_CONFIG).map(_.convertTo[String])
-  // fixme: either use botstra.server or bootstrap: servers {}
-  val bootstrapServers = settingsMap.getOrElse(
-    ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
-    throw new Exception(s"missing `${ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG}` in `settings`"))
+
+  MDC.put(tylog.traceIdKey, context.traceId)
+  log.info("using consummer settings {} with properties {}", consumerSettings, consumerSettings.properties)
+
+  // by default is set to false, unless user overrides in query config
+  val autoCommit = Option(consumerSettings.getProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
+    .exists(_ == "true")
+
+  val groupId = Option(consumerSettings.getProperty(ConsumerConfig.GROUP_ID_CONFIG))
+  assert(!autoCommit || groupId.nonEmpty,
+    """if auto commit is enabled, group.id must be set in the consumer settings: "group" : { "id" : "<ID>" }""")
+
+  val bootstrapServers = Option(consumerSettings.getProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG))
+    .getOrElse(throw new Exception(s"missing `${ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG}` in `settings`"))
 
   override def publisher: Props = {
-    val supervisor = getSupervisor(bootstrapServers.convertTo[String], groupId, actorContext, actorMaterializer)
-    Props(Kafka.getPublisherClass(consumerSettings), supervisor, query, consumerSettings, context, actorMaterializer)
+    val supervisor = getSupervisor(bootstrapServers, groupId, actorContext, actorMaterializer)
+    Props(Kafka.getPublisherClass(consumerSettings), supervisor, query, consumerSettings,
+      keyJsonFormat, valueJsonFormat, context, actorMaterializer)
   }
 }
 
@@ -84,7 +112,8 @@ class KafkaSupervisor(bootstrapServers: String, groupId: Option[String], maxPart
   // even if they have different settings
   // (except bootstrapServers, groupId)
   def getId(topic: String, partition: Option[Int], offset: Option[Long], settings: ConsumerSettings[_, _]): String =
-  topic + partition.map(_.toString).getOrElse("") + offset.map(_.toString).getOrElse("")
+  topic + partition.map(_.toString).getOrElse("") + offset.map(_.toString).getOrElse("") +
+    settings.properties.values.toVector.sorted
 
   override def receive: Receive = {
     case Terminated(ref) ⇒
@@ -134,7 +163,7 @@ class KafkaSupervisor(bootstrapServers: String, groupId: Option[String], maxPart
           // error: both need to be set
           case _ ⇒
             Failure(new Exception("unable to create manual subscription: both 'partition' and 'offset' need to be set"))
-        }).map { case source ⇒
+        }).map { source ⇒
 
           val broadcast = source.toMat(BroadcastHub.sink(bufferSize))(Keep.right).run()
 
@@ -159,7 +188,8 @@ class KafkaSupervisor(bootstrapServers: String, groupId: Option[String], maxPart
   }
 }
 
-class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: ConsumerSettings[K, V])
+class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: ConsumerSettings[K, V],
+                           kFormat: JsonFormat[K], vFormat: JsonFormat[V])
                           (implicit ctx: RequestContext, materializer: ActorMaterializer)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
@@ -222,14 +252,10 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
     (topic, partition, offset, { _ ⇒ true })
   }
 
-
+  // TODO implement incremental type metadata
   def parseRecord(c: ConsumerRecord[K, V]): Map[String, JsValue] = {
-    // FIXME we need to pass a sonic serializer in the class path
-    // capable of serializing the value into something more interesting
-    // maybe the best way is to follow a model like LocalFileSource in where
-    // there is a concrete class like KafkaJsonSource
-    if (c.key() != null && c.value() != null) Map("key" → JsString(c.key.toString), "value" → JsString(c.value.toString))
-    else if (c.value() != null) Map("value" → JsString(c.value().toString))
+    if (c.key() != null && c.value() != null) Map("key" → c.key.toJson(kFormat), "value" → c.value.toJson(vFormat))
+    else if (c.value() != null) Map("value" → c.value().toJson(vFormat))
     else Map.empty
   }
 
@@ -349,6 +375,16 @@ object Kafka extends SonicdLogging {
     classOf[KafkaPublisher[_, _]]
   }
 
+  def loadJsonFormat(s: Deserializer[_]): Option[JsonFormat[_]] = s match {
+    case d: DoubleDeserializer ⇒ Some(DoubleJsonFormat)
+    case d: IntegerDeserializer ⇒ Some(IntJsonFormat)
+    case d: LongDeserializer ⇒ Some(LongJsonFormat)
+    case d: StringDeserializer ⇒ Some(StringJsonFormat)
+    // all the byte deserializers have been excluded to force
+    // providing a higher level format
+    case _ ⇒ None
+  }
+
   def loadDeserializer(clazz: String): Deserializer[_] =
     Try(clazzLoader.loadClass(clazz))
       .getOrElse(clazzLoader.loadClass("org.apache.kafka.common.serialization." + clazz))
@@ -359,4 +395,6 @@ object Kafka extends SonicdLogging {
   case class GetBroadcastHub(topic: String, partition: Option[Int],
                              offset: Option[Long], settings: ConsumerSettings[_, _])(implicit val ctx: RequestContext)
 
+  val keyJsonFormatConfig = "key-json-format"
+  val valueJsonFormatConfig = "value-json-format"
 }
