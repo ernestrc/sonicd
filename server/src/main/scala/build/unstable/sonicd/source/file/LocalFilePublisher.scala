@@ -32,7 +32,7 @@ trait LocalFilePublisher {
 
   /* ABSTRACT */
 
-  def parseUTF8Data(raw: String): Map[String, JsValue]
+  def parseUTF8Data(raw: String): JsValue
 
   def rawQuery: String
 
@@ -108,25 +108,23 @@ trait LocalFilePublisher {
 
     tryPushDownstream()
 
+    // TODO implement incremental type metadata
+    //
     if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
-      val filteredMaybe = filter(data.get, query, channel.fileName)
-
-      if (meta.isEmpty && filteredMaybe.isDefined) {
-
-        meta = query.select.map { select ⇒
-          //FIXME select types potentially not known at this point
-          TypeMetadata(select.map(s ⇒ s → filteredMaybe.get.getOrElse(s, JsNull)))
-        }.orElse {
-          Some(TypeMetadata(filteredMaybe.get.toVector))
-        }
-
-        buffer.enqueue(OutputChunk(JsArray(select(meta, filteredMaybe.get))))
-        onNext(meta.get)
-      } else {
-        filteredMaybe match {
-          case Some(filtered) ⇒ onNext(OutputChunk(JsArray(select(meta, filtered))))
-          case None ⇒ //filtered out
-        }
+      filter(data.get, query, channel.fileName) match {
+        case Some(filtered) if meta.isEmpty && query.select.isDefined ⇒
+          val selected: Map[String, JsValue] = select(filtered)
+          val tmeta = TypeMetadata(selected)
+          meta = Some(tmeta)
+          buffer.enqueue(OutputChunk(JsArray(selected)))
+          onNext(tmeta)
+        case Some(filtered) if meta.isEmpty ⇒
+          val selected = select(filtered)
+          val tmeta = TypeMetadata(selected)
+          meta = Some(tmeta)
+          buffer.enqueue(OutputChunk(JsArray(select(meta, filtered))))
+          onNext(tmeta)
+        case None ⇒ //filtered out
       }
 
       stream(query, channel)
@@ -281,10 +279,7 @@ object LocalFilePublisher {
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ( {
-        char = readChar();
-        char.isDefined
-      } && char.get != '\n' && char.get != '\r') {
+      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 

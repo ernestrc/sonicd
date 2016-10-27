@@ -6,8 +6,7 @@ import spray.json._
 
 object JsonUtils {
 
-  case class JSONQuery(select: Option[Vector[String]],
-                       valueFilter: Map[String, JsValue] ⇒ Boolean)
+  case class JSONQuery(select: Option[Vector[String]], valueFilter: JsValue ⇒ Boolean)
 
   def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (data: Map[String, JsValue]) ⇒ {
     filter.forall {
@@ -57,10 +56,19 @@ object JsonUtils {
       v.convertTo[Vector[String]]
     }
 
-    val valueFilter = r.get("filter").map { fo ⇒
-      val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}").fields
-      matchObject(fObj)
-    }.getOrElse((o: Map[String, JsValue]) ⇒ true)
+    val valueFilter: JsValue ⇒ Boolean = r.get("filter").map {
+      case JsObject(objFilter) ⇒
+        val filter: PartialFunction[JsValue, Boolean] = {
+          case JsObject(fields) ⇒ matchObject(objFilter)(fields)
+          case _ ⇒ false
+        }
+        filter
+      case JsString(stringQuery) ⇒
+      case JsNumber(n) ⇒
+      case JsNull ⇒ true
+      case JsBoolean(bool) ⇒
+      case JsArray(v) ⇒
+    }.getOrElse((o: JsValue) ⇒ true)
 
     JSONQuery(select, valueFilter)
   }
@@ -74,12 +82,14 @@ object JsonUtils {
     }
   }
 
-  def filter(data: Map[String, JsValue], query: JSONQuery, target: String): Option[Map[String, JsValue]] = {
+  def filter(data: JsValue, query: JSONQuery, target: String): Option[JsValue] = {
     if (query.valueFilter(data) && target != "application.conf" && target != "reference.conf") {
       if (query.select.isEmpty) Some(data)
-      else {
-        val fields = data.filter(kv ⇒ query.select.get.contains(kv._1))
-        Some(fields)
+      else data match {
+        case JsObject(f) ⇒
+          Some(JsObject(f.filter(kv ⇒ query.select.get.contains(kv._1))))
+        // select was specified but data is not object, se we can't select on anything
+        case _ ⇒ None
       }
     } else None
   }

@@ -43,7 +43,6 @@ class LocalFileStreamPublisher(val queryId: Long,
                                val ctx: RequestContext)
   extends Actor with ActorPublisher[SonicMessage] with SonicdLogging with LocalFilePublisher {
 
-  override def parseUTF8Data(raw: String): Map[String, JsValue] =
-    Map("raw" → JsString(raw))
+  override def parseUTF8Data(raw: String): JsValue = JsString(raw)
 
 }
