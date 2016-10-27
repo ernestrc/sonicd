@@ -3,7 +3,7 @@ package build.unstable.sonicd.service.source
 import akka.actor.{ActorSystem, Props}
 import akka.stream.actor.ActorPublisher
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
-import build.unstable.sonic.{Query, RequestContext}
+import build.unstable.sonic.model.{Query, RequestContext}
 import build.unstable.sonicd.model.{ImplicitSubscriber, TestController}
 import build.unstable.sonicd.source.{ZOQLPublisher, ZuoraObjectQueryLanguageSource}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
