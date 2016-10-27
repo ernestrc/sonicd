@@ -238,7 +238,7 @@ class ZOQLPublisher(query: String, traceId: String, service: ActorRef,
 }
 
 object ZuoraObjectQueryLanguageSource {
-  val COLR = "(?i)(?<=select)(\\s*)(\\s*\\w\\s*,?)*(?=from\\s*(\\w*))".r
+  val COLR = "(?i)(?<=select)([\\s\\S]*)(?i)(?=from)".r
 
   def extractSelectColumnNames(sql: String): Vector[String] =
     COLR.findAllIn(sql)
