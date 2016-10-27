@@ -9,7 +9,9 @@ import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic._
 import build.unstable.sonicd.source.JdbcConnectionsHandler.JdbcHandle
 import build.unstable.sonicd.{SonicdConfig, SonicdLogging}
+import build.unstable.tylog
 import build.unstable.tylog.Variation
+import org.slf4j.MDC
 import org.slf4j.event.Level
 import spray.json._
 
@@ -334,9 +336,8 @@ class JdbcExecutor(query: String,
           log.debug("user has write access and auto-commit was true")
         } else if (!canWrite) {
           // should never happen
-          val e = new Exception("user ran update statements successfully without write access")
-          log.error(e, "this is very bad")
-          throw e
+          val e = new Exception("connection's autoCommit was true but user should not have write access")
+          log.error(e, "unable to enforce source permissions")
         }
         context.parent ! TypeMetadata(Vector.empty) //n at least will be 1
         if (n - 1 > 0) terminate(StreamCompleted.success)
@@ -371,6 +372,7 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
       }
 
     case cmd@JdbcConnectionsHandler.GetJdbcHandle(isQuery, driver, url, user, password, ctx) ⇒
+      MDC.put(tylog.traceIdKey, ctx.traceId)
       try {
         val conn: Connection = {
           //register driver
@@ -380,11 +382,12 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
           log.debug("created new connection {}", c)
           try {
             c.setAutoCommit(false)
+            if (c.getAutoCommit) {
+              throw new Exception(s"$driver ignored setAutoCommit method")
+            }
           } catch {
             case e: Exception ⇒
-              if (c.getAutoCommit) {
-                log.warning("{} doesn't support setting auto-commit to false: {}", driver, e.getMessage)
-              }
+              log.warning("{} doesn't support setting auto-commit to false: {}", driver, e)
           }
           c
         }
@@ -413,7 +416,6 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
           } else {
             stmt = conn.createStatement()
           }
-          log.debug("successfully set streaming properties")
         } catch {
           case e: Exception ⇒
             log.warning("could not set streaming properties for driver '{}'", driver)
