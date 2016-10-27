@@ -36,8 +36,7 @@ trait AkkaApi extends Api {
       completeWithMessage("rejected")
   }
 
-  val queryEndpoint = new QueryEndpoint(controllerService, authenticationService,
-    SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
+  val queryEndpoint = new QueryEndpoint(controllerService, SonicdConfig.ENDPOINT_TIMEOUT, SonicdConfig.ACTOR_TIMEOUT)
 
   val monitoringEndpoint = new MonitoringEndpoint(SonicdConfig.ENDPOINT_TIMEOUT, controllerService)
 
