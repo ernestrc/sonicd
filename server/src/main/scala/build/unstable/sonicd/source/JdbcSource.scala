@@ -76,15 +76,17 @@ class JdbcPublisher(query: String,
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
     log.info("stopping jdbc publisher of '{}'", ctx.traceId)
-    if (handle != null & !isDone) {
-      try {
-        handle.stmt.cancel()
-        log.debug("successfully canceled query '{}'", ctx.traceId)
-      } catch {
-        case e: Exception ⇒ log.warning("could not cancel query '{}': {}", ctx.traceId, e.getMessage)
+    if (handle != null) {
+      if (!isDone) {
+        try {
+          handle.stmt.cancel()
+          log.debug("successfully canceled query '{}'", ctx.traceId)
+        } catch {
+          case e: Exception ⇒ log.warning("could not cancel query '{}': {}", ctx.traceId, e.getMessage)
+        }
       }
+      connections ! handle
     }
-    connections ! handle
   }
 
   @throws[Exception](classOf[Exception])
