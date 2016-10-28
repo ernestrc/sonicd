@@ -10,11 +10,11 @@ import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.tylog.Variation
-import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import org.slf4j.MDC
 import org.slf4j.event.Level
 import spray.json._
 
+import scala.collection.mutable
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
@@ -26,10 +26,12 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
     log.info("starting Sonic Controller {}", self.path)
+    loadSourceConfiguration()
   }
 
   @throws[Exception](classOf[Exception])
   override def postRestart(reason: Throwable): Unit = {
+    loadSourceConfiguration()
     log.error(reason, "RESTARTED CONTROLLER")
   }
 
@@ -41,28 +43,53 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
 
   /* HELPERS */
-
-  def getSourceClass(query: Query): Try[Class[_]] = {
-    val clazzLoader = this.getClass.getClassLoader
-
-    Try(clazzLoader.loadClass(query.sonicdSourceClass))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.sonicdSourceClass)))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.sonicdSourceClass)))
+  def loadSourceConfiguration(): Unit = {
+    // TODO
+    ???
   }
 
-  def prepareMaterialization(handler: ActorRef, q: Query,
+  def getSourceClass(sonicdSourceClass: String): Try[Class[_]] = {
+    val clazzLoader = this.getClass.getClassLoader
+    Try(clazzLoader.loadClass("build.unstable.sonicd.source." + sonicdSourceClass))
+      .orElse(Try(clazzLoader.loadClass(sonicdSourceClass)))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + sonicdSourceClass)))
+  }
+
+  // query config can come in two flavours:
+  // - as a JSON object, in which case it will be passed to the underlying source untouched
+  // - as a string, in which case it needs to be resolved from classpath resources (sources.json)
+  def resolveQueryConfig(id: Long, q: Query): Query = q.config match {
+    case o: JsObject ⇒ q.copy(query_id = Some(id))
+    case JsString(alias) ⇒ try {
+      new Query(Some(id), q.traceId, q.auth, q.query, sources(alias))
+    } catch {
+      case e: Exception ⇒ throw new Exception(s"could not load query config '$alias'", e)
+    }
+    case _ ⇒
+      throw new Exception("'config' key in query config can only be either a full config " +
+        "object or an alias (string) that will be resolved from sonicd's configuration")
+  }
+
+  def prepareMaterialization(handler: ActorRef, query: Query,
                              user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {
       handled += 1L
       val queryId = handled
-      val query = q.copy(query_id = Some(queryId))
-      val source = getSourceClass(query)
-        .getOrElse(throw new Exception(s"could not find ${query.sonicdSourceClass} in the classpath")).getConstructors()(0)
-        .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
 
-      log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
+      val resolvedQuery = resolveQueryConfig(handled, query)
+      val resolvedConfig = resolvedQuery.config.asJsObject
 
-      val securityLevel = query.sonicdConfig.fields.get("security").map(_.convertTo[Int])
+      val sonicdSourceClass = resolvedConfig.fields.getOrElse("class",
+        throw new Exception(s"missing key 'class' in config")).convertTo[String]
+
+      val source = getSourceClass(sonicdSourceClass)
+        .getOrElse(throw new Exception(s"could not find $sonicdSourceClass in the classpath"))
+        .getConstructors()(0)
+        .newInstance(resolvedQuery, context, RequestContext(resolvedQuery.traceId.get, user)).asInstanceOf[DataSource]
+
+      log.debug("successfully instantiated source {} for query with id '{}'", sonicdSourceClass, queryId)
+
+      val securityLevel = resolvedConfig.fields.get("security").map(_.convertTo[Int])
 
       if (isAuthorized(user, securityLevel, clientAddress)) {
         handler ! source.publisher
@@ -89,9 +116,7 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
   //TODO deprecate queryId
   var handled: Long = 0L
-
-  case class TokenValidationResult(user: Try[ApiUser], query: Query,
-                                   handler: ActorRef, clientAddress: Option[InetAddress])
+  val sources = mutable.Map.empty[String, JsObject]
 
   /* BEHAVIOUR */
 
@@ -105,7 +130,6 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
       try {
         MDC.put("user", user.user)
         MDC.put("mode", user.mode.toString)
-        MDC.put("source", query.sonicdSourceClass)
         log.tylog(Level.INFO, query.traceId.get, AuthenticateUser, Variation.Success, "validated token successfully")
         prepareMaterialization(handler, query, Some(user), clientAddress)
       } catch {
@@ -160,30 +184,12 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
 object SonicdController {
 
-  implicit class SonicdQuery(query: Query) {
-
-    //CAUTION: leaking this value outside of sonicd-server is a major security risk
-    private[unstable] lazy val sonicdConfig: JsObject = query.config match {
-      case o: JsObject ⇒ o
-      case JsString(alias) ⇒ Try {
-        ConfigFactory.load().getObject(s"sonicd.source.$alias")
-          .render(ConfigRenderOptions.concise()).parseJson.asJsObject
-      }.recover {
-        case e: Exception ⇒ throw new Exception(s"could not load query config '$alias'", e)
-      }.get
-      case _ ⇒
-        throw new Exception("'config' key in query config can only be either a full config " +
-          "object or an alias (string) that will be extracted by sonicd server")
-    }
-
-    private[unstable] lazy val sonicdSourceClass: String = sonicdConfig.fields.getOrElse("class",
-      throw new Exception(s"missing key 'class' in config")).convertTo[String]
-
-  }
-
   class UnauthorizedException(user: Option[ApiUser], clientAddress: Option[InetAddress])
     extends Exception(user.map(u ⇒ s"user ${u.user} is unauthorized " +
       s"to access this source from ${clientAddress.getOrElse("unknown address")}")
       .getOrElse(s"unauthenticated user cannot access this source from ${clientAddress.getOrElse("unknown address")}. Please login first"))
+
+  case class TokenValidationResult(user: Try[ApiUser], query: Query,
+                                   handler: ActorRef, clientAddress: Option[InetAddress])
 
 }

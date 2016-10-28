@@ -356,10 +356,7 @@ object LocalFilePublisher {
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ( {
-        char = readChar();
-        char.isDefined
-      } && char.get != '\n' && char.get != '\r') {
+      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 

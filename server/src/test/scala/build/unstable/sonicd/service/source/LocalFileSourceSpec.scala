@@ -1,8 +1,6 @@
 package build.unstable.sonicd.service.source
 
-import java.io.File
-import java.nio.ByteBuffer
-import java.nio.channels.SeekableByteChannel
+import java.io.{File, FileOutputStream}
 import java.nio.charset.Charset
 import java.nio.file._
 
@@ -11,7 +9,6 @@ import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model.{OutputChunk, Query, QueryProgress, RequestContext}
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.LocalFileStreamPublisher
@@ -38,8 +35,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
     conf.createNewFile()
     conf2.createNewFile()
 
-    doWrite("hellYeah", confChannel)
-    doWrite("hellYeah", confChannel2)
+    doWrite("hellYeahsecretConfig\nsecretConfig\n", confChannel)
+    doWrite("hellYeahsecretConfig\nsecretConfig\n", confChannel2)
   }
 
   override protected def afterAll(): Unit = {
@@ -68,8 +65,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val conf = new File("/tmp/application.conf")
   val conf2 = new File("/tmp/reference.conf")
 
-  lazy val confChannel = Files.newByteChannel(conf.toPath, StandardOpenOption.WRITE, StandardOpenOption.SYNC, StandardOpenOption.DSYNC)
-  lazy val confChannel2 = Files.newByteChannel(conf2.toPath, StandardOpenOption.WRITE, StandardOpenOption.SYNC, StandardOpenOption.DSYNC)
+  lazy val confChannel = new FileOutputStream(conf)
+  lazy val confChannel2 = new FileOutputStream(conf2)
 
   def this() = this(ActorSystem("LocalFileSourceSpec"))
 
@@ -79,10 +76,8 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val fetchConfig = getConfig(tmp.toPath.toAbsolutePath.toString, tail = false)
   val tailConfig = getConfig(tmp.toPath.toAbsolutePath.toString, tail = true)
 
-  lazy val channel3 =
-    Files.newByteChannel(file3.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
-  lazy val channel4 =
-    Files.newByteChannel(file4.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
+  lazy val channel3 = new FileOutputStream(file3)
+  lazy val channel4 = new FileOutputStream(file4)
 
   val dirPath = tmp.toPath
   val filePath3 = file3.toPath
@@ -107,8 +102,13 @@ class LocalFileSourceSpec(_system: ActorSystem)
     ref
   }
 
-  def doWrite(buf: String, channel: SeekableByteChannel) = {
-    channel.write(ByteBuffer.wrap(buf.getBytes(Charset.defaultCharset())))
+  def doWrite(buf: String, fos: FileOutputStream) = {
+    val fd = fos.getFD
+    val c = fos.getChannel
+    c.force(true)
+    fos.write(buf.getBytes(Charset.defaultCharset()))
+    fos.flush()
+    fd.sync()
   }
 
   def doWrite4(buf: String) = doWrite(buf, channel4)
