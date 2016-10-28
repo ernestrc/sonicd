@@ -41,11 +41,11 @@ object JsonUtils {
   }
 
   /**
-    * {
-    * "select" : ["field1", "field2"],
-    * "filter" : { "field1" : "value1" }
-    * }
-    */
+   * {
+   * "select" : ["field1", "field2"],
+   * "filter" : { "field1" : "value1" }
+   * }
+   */
   def parseQuery(raw: String): JSONQuery = {
     val r = raw.parseJson.asJsObject(s"Query must be a valid JSON object: $raw").fields
     parseQuery(r)
@@ -73,12 +73,9 @@ object JsonUtils {
     JSONQuery(select, valueFilter)
   }
 
-  def select(meta: Option[TypeMetadata], fields: Map[String, JsValue]): Vector[JsValue] = {
-    meta match {
-      case Some(m) ⇒ m.typesHint.map {
-        case (s: String, v: JsValue) ⇒ fields.getOrElse(s, JsNull)
-      }
-      case None ⇒ fields.values.to[Vector]
+  def selectFromMeta(m: TypeMetadata, fields: Map[String, JsValue]): Vector[JsValue] = {
+    m.typesHint.map {
+      case (s: String, v: JsValue) ⇒ fields.getOrElse(s, JsNull)
     }
   }
 

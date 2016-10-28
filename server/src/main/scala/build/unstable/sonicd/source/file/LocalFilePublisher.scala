@@ -11,6 +11,7 @@ import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonicd.source.IncrementalMetadataSupport
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
 import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel
 import spray.json._
@@ -21,10 +22,10 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 /**
-  * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
-  * Subclasses need to implement `parseUTF8Data`
-  */
-trait LocalFilePublisher {
+ * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
+ * Subclasses need to implement `parseUTF8Data`
+ */
+trait LocalFilePublisher extends IncrementalMetadataSupport {
   this: Actor with ActorPublisher[SonicMessage] with SonicdLogging ⇒
 
   import build.unstable.sonicd.source.json.JsonUtils._
@@ -94,10 +95,10 @@ trait LocalFilePublisher {
   }
 
   /**
-    * streams until demand is 0 or there is no more data to be read
-    *
-    * @return whether there is no more data to read
-    */
+   * streams until demand is 0 or there is no more data to be read
+   *
+   * @return whether there is no more data to read
+   */
   @tailrec
   final def stream(query: JSONQuery,
                    channel: BufferedFileByteChannel): Boolean = {
@@ -108,29 +109,10 @@ trait LocalFilePublisher {
 
     tryPushDownstream()
 
-    // TODO implement incremental type metadata
-    //
     if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
-      filter(data.get, query, channel.fileName) match {
-        case Some(filtered) if meta.isEmpty && query.select.isDefined ⇒
-          val selected: Map[String, JsValue] = select(filtered)
-          val tmeta = TypeMetadata(selected)
-          meta = Some(tmeta)
-          buffer.enqueue(OutputChunk(JsArray(selected)))
-          onNext(tmeta)
-        case Some(filtered) if meta.isEmpty ⇒
-          val selected = select(filtered)
-          val tmeta = TypeMetadata(selected)
-          meta = Some(tmeta)
-          buffer.enqueue(OutputChunk(JsArray(select(meta, filtered))))
-          onNext(tmeta)
-        case None ⇒ //filtered out
-      }
-
+      filter(data.get, query, channel.fileName).foreach(d ⇒ onNext(query, d))
       stream(query, channel)
-
-      //problem parsing the data
-    } else if (totalDemand > 0 && read.nonEmpty) stream(query, channel)
+    } else if /* problem parsing the data */(totalDemand > 0 && read.nonEmpty) stream(query, channel)
     else {
       // if totalDemand is 0, then read must not be applied
       // or we will skip the line
@@ -144,7 +126,6 @@ trait LocalFilePublisher {
   val (folders, watchers) = watchersPair.unzip
   val files = mutable.Map.empty[String, (File, BufferedFileByteChannel)]
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
-  var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
 
@@ -274,12 +255,14 @@ object LocalFilePublisher {
     }
 
     /**
-      * Returns None if reached EOF
-      */
+     * Returns None if reached EOF
+     */
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
+      while ( {
+        char = readChar(); char.isDefined
+      } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 
