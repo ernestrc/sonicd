@@ -1,39 +1,90 @@
 package build.unstable.sonicd.source
 
-import akka.stream.actor.ActorPublisher
-import build.unstable.sonic.model.{SonicMessage, TypeMetadata}
+import build.unstable.sonic.model.{OutputChunk, SonicMessage, TypeMetadata}
 import build.unstable.sonicd.source.json.JsonUtils.JSONQuery
-import spray.json.{JsObject, JsValue}
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 trait IncrementalMetadataSupport {
-  this: ActorPublisher[SonicMessage] ⇒
+
+  import build.unstable.sonic.JsonProtocol._
+  import spray.json._
 
   val buffer: mutable.Queue[SonicMessage]
-  val meta: TypeMetadata = null
+  private var meta: TypeMetadata = TypeMetadata(Vector.empty)
 
-  def onNext(query: JSONQuery, data: JsValue): Unit = {
+  def select(data: Map[String, JsValue], selection: Vector[String]): Map[String, JsValue] =
+    selection.map(s ⇒ data.get(s) match {
+      case Some(v) ⇒ (s, v)
+      case None ⇒ (s, JsNull)
+    }).toMap
+
+  def getEmpty(value: JsValue): JsValue = value match {
+    case j: JsString ⇒ JsString.empty
+    case j: JsNumber ⇒ JsNumber.zero
+    case j: JsBoolean ⇒ JsBoolean(true)
+    case JsNull ⇒ JsNull
+    case j: JsArray ⇒ JsArray.empty
+    case j: JsObject ⇒ JsObject.empty
+  }
+
+  // combines two types metadata by appending new keys if not existent or updating type if they do exist
+  @tailrec
+  final def mergeMeta(prev: Vector[(String, JsValue)], current: Vector[(String, JsValue)]): Vector[(String, JsValue)] =
+  current.headOption match {
+    case Some((key, value)) ⇒
+      val idx = prev.indexWhere(_._1 == key)
+      if (idx >= 0) mergeMeta(prev.updated(idx, (key, value)), current.tail)
+      else mergeMeta(prev.:+((key, value)), current.tail)
+    case None ⇒ prev
+  }
+
+  // returns true if meta was updated
+  def updateMeta(m: TypeMetadata): Boolean = meta.typesHint != m.typesHint && {
+    val old = meta
+    meta = TypeMetadata(mergeMeta(meta.typesHint, m.typesHint))
+    meta != old
+  }
+
+  def extractMeta(data: Map[String, JsValue]): TypeMetadata =
+    TypeMetadata(data.foldLeft(Vector.empty[(String, JsValue)]) { (acc, kv) ⇒
+      acc.:+((kv._1, getEmpty(kv._2)))
+    })
+
+  def alignOutput(data: Map[String, JsValue], meta: TypeMetadata): OutputChunk =
+    OutputChunk(meta.typesHint.foldLeft(Vector.empty[JsValue]) { (acc, d) ⇒
+      acc.:+(data.getOrElse(d._1, JsNull))
+    })
+
+  def bufferNext(query: JSONQuery, data: JsValue): Unit = {
     (data, query.select) match {
-      case (JsObject(fields), Some(select)) ⇒
+
+      case (JsObject(fields), Some(selection)) ⇒
+        val selected = select(fields, selection)
+        val extracted = extractMeta(selected)
+        if (updateMeta(extracted)) buffer.enqueue(meta)
+        val aligned = alignOutput(selected, meta)
+        buffer.enqueue(aligned)
+
       case (JsObject(fields), None) ⇒
+        val extracted = extractMeta(fields)
+        if (updateMeta(extracted)) buffer.enqueue(meta)
+        val aligned = alignOutput(fields, meta)
+        buffer.enqueue(aligned)
+
+      case (jsValue, Some(selection)) ⇒
+        val fields = Map("raw" → jsValue)
+        val selected = select(fields, selection)
+        val extracted = extractMeta(selected)
+        if (updateMeta(extracted)) buffer.enqueue(meta)
+
+      case (jsValue, None) ⇒
+        val fields = Map("raw" → jsValue)
+        val extracted = extractMeta(fields)
+        if (updateMeta(extracted)) buffer.enqueue(meta)
+        val aligned = alignOutput(fields, meta)
+        buffer.enqueue(aligned)
     }
-    /* data match {
-      // generate meta from fields and select
-      case filtered if meta.isEmpty && query.select.isDefined ⇒
-        val selected: Map[String, JsValue] = query.select.get
-        val tmeta = TypeMetadata(selected)
-        meta = Some(tmeta)
-        buffer.enqueue(OutputChunk(JsArray(selected)))
-        onNext(tmeta)
-      // generate meta from fields
-      case filtered if meta.isEmpty ⇒
-        val selected = select(filtered)
-        val tmeta = TypeMetadata(selected)
-        meta = Some(tmeta)
-        buffer.enqueue(OutputChunk(JsArray(select(meta, filtered))))
-        onNext(tmeta)
-      case filtered ⇒ onNext(tmeta)
-    } */
   }
 }
