@@ -100,7 +100,7 @@ trait LocalFilePublisher extends IncrementalMetadataSupport {
    * @return whether there is no more data to read
    */
   @tailrec
-  final def stream(query: JSONQuery,
+  final def stream(query: ParsedQuery,
                    channel: BufferedFileByteChannel): Boolean = {
 
     lazy val read = channel.readLine()
@@ -110,7 +110,7 @@ trait LocalFilePublisher extends IncrementalMetadataSupport {
     tryPushDownstream()
 
     if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
-      filter(data.get, query, channel.fileName).foreach(d ⇒ onNext(query, d))
+      bufferNext(query, data.get)
       stream(query, channel)
     } else if /* problem parsing the data */(totalDemand > 0 && read.nonEmpty) stream(query, channel)
     else {
@@ -150,7 +150,7 @@ trait LocalFilePublisher extends IncrementalMetadataSupport {
       context.stop(self)
   }
 
-  final def streaming(query: JSONQuery, totalInitialFiles: Int): Receive = common orElse {
+  final def streaming(query: ParsedQuery, totalInitialFiles: Int): Receive = common orElse {
 
     case req: Request ⇒
       var totalDataLeft = false

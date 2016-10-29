@@ -1,7 +1,7 @@
 package build.unstable.sonicd.source
 
 import build.unstable.sonic.model.{OutputChunk, SonicMessage, TypeMetadata}
-import build.unstable.sonicd.source.json.JsonUtils.JSONQuery
+import build.unstable.sonicd.source.json.JsonUtils.ParsedQuery
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -57,34 +57,35 @@ trait IncrementalMetadataSupport {
       acc.:+(data.getOrElse(d._1, JsNull))
     })
 
-  def bufferNext(query: JSONQuery, data: JsValue): Unit = {
-    (data, query.select) match {
+  def bufferNext(query: ParsedQuery, data: JsValue): Unit = {
+    (query.valueFilter(data), query.select) match {
 
-      case (JsObject(fields), Some(selection)) ⇒
+      case (Some(JsObject(fields)), Some(selection)) ⇒
         val selected = select(fields, selection)
         val extracted = extractMeta(selected)
         if (updateMeta(extracted)) buffer.enqueue(meta)
         val aligned = alignOutput(selected, meta)
         buffer.enqueue(aligned)
 
-      case (JsObject(fields), None) ⇒
+      case (Some(JsObject(fields)), None) ⇒
         val extracted = extractMeta(fields)
         if (updateMeta(extracted)) buffer.enqueue(meta)
         val aligned = alignOutput(fields, meta)
         buffer.enqueue(aligned)
 
-      case (jsValue, Some(selection)) ⇒
+      case (Some(jsValue), Some(selection)) ⇒
         val fields = Map("raw" → jsValue)
         val selected = select(fields, selection)
         val extracted = extractMeta(selected)
         if (updateMeta(extracted)) buffer.enqueue(meta)
 
-      case (jsValue, None) ⇒
+      case (Some(jsValue), None) ⇒
         val fields = Map("raw" → jsValue)
         val extracted = extractMeta(fields)
         if (updateMeta(extracted)) buffer.enqueue(meta)
         val aligned = alignOutput(fields, meta)
         buffer.enqueue(aligned)
+      case (None, _) ⇒ //filtered out
     }
   }
 }

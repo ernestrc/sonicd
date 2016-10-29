@@ -11,7 +11,6 @@ import akka.stream.actor.ActorPublisherMessage.Cancel
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model.{OutputChunk, Query, QueryProgress, RequestContext}
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.LocalFileStreamPublisher
@@ -80,9 +79,11 @@ class LocalFileSourceSpec(_system: ActorSystem)
   val tailConfig = getConfig(tmp.toPath.toAbsolutePath.toString, tail = true)
 
   lazy val channel3 =
-    Files.newByteChannel(file3.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
+    Files.newByteChannel(file3.toPath.toAbsolutePath, StandardOpenOption.SYNC,
+      StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
   lazy val channel4 =
-    Files.newByteChannel(file4.toPath.toAbsolutePath, StandardOpenOption.SYNC, StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
+    Files.newByteChannel(file4.toPath.toAbsolutePath, StandardOpenOption.SYNC,
+      StandardOpenOption.WRITE, StandardOpenOption.APPEND, StandardOpenOption.DSYNC)
 
   val dirPath = tmp.toPath
   val filePath3 = file3.toPath

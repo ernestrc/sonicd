@@ -10,7 +10,7 @@ import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.json.JsonUtils
-import build.unstable.sonicd.source.json.JsonUtils.JSONQuery
+import build.unstable.sonicd.source.json.JsonUtils.ParsedQuery
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import spray.json._
 
@@ -60,7 +60,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
 
   // TODO should return select as well so that we can filter on that
   // like LocalJsonSource
-  def parseQuery(query: Query): (String, Option[Int], Option[Long], JSONQuery) = {
+  def parseQuery(query: Query): (String, Option[Int], Option[Long], ParsedQuery) = {
     val raw = query.query
     val obj = raw.parseJson.asJsObject(s"query must be a valid JSON object: $raw").fields
     val parsed = JsonUtils.parseQuery(obj)
@@ -82,7 +82,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
   }
 
   // TODO implement incremental type metadata
-  def parseRecord(c: ConsumerRecord[K, V]): Option[SonicMessage] = Try {
+  def parseRecord(c: ConsumerRecord[K, V]): Option[SonicMessage] = ??? /*Try {
     if (c.key() != null) Map("key" → c.key.toJson(kFormat), "value" → c.value.toJson(vFormat))
     else Map("value" → c.value().toJson(vFormat))
   }.recover {
@@ -90,7 +90,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
       errors += 1
       Map.empty
     case NonFatal(e) ⇒ throw e
-  }.get
+  }.get*/
 
   /* STATE */
 
@@ -138,6 +138,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
         log.trace("Received record {}", c)
         val record = c.asInstanceOf[ConsumerRecord[K, V]]
 
+        /* TODO
         if (filter(record)) {
           val message = parseRecord(record)
           if (totalDemand > 0) {
@@ -151,7 +152,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
           upstream ! Ack
         } else {
           pendingAck = true
-        }
+        }*/
     }
 
   def waiting: Receive = commonReceive orElse {

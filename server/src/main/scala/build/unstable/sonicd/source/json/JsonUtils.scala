@@ -1,12 +1,11 @@
 package build.unstable.sonicd.source.json
 
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic.model.TypeMetadata
 import spray.json._
 
 object JsonUtils {
 
-  case class JSONQuery(select: Option[Vector[String]], valueFilter: JsValue ⇒ Boolean)
+  case class ParsedQuery(select: Option[Vector[String]], valueFilter: JsValue ⇒ Option[JsValue])
 
   def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (data: Map[String, JsValue]) ⇒ {
     filter.forall {
@@ -41,53 +40,35 @@ object JsonUtils {
   }
 
   /**
-   * {
-   * "select" : ["field1", "field2"],
-   * "filter" : { "field1" : "value1" }
-   * }
-   */
-  def parseQuery(raw: String): JSONQuery = {
+    * {
+    * "select" : ["field1", "field2"],
+    * "filter" : { "field1" : "value1" }
+    * }
+    */
+  def parseQuery(raw: String): ParsedQuery = {
     val r = raw.parseJson.asJsObject(s"Query must be a valid JSON object: $raw").fields
     parseQuery(r)
   }
 
-  def parseQuery(r: Map[String, JsValue]): JSONQuery = {
+  def parseQuery(r: Map[String, JsValue]): ParsedQuery = {
     val select = r.get("select").map { v ⇒
       v.convertTo[Vector[String]]
     }
 
-    val valueFilter: JsValue ⇒ Boolean = r.get("filter").map {
+    val valueFilter: JsValue ⇒ Option[JsValue] = r.get("filter").map {
       case JsObject(objFilter) ⇒
-        val filter: PartialFunction[JsValue, Boolean] = {
-          case JsObject(fields) ⇒ matchObject(objFilter)(fields)
-          case _ ⇒ false
+        val filter: PartialFunction[JsValue, Option[JsValue]] = {
+          case j@JsObject(fields) ⇒ if (matchObject(objFilter)(fields)) Some(j) else None
+          case _ ⇒ None
         }
         filter
-      case JsString(stringQuery) ⇒
-      case JsNumber(n) ⇒
-      case JsNull ⇒ true
-      case JsBoolean(bool) ⇒
-      case JsArray(v) ⇒
-    }.getOrElse((o: JsValue) ⇒ true)
+      case j: JsString ⇒ (a: JsValue) ⇒ { if(a == j) Some(j) else None }
+      case j: JsNumber ⇒ (a: JsValue) ⇒ { if(a == j) Some(j) else None }
+      case JsNull ⇒ (a: JsValue) ⇒ { if (a == JsNull) Some(JsNull) else None }
+      case j: JsBoolean ⇒ (a: JsValue) ⇒ { if (a == j) Some(j) else None }
+      case j: JsArray ⇒ (a: JsValue) ⇒ { if (a == j) Some(j) else None }
+    }.getOrElse((o: JsValue) ⇒ Some(o))
 
-    JSONQuery(select, valueFilter)
-  }
-
-  def selectFromMeta(m: TypeMetadata, fields: Map[String, JsValue]): Vector[JsValue] = {
-    m.typesHint.map {
-      case (s: String, v: JsValue) ⇒ fields.getOrElse(s, JsNull)
-    }
-  }
-
-  def filter(data: JsValue, query: JSONQuery, target: String): Option[JsValue] = {
-    if (query.valueFilter(data) && target != "application.conf" && target != "reference.conf") {
-      if (query.select.isEmpty) Some(data)
-      else data match {
-        case JsObject(f) ⇒
-          Some(JsObject(f.filter(kv ⇒ query.select.get.contains(kv._1))))
-        // select was specified but data is not object, se we can't select on anything
-        case _ ⇒ None
-      }
-    } else None
+    ParsedQuery(select, valueFilter)
   }
 }
