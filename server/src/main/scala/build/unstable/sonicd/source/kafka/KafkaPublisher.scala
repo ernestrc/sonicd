@@ -9,20 +9,19 @@ import akka.stream.scaladsl.{Sink, Source}
 import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.source.json.JsonUtils
-import build.unstable.sonicd.source.json.JsonUtils.ParsedQuery
+import build.unstable.sonicd.source.SonicdPublisher
+import build.unstable.sonicd.source.SonicdPublisher.ParsedQuery
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import spray.json._
 
 import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.Try
-import scala.util.control.NonFatal
 
 class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: ConsumerSettings[K, V],
                            kFormat: JsonFormat[K], vFormat: JsonFormat[V], ignoreParsingErrors: Option[Int])
                           (implicit ctx: RequestContext, materializer: ActorMaterializer)
-  extends ActorPublisher[SonicMessage] with SonicdLogging {
+  extends ActorPublisher[SonicMessage] with SonicdLogging with SonicdPublisher {
 
   // messages used with actorRefWithAck method to signal backpressure/completion with
   // underlying kafka consumer
@@ -63,7 +62,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
   def parseQuery(query: Query): (String, Option[Int], Option[Long], ParsedQuery) = {
     val raw = query.query
     val obj = raw.parseJson.asJsObject(s"query must be a valid JSON object: $raw").fields
-    val parsed = JsonUtils.parseQuery(obj)
+    val parsed = parseQuery(obj)
 
     val topic: String = {
       val value = Try(obj("topic")).getOrElse(throw new Exception("missing 'topic' in query"))

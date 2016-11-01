@@ -11,7 +11,8 @@ import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
-import build.unstable.sonicd.source.IncrementalMetadataSupport
+import build.unstable.sonicd.source.SonicdPublisher
+import build.unstable.sonicd.source.SonicdPublisher.ParsedQuery
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
 import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel
 import spray.json._
@@ -25,11 +26,8 @@ import scala.util.Try
  * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
  * Subclasses need to implement `parseUTF8Data`
  */
-trait LocalFilePublisher extends IncrementalMetadataSupport {
+trait LocalFilePublisher extends SonicdPublisher {
   this: Actor with ActorPublisher[SonicMessage] with SonicdLogging ⇒
-
-  import build.unstable.sonicd.source.json.JsonUtils._
-
 
   /* ABSTRACT */
 
@@ -260,9 +258,7 @@ object LocalFilePublisher {
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ( {
-        char = readChar(); char.isDefined
-      } && char.get != '\n' && char.get != '\r') {
+      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 

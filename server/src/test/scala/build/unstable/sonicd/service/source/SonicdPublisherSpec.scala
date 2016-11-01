@@ -1,23 +1,23 @@
 package build.unstable.sonicd.service.source
 
 import build.unstable.sonic.model.{OutputChunk, SonicMessage, TypeMetadata}
-import build.unstable.sonicd.source.IncrementalMetadataSupport
-import build.unstable.sonicd.source.json.JsonUtils.ParsedQuery
+import build.unstable.sonicd.source.SonicdPublisher
+import build.unstable.sonicd.source.SonicdPublisher.ParsedQuery
 import org.scalatest.{Matchers, WordSpec}
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsObject, JsString, JsValue}
 
 import scala.collection.mutable
 
-class IncrementalMetadataSupportSpec extends WordSpec with Matchers {
+class SonicdPublisherSpec extends WordSpec with Matchers {
 
-  def newCase() = new IncrementalMetadataSupport {
+  def newCase() = new SonicdPublisher {
     override val buffer: mutable.Queue[SonicMessage] = mutable.Queue.empty[SonicMessage]
   }
 
   val noFilter = (j: JsValue) ⇒ Some(j)
   val noSelect = None
 
-  "IncrementalMetadataSupport with no filters" should {
+  "SonicdPublisher with no filters" should {
     "ignore data when not a JsObject and select is defined" in {
       val test = newCase()
       val query = ParsedQuery(Some(Vector("a", "b")), noFilter)
@@ -149,7 +149,7 @@ class IncrementalMetadataSupportSpec extends WordSpec with Matchers {
     }
   }
 
-  "IncrementalMetadataSupport with filters" should {
+  "SonicdPublisher with filters" should {
     "ignore data when not a JsObject and select is defined" in {
       val test = newCase()
       val filter: PartialFunction[JsValue, Option[JsValue]] = {
