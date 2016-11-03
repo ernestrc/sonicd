@@ -1,5 +1,7 @@
 package build.unstable.sonicd.source
 
+import java.util.concurrent.TimeUnit
+
 import akka.actor._
 import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model._
@@ -27,6 +29,8 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
 
   val masterUrl: String = getConfig[String]("url")
   val masterPort: Int = getOption[Int]("port").getOrElse(8889)
+  val queryTimeout: Option[FiniteDuration] = getOption[Long]("timeout")
+    .map(t ⇒ FiniteDuration.apply(t, TimeUnit.SECONDS))
 
   val supervisorName = Presto.getSupervisorName(masterUrl)
 
@@ -45,7 +49,7 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
       SonicdConfig.PRESTO_WATERMARK, SonicdConfig.PRESTO_MAX_RETRIES,
       SonicdConfig.PRESTO_RETRYIN, SonicdConfig.PRESTO_RETRY_MULTIPLIER,
-      SonicdConfig.PRESTO_RETRY_ERRORS, context)
+      SonicdConfig.PRESTO_RETRY_ERRORS, queryTimeout, context)
   }
 }
 
@@ -74,7 +78,8 @@ class PrestoPublisher(traceId: String, query: String,
                       maxRetries: Int,
                       retryIn: FiniteDuration,
                       retryMultiplier: Int,
-                      retryErrors: Either[List[Long], Unit])
+                      retryErrors: Either[List[Long], Unit],
+                      queryTimeout: Option[FiniteDuration])
                      (implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
@@ -90,12 +95,14 @@ class PrestoPublisher(traceId: String, query: String,
     log.debug("stopping presto publisher of '{}'", traceId)
     retryScheduled.map(c ⇒ if (!c.isCancelled) c.cancel())
     context unwatch supervisor
+    timeoutCancellable.foreach(c ⇒ c.cancel())
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
     log.debug("starting presto publisher of '{}'", traceId)
     context watch supervisor
+    queryTimeout.foreach(t ⇒ timeoutCancellable = Some(context.system.scheduler.scheduleOnce(t, self, Timeout)))
   }
 
 
@@ -133,6 +140,16 @@ class PrestoPublisher(traceId: String, query: String,
     })
   }
 
+  def retry() {
+    retried += 1
+    callType = RetryStatement(retried)
+    retryScheduled = Some(context.system.scheduler
+      .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn,
+        new Runnable {
+          override def run(): Unit = runStatement(callType, queryCommand, context.self)
+        }))
+  }
+
   val submitUri = s"/${SonicdConfig.PRESTO_APIV}/statement"
   val headers: scala.collection.immutable.Seq[HttpHeader] =
     Seq(ctx.user.map(u ⇒ Headers.USER(u.user)).getOrElse(Headers.USER("sonicd")))
@@ -152,6 +169,7 @@ class PrestoPublisher(traceId: String, query: String,
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var lastQueryResults: Option[QueryResults] = None
   var retryScheduled: Option[Cancellable] = None
+  var timeoutCancellable: Option[Cancellable] = None
   var retried = 0
   var callType: CallType = ExecuteStatement
   var completedSplits = 0
@@ -219,16 +237,8 @@ class PrestoPublisher(traceId: String, query: String,
 
           //retry
           if ((retryErrors.isLeft && retryErrors.left.get.contains(error.errorCode) ||
-            retryErrors.isRight && (error.isInternal || error.isExternal)) && retried < maxRetries) {
-            retried += 1
-            callType = RetryStatement(retried)
-            retryScheduled = Some(context.system.scheduler
-              .scheduleOnce(if (retryMultiplier > 0) retryIn * retryMultiplier * retried else retryIn,
-                new Runnable {
-                  override def run(): Unit = runStatement(callType, queryCommand, context.self)
-                }))
-
-          } else {
+            retryErrors.isRight && (error.isInternal || error.isExternal)) && retried < maxRetries) retry()
+          else {
             log.debug("error_code: {}; error_type: {}; skipping retry", error.errorCode, error.errorType)
             context.become(terminating(StreamCompleted.error(e)))
           }
@@ -256,6 +266,11 @@ class PrestoPublisher(traceId: String, query: String,
   }
 
   def commonReceive: Receive = {
+    case Timeout if retried < maxRetries ⇒ retry()
+    case Timeout ⇒
+      val e = new Exception(s"query timed out after $queryTimeout after exhausting $maxRetries retries")
+      log.tylog(Level.INFO, traceId, callType, Variation.Failure(e), "query status is FAILED: {}", e)
+      context.become(terminating(StreamCompleted.error(e)))
     case Cancel ⇒
       log.debug("client canceled")
       onComplete()
@@ -304,6 +319,8 @@ object Presto {
     val PAGENEXT = mkHeader("X-Presto-Page-End-Sequence-Id", _: String)
     val BUFCOMPLETE = mkHeader("X-Presto-Buffer-Complete", _: String)
   }
+
+  case object Timeout
 
   case class StatementStats(state: String,
                             scheduled: Boolean,
