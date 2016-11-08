@@ -69,6 +69,7 @@ class PrestoSourceSpec(_system: ActorSystem)
   val defaultRow: Vector[JsValue] = Vector(JsNumber(1), JsString("String"))
   val defaultData = Vector(defaultRow, defaultRow)
   val defaultStats = StatementStats.apply("FINISHED", true, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+  val defaultQueryFinished = QueryProgress(QueryProgress.Finished, defaultStats.totalSplits, Some(defaultStats.totalSplits), Some("splits"))
 
   def assertRequest(req: HttpRequest, query: String) = {
     req.method.value shouldBe "POST"
@@ -100,6 +101,8 @@ class PrestoSourceSpec(_system: ActorSystem)
     expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
     pub ! ActorPublisherMessage.Request(1)
     expectTypeMetadata()
+    pub ! ActorPublisherMessage.Request(1)
+    expectMsg(defaultQueryFinished)
     data.foreach { h ⇒
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(defaultRow))
@@ -166,12 +169,17 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       val columns = Vector(col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11)
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
+
       pub ! QueryResults("", "", None, None,
         Some(columns), None, defaultStats, None, None, None)
 
-      expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
       pub ! ActorPublisherMessage.Request(1)
       val meta = expectTypeMetadata()
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(defaultQueryFinished)
 
       val (cols, types) = meta.typesHint.unzip
 
@@ -276,8 +284,11 @@ class PrestoSourceSpec(_system: ActorSystem)
         assert(cmd.request._2.toString().endsWith("6"))
 
         pub ! QueryResults("", "", None, None,
-          Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 100), None, None, None)
+          Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000), None, None, None)
       }
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Finished, 0, Some(1000), Some("splits")))
 
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
@@ -375,6 +386,8 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
       expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
       expectMsgType[OutputChunk]
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Finished, 0, Some(1000), Some("splits")))
       expectMsgType[OutputChunk]
       expectMsgType[OutputChunk]
 

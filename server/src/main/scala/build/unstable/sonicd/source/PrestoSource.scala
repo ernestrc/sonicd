@@ -208,22 +208,23 @@ class PrestoPublisher(traceId: String, query: String,
       }
 
       val splits = r.stats.completedSplits - completedSplits
-      val totalSplits = Some(r.stats.totalSplits.toDouble)
+      val totalSplits = r.stats.totalSplits.toDouble
       completedSplits = r.stats.completedSplits
 
       r.stats.state match {
 
         case "QUEUED" | "PLANNING" ⇒
-          buffer.enqueue(QueryProgress(QueryProgress.Waiting, splits, totalSplits, units))
+          buffer.enqueue(QueryProgress(QueryProgress.Waiting, splits, Some(totalSplits), units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           tryPullUpstream()
 
         case "RUNNING" | "STARTING" | "FINISHING" ⇒
-          buffer.enqueue(QueryProgress(QueryProgress.Running, splits, totalSplits, units))
+          buffer.enqueue(QueryProgress(QueryProgress.Running, splits, Some(totalSplits), units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           tryPullUpstream()
 
         case "FINISHED" ⇒
+          buffer.enqueue(QueryProgress(QueryProgress.Finished, totalSplits - completedSplits, Some(totalSplits), units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           log.tylog(Level.INFO, traceId, callType, Variation.Success, r.stats.state)
           context.become(terminating(done = StreamCompleted.success))
