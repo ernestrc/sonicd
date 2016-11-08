@@ -52,10 +52,11 @@ class PrestoSourceSpec(_system: ActorSystem)
   def newPublisher(q: String, context: RequestContext = testCtx, watermark: Int = -1,
                    maxRetries: Int = 0, retryIn: FiniteDuration = 1.second, retryMultiplier: Int = 1,
                    retryErrors: Either[List[Long], Unit] = Left(List.empty),
+                   timeout: Option[FiniteDuration] = None,
                    dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[PrestoPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
     val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier, retryErrors,
-      self, query, controller.underlyingActor.context, context)
+      self, query, timeout, controller.underlyingActor.context, context)
     val ref = TestActorRef[PrestoPublisher](src.publisher.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
@@ -68,6 +69,7 @@ class PrestoSourceSpec(_system: ActorSystem)
   val defaultRow: Vector[JsValue] = Vector(JsNumber(1), JsString("String"))
   val defaultData = Vector(defaultRow, defaultRow)
   val defaultStats = StatementStats.apply("FINISHED", true, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+  val defaultQueryFinished = QueryProgress(QueryProgress.Finished, defaultStats.totalSplits, Some(defaultStats.totalSplits), Some("splits"))
 
   def assertRequest(req: HttpRequest, query: String) = {
     req.method.value shouldBe "POST"
@@ -99,6 +101,8 @@ class PrestoSourceSpec(_system: ActorSystem)
     expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
     pub ! ActorPublisherMessage.Request(1)
     expectTypeMetadata()
+    pub ! ActorPublisherMessage.Request(1)
+    expectMsg(defaultQueryFinished)
     data.foreach { h ⇒
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(defaultRow))
@@ -120,6 +124,24 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
+    }
+
+    "timeout a simple query" in {
+      val pub = newPublisher(query1, maxRetries = 0)
+      pub ! ActorPublisherMessage.Request(1)
+      val httpCmd = expectMsgType[HttpRequestCommand]
+
+      assertRequest(httpCmd.request, query1)
+
+      expectStreamStarted()
+
+      pub ! Presto.Timeout
+      pub ! ActorPublisherMessage.Request(1)
+
+      expectMsgType[QueryProgress]
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub, false)
     }
 
 
@@ -147,12 +169,17 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       val columns = Vector(col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11)
 
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
+
       pub ! QueryResults("", "", None, None,
         Some(columns), None, defaultStats, None, None, None)
 
-      expectMsg(QueryProgress(QueryProgress.Started, 0, None, None))
       pub ! ActorPublisherMessage.Request(1)
       val meta = expectTypeMetadata()
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(defaultQueryFinished)
 
       val (cols, types) = meta.typesHint.unzip
 
@@ -257,8 +284,11 @@ class PrestoSourceSpec(_system: ActorSystem)
         assert(cmd.request._2.toString().endsWith("6"))
 
         pub ! QueryResults("", "", None, None,
-          Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 100), None, None, None)
+          Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000), None, None, None)
       }
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Finished, 0, Some(1000), Some("splits")))
 
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
@@ -356,13 +386,15 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
       expectQueryProgress(200, QueryProgress.Running, Some(1000), Some("splits"))
       expectMsgType[OutputChunk]
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Finished, 0, Some(1000), Some("splits")))
       expectMsgType[OutputChunk]
       expectMsgType[OutputChunk]
 
       expectDone(pub)
     }
 
-    "should retry up to a maximum of n retries if error is in 'retry-errors' list" in {
+    "should retry up to a maximum of n retries if error is in 'retry-errors' list or query times out" in {
       val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond, retryMultiplier = -1,
         retryErrors = Left(List(1234, 3434)))
       pub ! ActorPublisherMessage.Request(100)
@@ -386,8 +418,7 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectMsgType[HttpRequestCommand]
 
-      pub ! QueryResults("", "", None, None, None, None,
-        defaultStats.copy(state = "FAILED"), Some(error.copy(errorCode = 3434)), None, None)
+      pub ! Presto.Timeout
 
       expectMsgType[HttpRequestCommand]
 
@@ -478,6 +509,7 @@ class PrestoSourceSpec(_system: ActorSystem)
 //override supervisor
 class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, retryMultiplier: Int,
                    retryErrors: Either[List[Long], Unit], implicitSender: ActorRef, query: Query,
+                   timeout: Option[FiniteDuration],
                    actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.PrestoSource(query, actorContext, context) {
 
@@ -485,9 +517,9 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, ret
 
   override lazy val publisher: Props = {
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
-    val supervisor = getSupervisor(supervisorName)
+    getSupervisor(supervisorName)
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark,
-      maxRetries, retryIn, retryMultiplier, retryErrors, context)
+      maxRetries, retryIn, retryMultiplier, retryErrors, timeout, context)
   }
 }
