@@ -9,7 +9,7 @@ import scala.collection.mutable
 
 object SonicdPublisher {
 
-  case class ParsedQuery(select: Option[Vector[String]], valueFilter: JsValue ⇒ Option[JsValue])
+  case class ParsedQuery(select: Option[Vector[String]], valueFilter: JsObject ⇒ Boolean)
 
 }
 
@@ -60,7 +60,7 @@ trait SonicdPublisher {
     * }
     */
   def parseQuery(raw: String): ParsedQuery = {
-    val r = raw.parseJson.asJsObject(s"Query must be a valid JSON object: $raw").fields
+    val r = raw.parseJson.asJsObject(s"query must be a valid JSON object: $raw").fields
     parseQuery(r)
   }
 
@@ -69,38 +69,19 @@ trait SonicdPublisher {
       v.convertTo[Vector[String]]
     }
 
-    val valueFilter: JsValue ⇒ Option[JsValue] = r.get("filter").map {
-      case JsObject(objFilter) ⇒
-        val filter: PartialFunction[JsValue, Option[JsValue]] = {
-          case j@JsObject(fields) ⇒ if (matchObject(objFilter)(fields)) Some(j) else None
-          case _ ⇒ None
-        }
-        filter
-      case j: JsString ⇒ (a: JsValue) ⇒ {
-        if (a == j) Some(j) else None
-      }
-      case j: JsNumber ⇒ (a: JsValue) ⇒ {
-        if (a == j) Some(j) else None
-      }
-      case JsNull ⇒ (a: JsValue) ⇒ {
-        if (a == JsNull) Some(JsNull) else None
-      }
-      case j: JsBoolean ⇒ (a: JsValue) ⇒ {
-        if (a == j) Some(j) else None
-      }
-      case j: JsArray ⇒ (a: JsValue) ⇒ {
-        if (a == j) Some(j) else None
-      }
-    }.getOrElse((o: JsValue) ⇒ Some(o))
+    val valueFilter: JsObject ⇒ Boolean = r.get("filter").map {
+      case JsObject(objFilter) ⇒ js: JsObject ⇒ matchObject(objFilter)(js.fields)
+      case anyElse ⇒ throw new Exception("filter must be an object")
+    }.getOrElse((o: JsObject) ⇒ true)
 
     ParsedQuery(select, valueFilter)
   }
 
   def select(data: Map[String, JsValue], selection: Vector[String]): Map[String, JsValue] =
-    selection.map(s ⇒ data.get(s) match {
-      case Some(v) ⇒ (s, v)
-      case None ⇒ (s, JsNull)
-    }).toMap
+    selection.foldLeft(Map.empty[String, JsValue])((acc, s) ⇒ data.get(s) match {
+      case Some(v) ⇒ acc.updated(s, v)
+      case None ⇒ acc
+    })
 
   def getEmpty(value: JsValue): JsValue = value match {
     case j: JsString ⇒ JsString.empty
@@ -139,35 +120,29 @@ trait SonicdPublisher {
       acc.:+(data.getOrElse(d._1, JsNull))
     })
 
-  def bufferNext(query: ParsedQuery, data: JsValue): Unit = {
-    (query.valueFilter(data), query.select) match {
-
-      case (Some(JsObject(fields)), Some(selection)) ⇒
-        val selected = select(fields, selection)
-        val extracted = extractMeta(selected)
-        if (updateMeta(extracted)) buffer.enqueue(meta)
-        val aligned = alignOutput(selected, meta)
-        buffer.enqueue(aligned)
-
-      case (Some(JsObject(fields)), None) ⇒
-        val extracted = extractMeta(fields)
-        if (updateMeta(extracted)) buffer.enqueue(meta)
-        val aligned = alignOutput(fields, meta)
-        buffer.enqueue(aligned)
-
-      case (Some(jsValue), Some(selection)) ⇒
-        val fields = Map("raw" → jsValue)
-        val selected = select(fields, selection)
-        val extracted = extractMeta(selected)
-        if (updateMeta(extracted)) buffer.enqueue(meta)
-
-      case (Some(jsValue), None) ⇒
-        val fields = Map("raw" → jsValue)
-        val extracted = extractMeta(fields)
-        if (updateMeta(extracted)) buffer.enqueue(meta)
-        val aligned = alignOutput(fields, meta)
-        buffer.enqueue(aligned)
-      case (None, _) ⇒ //filtered out
+  def bufferNext(query: ParsedQuery, data: JsValue, defaultKey: Option[String] = None): Boolean = {
+    val d = data match {
+      case j: JsObject ⇒ j
+      case anyElse ⇒ JsObject(Map(defaultKey.getOrElse("raw") → anyElse))
     }
+
+    query.valueFilter(d) && (query.select match {
+      case Some(selection) ⇒
+        val selected = select(d.fields, selection)
+        selected.nonEmpty && {
+          val extracted = extractMeta(selected)
+          if (updateMeta(extracted)) buffer.enqueue(meta)
+          val aligned = alignOutput(selected, meta)
+          buffer.enqueue(aligned)
+          true
+        }
+
+      case None ⇒
+        val extracted = extractMeta(d.fields)
+        if (updateMeta(extracted)) buffer.enqueue(meta)
+        val aligned = alignOutput(d.fields, meta)
+        buffer.enqueue(aligned)
+        true
+    })
   }
 }

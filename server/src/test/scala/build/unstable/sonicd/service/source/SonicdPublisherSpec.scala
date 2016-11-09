@@ -6,6 +6,7 @@ import build.unstable.sonicd.source.SonicdPublisher.ParsedQuery
 import org.scalatest.{Matchers, WordSpec}
 import spray.json.{JsArray, JsBoolean, JsNull, JsNumber, JsObject, JsString, JsValue}
 
+import scala.collection.immutable.Map
 import scala.collection.mutable
 
 class SonicdPublisherSpec extends WordSpec with Matchers {
@@ -14,7 +15,7 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
     override val buffer: mutable.Queue[SonicMessage] = mutable.Queue.empty[SonicMessage]
   }
 
-  val noFilter = (j: JsValue) ⇒ Some(j)
+  val noFilter = (j: JsObject) ⇒ true
   val noSelect = None
 
   "SonicdPublisher with no filters" should {
@@ -23,16 +24,12 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
       val query = ParsedQuery(Some(Vector("a", "b")), noFilter)
 
       test.bufferNext(query, JsString("1234"))
-      test.buffer.dequeue()
-        .asInstanceOf[TypeMetadata].typesHint should contain
-        .theSameElementsInOrderAs(Vector(("a", JsNull), ("b", JsNull)))
-
       test.bufferNext(query, JsNumber(1))
       test.bufferNext(query, JsNull)
       test.bufferNext(query, JsBoolean(true))
       test.bufferNext(query, JsArray(JsNumber(1)))
 
-      test.buffer.isEmpty shouldBe true
+      test.buffer.isEmpty shouldBe true //shouldBe mutable.Queue.empty[SonicMessage]
     }
 
     "if data is not a JsObject should encode it as 'raw' -> value" in {
@@ -118,9 +115,6 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
       val query = ParsedQuery(Some(Vector("a", "b")), noFilter)
 
       test.bufferNext(query, JsString("hello"))
-      test.buffer.dequeue()
-        .asInstanceOf[TypeMetadata].typesHint should contain
-        .theSameElementsInOrderAs(Vector(("a", JsNull), ("b", JsNull)))
 
       test.bufferNext(query, JsObject(Map("a" → JsString("1234"), "b" → JsNumber(1), "c" → JsBoolean(true))))
       test.buffer.dequeue()
@@ -152,9 +146,9 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
   "SonicdPublisher with filters" should {
     "ignore data when not a JsObject and select is defined" in {
       val test = newCase()
-      val filter: PartialFunction[JsValue, Option[JsValue]] = {
-        case j@JsObject(f) if f.exists(kv => kv._2 == JsString("1234")) ⇒ Some(j)
-        case _ ⇒ None
+      val filter: PartialFunction[JsValue, Boolean] = {
+        case j@JsObject(f) ⇒ f.exists(kv => kv._2 == JsString("1234"))
+        case _ ⇒ false
       }
 
       val query = ParsedQuery(Some(Vector("a", "b")), filter)
@@ -171,9 +165,8 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
 
     "if data is not a JsObject should encode it as 'raw' -> value" in {
       val test = newCase()
-      val filter: PartialFunction[JsValue, Option[JsValue]] = {
-        case j@JsString("1234") ⇒ Some(j)
-        case _ ⇒ None
+      val filter: PartialFunction[JsObject, Boolean] = {
+        case j@JsObject(fields) ⇒ fields == Map("raw" → JsString("1234"))
       }
       val query = ParsedQuery(noSelect, filter)
 
@@ -194,9 +187,8 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
 
     "incrementally emit new type metadata that conform to the previously seen values" in {
       val test = newCase()
-      val filter: PartialFunction[JsValue, Option[JsValue]] = {
-        case j@JsObject(f) if f.exists(kv => kv._1 == "a" && kv._2 == JsString("1234")) ⇒ Some(j)
-        case _ ⇒ None
+      val filter: PartialFunction[JsObject, Boolean] = {
+        case j@JsObject(f) ⇒ f.exists(kv => kv._1 == "a" && kv._2 == JsString("1234"))
       }
       val query = ParsedQuery(noSelect, filter)
 
@@ -250,9 +242,9 @@ class SonicdPublisherSpec extends WordSpec with Matchers {
 
     "incrementally emit new type metadata that conform to the select, if types change" in {
       val test = newCase()
-      val filter: PartialFunction[JsValue, Option[JsValue]] = {
-        case j@JsObject(f) if f.exists(kv => kv._1 == "a" && kv._2 == JsString("1234")) ⇒ Some(j)
-        case _ ⇒ None
+      val filter: PartialFunction[JsValue, Boolean] = {
+        case j@JsObject(f) ⇒ f.exists(kv => kv._1 == "a" && kv._2 == JsString("1234"))
+        case _ ⇒ false
       }
       val query = ParsedQuery(Some(Vector("a", "b")), filter)
 

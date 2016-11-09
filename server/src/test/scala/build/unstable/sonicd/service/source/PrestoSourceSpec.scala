@@ -516,9 +516,6 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, ret
   override def getSupervisor(name: String): ActorRef = implicitSender
 
   override lazy val publisher: Props = {
-    //if no ES supervisor has been initialized yet for this ES cluster, initialize one
-    getSupervisor(supervisorName)
-
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark,
       maxRetries, retryIn, retryMultiplier, retryErrors, timeout, context)
   }

@@ -30,6 +30,17 @@ class KafkaSource(query: Query, actorContext: ActorContext, context: RequestCont
     }
   }
 
+  def getSupervisor(bootstrapServers: String, groupId: Option[String],
+                    actorContext: ActorContext, materializer: ActorMaterializer): ActorRef = {
+    val name = KafkaSource.getSuperviorName(bootstrapServers, groupId)
+    actorContext.child(name).getOrElse {
+      actorContext.actorOf(Props(classOf[KafkaSupervisor],
+        bootstrapServers, groupId, SonicdConfig.KAFKA_MAX_PARTITIONS,
+        SonicdConfig.KAFKA_BROADCAST_BUFFER_SIZE, materializer
+      ), name)
+    }
+  }
+
   val ignoreParsingErrors = getOption[Int]("ignore-parsing-errors")
   val settingsMap = getConfig[Map[String, JsValue]]("settings")
   val keyDeserializerClass = getConfig[String]("key-deserializer")
@@ -53,21 +64,26 @@ class KafkaSource(query: Query, actorContext: ActorContext, context: RequestCont
   var consumerSettings = ConsumerSettings(settings, keyDeserializer, valueDeserializer)
 
   MDC.put(tylog.traceIdKey, context.traceId)
-  log.info("using consummer settings {} with properties {}", consumerSettings, consumerSettings.properties)
+  log.info("using consumer settings {} with properties {}", consumerSettings, consumerSettings.properties)
 
   // by default is set to false, unless user overrides in query config
-  val autoCommit = Option(consumerSettings.getProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
+  val autoCommit: Boolean = Option(consumerSettings.getProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
     .exists(_ == "true")
 
   val groupId = Option(consumerSettings.getProperty(ConsumerConfig.GROUP_ID_CONFIG))
-  assert(!autoCommit || groupId.nonEmpty,
+  if (autoCommit && groupId.isEmpty) throw new Exception(
     """if auto commit is enabled, group.id must be set in the consumer settings: "group" : { "id" : "<ID>" }""")
+
+  log.debug("{}:{} - {}:{}", ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,
+    autoCommit, ConsumerConfig.GROUP_ID_CONFIG, groupId)
 
   val bootstrapServers = Option(consumerSettings.getProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG))
     .getOrElse(throw new Exception(s"missing `${ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG}` in `settings`"))
 
+  log.debug("bootstrapServers set to {}", bootstrapServers)
+
   override def publisher: Props = {
-    val supervisor = KafkaSource.getSupervisor(bootstrapServers, groupId, actorContext, actorMaterializer)
+    val supervisor = getSupervisor(bootstrapServers, groupId, actorContext, actorMaterializer)
     Props(KafkaSource.getPublisherClass(consumerSettings), supervisor, query, consumerSettings,
       keyJsonFormat, valueJsonFormat, ignoreParsingErrors, context, actorMaterializer)
   }
@@ -82,17 +98,6 @@ object KafkaSource extends SonicdLogging {
 
   def getSuperviorName(bootstrapServers: String, groupId: Option[String]): String = {
     bootstrapServers.split(",").sorted.reduce(_ + _) + groupId.map("_group_" + _).getOrElse("")
-  }
-
-  def getSupervisor(bootstrapServers: String, groupId: Option[String],
-                    actorContext: ActorContext, materializer: ActorMaterializer): ActorRef = {
-    val name = getSuperviorName(bootstrapServers, groupId)
-    actorContext.child(name).getOrElse {
-      actorContext.actorOf(Props(classOf[KafkaSupervisor],
-        bootstrapServers, groupId, SonicdConfig.KAFKA_MAX_PARTITIONS,
-        SonicdConfig.KAFKA_BROADCAST_BUFFER_SIZE, materializer
-      ), name)
-    }
   }
 
   def getPublisherClass(settings: ConsumerSettings[_, _]): Class[_] = {
@@ -131,4 +136,5 @@ object KafkaSource extends SonicdLogging {
 
     override def write(obj: String): JsValue = obj.parseJson
   }
+
 }

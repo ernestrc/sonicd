@@ -68,28 +68,17 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
       val value = Try(obj("topic")).getOrElse(throw new Exception("missing 'topic' in query"))
 
       Try(value.convertTo[String])
-        .getOrElse(throw new Exception("'partition' in query must be an integer"))
+        .getOrElse(throw new Exception("'topic' field expected to be a string"))
     }
 
-    val partition: Option[Int] = obj.get("partition").map(p ⇒ Try(p.convertTo[Int])
-      .getOrElse(throw new Exception("'partition' in query must be an integer")))
+    val partition: Option[Int] = obj.get("partition").flatMap(p ⇒ Try(p.convertTo[Option[Int]])
+      .getOrElse(throw new Exception("'partition' in query expected to be an integer")))
 
-    val offset: Option[Long] = obj.get("offset").map(p ⇒ Try(p.convertTo[Long])
-      .getOrElse(throw new Exception("'offset' in query must be an integer")))
+    val offset: Option[Long] = obj.get("offset").flatMap(p ⇒ Try(p.convertTo[Option[Long]])
+      .getOrElse(throw new Exception("'offset' in query expected to be an integer")))
 
     (topic, partition, offset, parsed)
   }
-
-  // TODO implement incremental type metadata
-  def parseRecord(c: ConsumerRecord[K, V]): Option[SonicMessage] = ??? /*Try {
-    if (c.key() != null) Map("key" → c.key.toJson(kFormat), "value" → c.value.toJson(vFormat))
-    else Map("value" → c.value().toJson(vFormat))
-  }.recover {
-    case NonFatal(e) if ignoreParsingErrors.isDefined && errors < ignoreParsingErrors.get ⇒
-      errors += 1
-      Map.empty
-    case NonFatal(e) ⇒ throw e
-  }.get*/
 
   /* STATE */
 
@@ -98,7 +87,7 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
   var errors: Int = 0
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var callType: CallType = ExecuteStatement
-  val (topic, partition, offset, filter) = parseQuery(query)
+  val (topic, partition, offset, parsedQuery) = parseQuery(query)
 
   /* BEHAVIOUR */
 
@@ -124,40 +113,39 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
     }
   }
 
-  def materialized(upstream: ActorRef): Receive =
-    commonReceive orElse {
-      case Request(n) ⇒
+  def materialized(upstream: ActorRef): Receive = commonReceive orElse {
+    case Request(n) ⇒
+      tryPushDownstream()
+      if (totalDemand > 0 && pendingAck) {
+        upstream ! Ack
+        pendingAck = false
+      }
+
+    case c: ConsumerRecord[_, _] ⇒
+      log.trace("Received record {}", c)
+      val record = c.asInstanceOf[ConsumerRecord[K, V]]
+
+      val key: Option[String] = kFormat.write(record.key()) match {
+        case JsString(k) ⇒ Some(k)
+        case JsNumber(n) ⇒ Some(n.toString())
+        case JsBoolean(b) ⇒ Some(b.toString)
+        case e ⇒ None
+      }
+
+      if (bufferNext(parsedQuery, vFormat.write(record.value()), key)) {
         tryPushDownstream()
-        if (totalDemand > 0 && pendingAck) {
-          upstream ! Ack
-          pendingAck = false
-        }
+      }
 
-      case c: ConsumerRecord[_, _] ⇒
-        log.trace("Received record {}", c)
-        val record = c.asInstanceOf[ConsumerRecord[K, V]]
-
-        /* TODO
-        if (filter(record)) {
-          val message = parseRecord(record)
-          if (totalDemand > 0) {
-            onNext(message)
-          } else {
-            buffer.enqueue(message)
-          }
-        } else log.trace("filtered out record {}", record)
-
-        if (totalDemand > 0) {
-          upstream ! Ack
-        } else {
-          pendingAck = true
-        }*/
-    }
+      if (totalDemand > 0) {
+        upstream ! Ack
+      } else {
+        pendingAck = true
+      }
+  }
 
   def waiting: Receive = commonReceive orElse {
     case Request(n) ⇒ tryPushDownstream()
     case Started ⇒
-      buffer.enqueue(QueryProgress(QueryProgress.Started, 0, None, None))
       tryPushDownstream()
       log.debug("materialized kafka stream for {}", ctx.traceId)
 
