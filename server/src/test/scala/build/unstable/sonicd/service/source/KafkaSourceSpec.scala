@@ -64,6 +64,7 @@ class KafkaSourceSpec(_system: ActorSystem)
 
     keyJsonFormat.foreach(k ⇒ fields.update("key-json-format", JsString(k.getClass.getName)))
     valueJsonFormat.foreach(k ⇒ fields.update("value-json-format", JsString(k.getClass.getName)))
+    ignoreParsingErrors.foreach(k ⇒ fields.update("ignore-parsing-errors", JsNumber(k)))
 
     val config = JsObject(fields.toMap)
     val query = new Query(Some(1L), Some("traceId"), None, q, config)
@@ -136,6 +137,43 @@ class KafkaSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
       val meta2 = expectTypeMetadata()
       meta2.typesHint shouldBe Vector(("B", JsString.empty), ("G", JsString.empty))
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("g")))))
+
+      pub ! Cancel
+      expectTerminated(pub)
+    }
+
+    "run a simple query and stream [null,String] consumer records" in {
+      val topic = "topic1"
+      val query = buildQuery(topic)
+      val pub = newPublisher[String, String](query, defaultConsumerSettings)
+
+      pub ! ActorPublisherMessage.Request(2)
+      expectGetBroadcastHub(topic)
+      expectStreamStarted()
+      expectQueryProgress(0, QueryProgress.Waiting, None, None)
+
+      val proxy = newProxyPublisher[ConsumerRecord[String, String]]
+      val source = newProxySource[ConsumerRecord[String, String]](proxy)
+      pub ! source
+
+      proxy ! new ConsumerRecord(topic, 0, 0, null, "b")
+
+      pub ! ActorPublisherMessage.Request(1)
+      val meta = expectTypeMetadata()
+      meta.typesHint shouldBe Vector(("raw", JsString.empty))
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(Vector("b")))
+
+      // new schema
+      proxy ! new ConsumerRecord(topic, 0, 0, "G", "g")
+
+      pub ! ActorPublisherMessage.Request(1)
+      val meta2 = expectTypeMetadata()
+      meta2.typesHint shouldBe Vector(("raw", JsString.empty), ("G", JsString.empty))
 
       pub ! ActorPublisherMessage.Request(1)
       expectMsg(OutputChunk(JsArray(Vector(JsNull, JsString("g")))))
@@ -377,6 +415,11 @@ class KafkaSourceSpec(_system: ActorSystem)
         newPublisher[String, String]("""{"topic": "blabla"}""", Map.empty)
       }.getMessage.toLowerCase.contains("missing"))
 
+      // missing topic
+      assert(intercept[Exception] {
+        newPublisher[String, String]("""{"partition": 1}""", Map.empty)
+      }.getMessage.toLowerCase.contains("missing"))
+
       // custom deserializer or complex type deserializer requires a custom json format
       assert(intercept[Exception] {
         newPublisher[String, String](
@@ -428,6 +471,62 @@ class KafkaSourceSpec(_system: ActorSystem)
         newPublisher[String, String]("""{"topic": "blabla"}""", settings)
       }.getMessage.contains("group.id"))
 
+    }
+
+    "should complete stream gracefully if supervisor fails to instantiate underlying resources" in {
+      val topic = "topic1"
+      val query = buildQuery(topic)
+      val pub = newPublisher[String, Double](query, defaultConsumerSettings,
+        keyDeserializer = "StringDeserializer",
+        valueDeserializer = "IntegerDeserializer",
+        ignoreParsingErrors = Some(1))
+
+      pub ! ActorPublisherMessage.Request(2)
+      expectGetBroadcastHub(topic)
+      expectStreamStarted()
+      expectQueryProgress(0, QueryProgress.Waiting, None, None)
+
+      pub ! ActorPublisherMessage.Request(1)
+      pub ! Status.Failure(new Exception("BOOM"))
+      expectDone(pub, success = false)
+    }
+
+    "tolerates parsing errors up to `ignore-parsing-errors` config" in {
+      val topic = "topic1"
+      val query = buildQuery(topic)
+      val pub = newPublisher[String, Double](query, defaultConsumerSettings,
+        keyDeserializer = "StringDeserializer",
+        valueDeserializer = "IntegerDeserializer",
+        ignoreParsingErrors = Some(1))
+
+      pub ! ActorPublisherMessage.Request(2)
+      expectGetBroadcastHub(topic)
+      expectStreamStarted()
+      expectQueryProgress(0, QueryProgress.Waiting, None, None)
+
+      val proxy = newProxyPublisher[ConsumerRecord[String, String]]
+      val source = newProxySource[ConsumerRecord[String, String]](proxy)
+      pub ! source
+
+      pub ! ActorPublisherMessage.Request(2)
+
+      // errors = 1
+      proxy ! new ConsumerRecord(topic, 0, 0, "B", "b")
+
+      // 1 correct
+      proxy ! new ConsumerRecord(topic, 0, 0, "G", 10)
+
+      val meta2 = expectTypeMetadata()
+      meta2.typesHint shouldBe Vector(("G", JsNumber.zero))
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(OutputChunk(JsArray(Vector(JsNumber(10)))))
+
+      // errors >= maxErrors
+      proxy ! new ConsumerRecord(topic, 0, 0, "B", "b")
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub, success = false)
     }
   }
 }

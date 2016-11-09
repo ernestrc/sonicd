@@ -57,8 +57,6 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
     }
   }
 
-  // TODO should return select as well so that we can filter on that
-  // like LocalJsonSource
   def parseQuery(query: Query): (String, Option[Int], Option[Long], ParsedQuery) = {
     val raw = query.query
     val obj = raw.parseJson.asJsObject(s"query must be a valid JSON object: $raw").fields
@@ -84,7 +82,8 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
 
   var bufferedMeta: Boolean = false
   var pendingAck: Boolean = false
-  var errors: Int = 0
+  var maxParsingErrors: Int = ignoreParsingErrors.getOrElse(-1)
+  var parsingErrors: Int = 0
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var callType: CallType = ExecuteStatement
   val (topic, partition, offset, parsedQuery) = parseQuery(query)
@@ -123,23 +122,36 @@ class KafkaPublisher[K, V](supervisor: ActorRef, query: Query, settings: Consume
 
     case c: ConsumerRecord[_, _] ⇒
       log.trace("Received record {}", c)
-      val record = c.asInstanceOf[ConsumerRecord[K, V]]
+      try {
+        val record = c.asInstanceOf[ConsumerRecord[K, V]]
+        val key: Option[String] = Option(record.key()).map(kFormat.write) match {
+          case Some(JsString(k)) ⇒ Some(k)
+          case Some(JsNumber(n)) ⇒ Some(n.toString())
+          case Some(JsBoolean(b)) ⇒ Some(b.toString)
+          case _ ⇒ None
+        }
 
-      val key: Option[String] = kFormat.write(record.key()) match {
-        case JsString(k) ⇒ Some(k)
-        case JsNumber(n) ⇒ Some(n.toString())
-        case JsBoolean(b) ⇒ Some(b.toString)
-        case e ⇒ None
-      }
+        val value = Option(record.value())
 
-      if (bufferNext(parsedQuery, vFormat.write(record.value()), key)) {
-        tryPushDownstream()
-      }
-
-      if (totalDemand > 0) {
-        upstream ! Ack
-      } else {
-        pendingAck = true
+        if (value.isDefined && bufferNext(parsedQuery, vFormat.write(value.get), key)) {
+          tryPushDownstream()
+        }
+      } catch {
+        case e: Exception if parsingErrors < maxParsingErrors ⇒
+          log.warning("ignoring parsing error as errors ({}) < maxParsingErrors({})", parsingErrors, maxParsingErrors)
+          parsingErrors += 1
+        case e: Exception ⇒
+          parsingErrors += 1
+          val msg = s"completing stream due to $e; total errors: $parsingErrors"
+          log.warning(msg)
+          val newEx = new Exception(msg, e)
+          context.become(terminating(StreamCompleted.error(newEx)))
+      } finally {
+        if (totalDemand > 0) {
+          upstream ! Ack
+        } else {
+          pendingAck = true
+        }
       }
   }
 
