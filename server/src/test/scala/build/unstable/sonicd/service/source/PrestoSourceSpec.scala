@@ -52,11 +52,10 @@ class PrestoSourceSpec(_system: ActorSystem)
   def newPublisher(q: String, context: RequestContext = testCtx, watermark: Int = -1,
                    maxRetries: Int = 0, retryIn: FiniteDuration = 1.second, retryMultiplier: Int = 1,
                    retryErrors: Either[List[Long], Unit] = Left(List.empty),
-                   timeout: Option[FiniteDuration] = None,
                    dispatcher: String = CallingThreadDispatcher.Id): TestActorRef[PrestoPublisher] = {
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
     val src = new PrestoSource(watermark, maxRetries, retryIn, retryMultiplier, retryErrors,
-      self, query, timeout, controller.underlyingActor.context, context)
+      self, query, controller.underlyingActor.context, context)
     val ref = TestActorRef[PrestoPublisher](src.publisher.withDispatcher(dispatcher))
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
@@ -124,24 +123,6 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
-    }
-
-    "timeout a simple query" in {
-      val pub = newPublisher(query1, maxRetries = 0)
-      pub ! ActorPublisherMessage.Request(1)
-      val httpCmd = expectMsgType[HttpRequestCommand]
-
-      assertRequest(httpCmd.request, query1)
-
-      expectStreamStarted()
-
-      pub ! Presto.Timeout
-      pub ! ActorPublisherMessage.Request(1)
-
-      expectMsgType[QueryProgress]
-
-      pub ! ActorPublisherMessage.Request(1)
-      expectDone(pub, false)
     }
 
 
@@ -394,7 +375,7 @@ class PrestoSourceSpec(_system: ActorSystem)
       expectDone(pub)
     }
 
-    "should retry up to a maximum of n retries if error is in 'retry-errors' list or query times out" in {
+    "should retry up to a maximum of n retries if error is in 'retry-errors' list" in {
       val pub = newPublisher(query1, maxRetries = 3, retryIn = 1.millisecond, retryMultiplier = -1,
         retryErrors = Left(List(1234, 3434)))
       pub ! ActorPublisherMessage.Request(100)
@@ -418,7 +399,8 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectMsgType[HttpRequestCommand]
 
-      pub ! Presto.Timeout
+      pub ! QueryResults("", "", None, None, None, None,
+        defaultStats.copy(state = "FAILED"), Some(error.copy(errorCode = 3434)), None, None)
 
       expectMsgType[HttpRequestCommand]
 
@@ -509,7 +491,6 @@ class PrestoSourceSpec(_system: ActorSystem)
 //override supervisor
 class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, retryMultiplier: Int,
                    retryErrors: Either[List[Long], Unit], implicitSender: ActorRef, query: Query,
-                   timeout: Option[FiniteDuration],
                    actorContext: ActorContext, context: RequestContext)
   extends build.unstable.sonicd.source.PrestoSource(query, actorContext, context) {
 
@@ -517,9 +498,9 @@ class PrestoSource(watermark: Int, maxRetries: Int, retryIn: FiniteDuration, ret
 
   override lazy val publisher: Props = {
     //if no ES supervisor has been initialized yet for this ES cluster, initialize one
-    getSupervisor(supervisorName)
+    val supervisor = getSupervisor(supervisorName)
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, implicitSender, watermark,
-      maxRetries, retryIn, retryMultiplier, retryErrors, timeout, context)
+      maxRetries, retryIn, retryMultiplier, retryErrors, context)
   }
 }
