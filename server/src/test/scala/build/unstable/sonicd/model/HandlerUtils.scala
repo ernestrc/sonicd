@@ -1,8 +1,13 @@
 package build.unstable.sonicd.model
 
-import akka.actor.ActorRef
-import akka.testkit.TestKitBase
+import akka.actor.{Actor, ActorRef, Props}
+import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
+import akka.stream.scaladsl.Source
+import akka.testkit.{CallingThreadDispatcher, TestKitBase}
 import build.unstable.sonic.model.{QueryProgress, StreamCompleted, StreamStarted, TypeMetadata}
+import org.reactivestreams.{Publisher, Subscriber}
+
+import scala.collection.mutable
 
 trait HandlerUtils {
   this: TestKitBase ⇒
@@ -36,5 +41,26 @@ trait HandlerUtils {
     expectMsg("complete") //sent by ImplicitSubscriber
     expectTerminated(pub)
     d
+  }
+
+  def newProxyPublisher[K]: ActorRef =
+    system.actorOf(Props[TestPublisher[K]].withDispatcher(CallingThreadDispatcher.Id))
+
+  def newProxySource[K](publisher: ActorRef): Source[K, _] = Source.fromPublisher(ActorPublisher.apply(publisher))
+}
+
+// publisher that proxies messages to subscriber
+class TestPublisher[K] extends ActorPublisher[K] with Actor {
+
+  val buffer = mutable.Queue.empty[K]
+
+  override def receive: Receive = {
+    case ActorPublisherMessage.Request(_) ⇒
+      while (buffer.nonEmpty && totalDemand > 0) {
+        onNext(buffer.dequeue())
+      }
+    case ActorPublisherMessage.Cancel ⇒ //
+    case msg if isActive && totalDemand > 0 ⇒ onNext(msg.asInstanceOf[K])
+    case msg ⇒ buffer.enqueue(msg.asInstanceOf[K])
   }
 }

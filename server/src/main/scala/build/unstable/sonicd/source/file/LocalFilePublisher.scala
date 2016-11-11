@@ -9,9 +9,10 @@ import akka.actor._
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request}
 import akka.util.ByteString
-import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
+import build.unstable.sonicd.source.SonicdPublisher
+import build.unstable.sonicd.source.SonicdPublisher.ParsedQuery
 import build.unstable.sonicd.source.file.FileWatcher.{Glob, PathWatchEvent}
 import build.unstable.sonicd.source.file.LocalFilePublisher.BufferedFileByteChannel
 import spray.json._
@@ -22,16 +23,15 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 /**
-  * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
-  * Subclasses need to implement `parseUTF8Data`
-  */
-trait LocalFilePublisher {
+ * Watches files in 'path' local to Sonicd instance and exposes contents as a stream.
+ * Subclasses need to implement `parseUTF8Data`
+ */
+trait LocalFilePublisher extends SonicdPublisher {
   this: Actor with ActorPublisher[SonicMessage] with SonicdLogging ⇒
-
 
   /* ABSTRACT */
 
-  def parseUTF8Data(raw: String): Map[String, JsValue]
+  def parseUTF8Data(raw: String): JsValue
 
   def rawQuery: String
 
@@ -64,10 +64,6 @@ trait LocalFilePublisher {
   override def subscriptionTimeout: Duration = 10.seconds
 
 
-  case class FileQuery(raw: String,
-                       select: Option[Vector[String]],
-                       valueFilter: Map[String, JsValue] ⇒ Boolean)
-
   /* HELPERS */
 
   def tryPushDownstream() {
@@ -96,85 +92,13 @@ trait LocalFilePublisher {
       None
   }
 
-  def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (data: Map[String, JsValue]) ⇒ {
-    filter.forall {
-      case (key, j: JsObject) if data.isDefinedAt(key) && data(key).isInstanceOf[JsObject] ⇒
-        matchObject(j.fields)(data(key).asInstanceOf[JsObject].fields)
-
-      case (key, JsString(s)) if data.isDefinedAt(key) && data(key).isInstanceOf[JsString] && s.startsWith("*") ⇒
-        data(key).convertTo[String].endsWith(s.tail)
-
-      case (key, JsString(s)) if data.isDefinedAt(key) && data(key).isInstanceOf[JsString] && s.endsWith("*") ⇒
-        data(key).convertTo[String].endsWith(s.tail)
-
-      case (key, value) ⇒ data.isDefinedAt(key) && data(key) == value
-    }
-
-    filter.forall { case ((key, matchValue)) ⇒
-      lazy val value = data(key)
-      lazy val valueIsString = value.isInstanceOf[JsString]
-      lazy val matchIsString = matchValue.isInstanceOf[JsString]
-      lazy val valueString = value.convertTo[String]
-      lazy val matchString = matchValue.convertTo[String]
-      // data is not defined and match filter is null
-      (!data.isDefinedAt(key) && matchValue == JsNull) || (data.isDefinedAt(key) && (
-        // * at the beginning of the query so value endsWith
-        (matchIsString && valueIsString && matchString.startsWith("*") && valueString.endsWith(matchString.substring(1, matchString.length))) ||
-          // * at the end of the query so value startsWith
-          (matchIsString && valueIsString && matchString.endsWith("*") && valueString.startsWith(matchString.substring(0, matchString.length - 1))) ||
-          // equality match
-          (value == matchValue)
-        ))
-    }
-  }
-
   /**
-    * {
-    * "select" : ["field1", "field2"],
-    * "filter" : { "field1" : "value1" }
-    * }
-    */
-  def parseQuery(raw: String): FileQuery = {
-    val r = raw.parseJson.asJsObject(s"Query must be a valid JSON object: $raw").fields
-
-    val select = r.get("select").map { v ⇒
-      v.convertTo[Vector[String]]
-    }
-
-    val valueFilter = r.get("filter").map { fo ⇒
-      val fObj = fo.asJsObject(s"filter key must be a valid JSON object: ${fo.compactPrint}").fields
-      matchObject(fObj)
-    }.getOrElse((o: Map[String, JsValue]) ⇒ true)
-
-    FileQuery(raw, select, valueFilter)
-  }
-
-  def select(meta: Option[TypeMetadata], fields: Map[String, JsValue]): Vector[JsValue] = {
-    meta match {
-      case Some(m) ⇒ m.typesHint.map {
-        case (s: String, v: JsValue) ⇒ fields.getOrElse(s, JsNull)
-      }
-      case None ⇒ fields.values.to[Vector]
-    }
-  }
-
-  def filter(data: Map[String, JsValue], query: FileQuery, target: String): Option[Map[String, JsValue]] = {
-    if (query.valueFilter(data) && target != "application.conf" && target != "reference.conf") {
-      if (query.select.isEmpty) Some(data)
-      else {
-        val fields = data.filter(kv ⇒ query.select.get.contains(kv._1))
-        Some(fields)
-      }
-    } else None
-  }
-
-  /**
-    * streams until demand is 0 or there is no more data to be read
-    *
-    * @return whether there is no more data to read
-    */
+   * streams until demand is 0 or there is no more data to be read
+   *
+   * @return whether there is no more data to read
+   */
   @tailrec
-  final def stream(query: FileQuery,
+  final def stream(query: ParsedQuery,
                    channel: BufferedFileByteChannel): Boolean = {
 
     lazy val read = channel.readLine()
@@ -184,30 +108,9 @@ trait LocalFilePublisher {
     tryPushDownstream()
 
     if (totalDemand > 0 && read.nonEmpty && data.isSuccess) {
-      val filteredMaybe = filter(data.get, query, channel.fileName)
-
-      if (meta.isEmpty && filteredMaybe.isDefined) {
-
-        meta = query.select.map { select ⇒
-          //FIXME select types potentially not known at this point
-          TypeMetadata(select.map(s ⇒ s → filteredMaybe.get.getOrElse(s, JsNull)))
-        }.orElse {
-          Some(TypeMetadata(filteredMaybe.get.toVector))
-        }
-
-        buffer.enqueue(OutputChunk(JsArray(select(meta, filteredMaybe.get))))
-        onNext(meta.get)
-      } else {
-        filteredMaybe match {
-          case Some(filtered) ⇒ onNext(OutputChunk(JsArray(select(meta, filtered))))
-          case None ⇒ //filtered out
-        }
-      }
-
+      bufferNext(query, data.get)
       stream(query, channel)
-
-      //problem parsing the data
-    } else if (totalDemand > 0 && read.nonEmpty) stream(query, channel)
+    } else if /* problem parsing the data */(totalDemand > 0 && read.nonEmpty) stream(query, channel)
     else {
       // if totalDemand is 0, then read must not be applied
       // or we will skip the line
@@ -221,7 +124,6 @@ trait LocalFilePublisher {
   val (folders, watchers) = watchersPair.unzip
   val files = mutable.Map.empty[String, (File, BufferedFileByteChannel)]
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
-  var meta: Option[TypeMetadata] = None
   val watching: Boolean = false
 
 
@@ -246,7 +148,7 @@ trait LocalFilePublisher {
       context.stop(self)
   }
 
-  final def streaming(query: FileQuery, totalInitialFiles: Int): Receive = common orElse {
+  final def streaming(query: ParsedQuery, totalInitialFiles: Int): Receive = common orElse {
 
     case req: Request ⇒
       var totalDataLeft = false
@@ -351,15 +253,12 @@ object LocalFilePublisher {
     }
 
     /**
-      * Returns None if reached EOF
-      */
+     * Returns None if reached EOF
+     */
     def readLine(): Option[String] = {
       val builder = mutable.StringBuilder.newBuilder
       var char: Option[Char] = None
-      while ( {
-        char = readChar();
-        char.isDefined
-      } && char.get != '\n' && char.get != '\r') {
+      while ({ char = readChar(); char.isDefined } && char.get != '\n' && char.get != '\r') {
         builder append char.get
       }
 

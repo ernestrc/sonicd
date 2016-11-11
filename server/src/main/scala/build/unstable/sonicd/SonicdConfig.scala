@@ -77,5 +77,8 @@ abstract class FromResourcesConfig(config: Config) extends SonicdLogging {
   val ES_QUERY_SIZE = config.getLong("sonicd.es.query-size")
 
   assert(ES_WATERMARK < ES_QUERY_SIZE, "ES watermark must be smaller than query fetch size")
+
+  val KAFKA_MAX_PARTITIONS = config.getInt("sonicd.kafka.max-partitions")
+  val KAFKA_BROADCAST_BUFFER_SIZE = config.getInt("sonicd.kafka.broadcast-buffer-size")
 }
 

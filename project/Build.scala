@@ -68,6 +68,7 @@ object Build extends sbt.Build {
           //core
           "build.unstable" %% "sonic-core" % sonicdV,
           "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "com.typesafe.akka" %% "akka-stream-kafka" % "0.13",
           "com.auth0" % "java-jwt" % "2.1.0",
           "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
           "ch.qos.logback" % "logback-classic" % "1.1.7",
