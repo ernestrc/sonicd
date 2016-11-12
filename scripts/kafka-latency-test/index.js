@@ -18,18 +18,18 @@ const DOC = `
 Utility to measure the latency between a Kafka Sonicd client and a direct Kafka consumer
 
 Usage:
-	kafka-sonic latency <rate> [options]
-	kafka-sonic -h | --help | --version
+    kafka-sonic latency <rate> [options]
+    kafka-sonic -h | --help | --version
 
 Arguments:
-	rate                    Producer rate (Max is 1000)
+    rate                    Producer rate (Max is 1000)
 
 Options:
-	-k, --kafka=<addr>      Kafka address [default: localhost:9092]
-	-z, --zookeeper=<addr>  Zookeeper address [default: localhost:2181]
-	-s, --sonicd=<addr>     Sonicd ws address [default: localhost:9111]
-	-p, --message=<file>    JSON file to push as message
-	--verbose               Turn on debug log level
+    -k, --kafka=<addr>      Kafka address [default: localhost:9092]
+    -z, --zookeeper=<addr>  Zookeeper address [default: localhost:2181]
+    -s, --sonicd=<addr>     Sonicd ws address [default: localhost:9111]
+    -p, --message=<file>    JSON file to push as message
+    --verbose               Turn on debug log level
 `;
 
 const options = docopt(DOC, { version: version });
@@ -53,19 +53,19 @@ const SONICD_CONFIG = {
   'value-deserializer': 'StringDeserializer',
   'ignore-parsing-errors': 100,
   settings: {
-	group: {
-	  id: GROUP_ID
-	},
-	bootstrap: {
-	  servers: kurl
-	}
+    group: {
+      id: GROUP_ID
+    },
+    bootstrap: {
+      servers: kurl
+    }
   },
   'value-json-format': 'build.unstable.sonicd.source.KafkaSource$JSONParser'
 };
 const SONICD_QUERY = {
   query: JSON.stringify({
-	topic: TOPIC,
-	partition: 0
+    topic: TOPIC,
+    partition: 0
   }),
   config: SONICD_CONFIG
 };
@@ -109,7 +109,6 @@ const kclient = new kafka.Client(zurl);
 const sclient = new sonic.Client(`ws://${surl}/v1/query`);
 
 const producer = new Producer(kclient);
-const consumer = new Consumer(kclient, consumerpay, consumeropt);
 
 let id = 0;
 let meta = {};
@@ -121,100 +120,104 @@ function startProducing() {
   log.info('producer will send messages at %s/s (delay is %s)', rate, delay);
 
   setInterval(() => {
-	let ts = microtime.now();
-	template.id = id;
-	template.ts = ts;
-	results[id] = { p1: ts, c: null, s: null };
-	producerpay[0].messages = JSON.stringify(template);
-	producer.send(producerpay, (err, data) => {
-	  if (err) {
-		log.error('error producing message %s', err);
-		process.exit(1);
-		return;
-	  }
-	  ts = microtime.now();
-	  log.debug('successfully produced message with id %s: %j', id, template);
-	});
-	id += 1;
+    let ts = microtime.now();
+    template.id = id;
+    template.ts = ts;
+    results[id] = { p1: ts, c: null, s: null };
+    producerpay[0].messages = JSON.stringify(template);
+    producer.send(producerpay, (err, data) => {
+      if (err) {
+        log.error('error producing message %s', err);
+        process.exit(1);
+        return;
+      }
+      ts = microtime.now();
+      log.debug('successfully produced message with id %s: %j', id, template);
+    });
+    id += 1;
   }, delay);
 }
 
 function startMeasuring() {
   // TODO drain results
   setInterval(() => {
-	const sums = Object.keys(results).reduce((acc, i) => {
-	  const result = results[i];
-	  if (result.c && result.s) {
-		const klatency = result.c - result.p1;
-		const slatency = result.s - result.p1;
-		return acc.concat([slatency - klatency]);
-	  }
+    const sums = Object.keys(results).reduce((acc, i) => {
+      const result = results[i];
+      if (result.c && result.s) {
+        const klatency = result.c - result.p1;
+        const slatency = result.s - result.p1;
+        return acc.concat([slatency - klatency]);
+      }
 
-	  return acc;
-	}, []);
-	const m = median(sums);
-	log.debug('%j', sums);
-	log.info('Sonicd client median extra latency: %s microseconds', m);
+      return acc;
+    }, []);
+    const m = median(sums);
+    log.debug('%j', sums);
+    log.info('Sonicd client median extra latency: %s microseconds', m);
   }, 1000);
 }
 
-const stream = sclient.stream(SONICD_QUERY);
+function startConsuming() {
+  const consumer = new Consumer(kclient, consumerpay, consumeropt);
+  const stream = sclient.stream(SONICD_QUERY);
 
-stream.on('data', (data) => {
-  let ts;
-  try {
-    // construct object from data & meta arrays
-	const d = {};
-	data.forEach((val, idx) => {
-	  d[meta[idx][0]] = val;
-	});
-	ts = microtime.now();
-    // push ts to results
-	results[d.id].s = ts;
-  } catch (e) {
-	log.warn('unexpected message %s: %s', data, e);
-  }
-  log.debug('sonicd client received %j in %s microseconds', data, ts - data[1]);
-});
+  stream.on('data', (data) => {
+    let ts;
+    try {
+      // construct object from data & meta arrays
+      const d = {};
+      data.forEach((val, idx) => {
+        d[meta[idx][0]] = val;
+      });
+      ts = microtime.now();
+      // push ts to results
+      results[d.id].s = ts;
+    } catch (e) {
+      log.warn('unexpected message %s: %s', data, e);
+    }
+    log.debug('sonicd client received %j in %s microseconds', data, ts - data[1]);
+  });
 
-stream.on('metadata', m => {
-  meta = m;
-  log.debug('sonicd client received metadata: %j', meta);
-});
+  stream.on('metadata', m => {
+    meta = m;
+    log.debug('sonicd client received metadata: %j', meta);
+  });
 
-stream.on('error', (err) => {
-  log.error('sonicd stream error: %s', err);
-  process.exit(1);
-});
+  stream.on('error', (err) => {
+    log.error('sonicd stream error: %s', err);
+    process.exit(1);
+  });
+
+  consumer.on('message', (message) => {
+    const ts = microtime.now();
+    try {
+      const parsed = JSON.parse(message.value);
+      log.debug('consumer received %j in %s microseconds', message, ts - parsed.ts);
+      const i = parsed.id;
+      results[i].c = ts;
+    } catch (e) {
+      log.warn('unexpected message %s: %s', message, e);
+    }
+  });
+}
 
 producer.on('ready', () => {
   producer.createTopics([TOPIC], false, (err, data) => {
-	if (err) {
-	  log.error('error creating test topic: %s', err);
-	  process.exit(1);
-	  return;
-	}
+    if (err) {
+      log.error('error creating test topic: %s', err);
+      process.exit(1);
+      return;
+    }
 
-	log.info('topic "%s" ready: %j', TOPIC, data);
+    log.info('topic "%s" ready: %j', TOPIC, data);
 
-	startProducing();
-	startMeasuring();
+    startConsuming();
+    startProducing();
+    startMeasuring();
   });
 });
 
 producer.on('error', (err) => {
   log.error('producer error: %s', err);
   process.exit(1);
-});
-
-consumer.on('message', (message) => {
-  const ts = microtime.now();
-  try {
-	const parsed = JSON.parse(message.value);
-	log.debug('consumer received %j in %s microseconds', message, ts - parsed.ts);
-	const i = parsed.id;
-	results[i].c = ts;
-  } catch (e) {
-	log.warn('unexpected message %s: %s', message, e);
-  }
 });
