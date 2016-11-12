@@ -29,6 +29,7 @@ Options:
     -z, --zookeeper=<addr>  Zookeeper address [default: localhost:2181]
     -s, --sonicd=<addr>     Sonicd ws address [default: localhost:9111]
     -p, --message=<file>    JSON file to push as message
+    --no-parser              Disable Sonicd JSON parsing
     --verbose               Turn on debug log level
 `;
 
@@ -43,6 +44,7 @@ log.debug('parsed options', options);
 const kurl = options['--kafka'];
 const zurl = options['--zookeeper'];
 const surl = options['--sonicd'];
+const disableParsing = options['--no-parser'];
 
 // const GROUP_ID = `sonicd_latency_group_${microtime.now()}`;
 const GROUP_ID = 'sonicd_latency_group';
@@ -60,14 +62,36 @@ const SONICD_CONFIG = {
       servers: kurl
     }
   },
-  'value-json-format': 'build.unstable.sonicd.source.KafkaSource$JSONParser'
 };
+
+if (!disableParsing) {
+  log.info('enabled KafkaSource$JSONParser in Sonicd');
+  SONICD_CONFIG['value-json-format'] = 'build.unstable.sonicd.source.KafkaSource$JSONParser';
+} else {
+  log.info('disabled KafkaSource$JSONParser in Sonicd');
+}
+
 const SONICD_QUERY = {
   query: JSON.stringify({
     topic: TOPIC,
     partition: 0
   }),
-  config: SONICD_CONFIG
+  config: {
+    config: {
+      config: {
+        config: SONICD_CONFIG,
+        class: 'SonicSource',
+        host: '0.0.0.0',
+        port: 10001
+      },
+      class: 'SonicSource',
+      host: '0.0.0.0',
+      port: 10001
+    },
+    class: 'SonicSource',
+    host: '0.0.0.0',
+    port: 10001
+  }
 };
 
 const rate = parseInt(options['<rate>'], 10);
@@ -163,19 +187,23 @@ function startConsuming() {
 
   stream.on('data', (data) => {
     let ts;
+    let d;
     try {
-      // construct object from data & meta arrays
-      const d = {};
-      data.forEach((val, idx) => {
-        d[meta[idx][0]] = val;
-      });
+      if (!disableParsing) {
+        // construct object from data & meta arrays
+        d = {};
+        data.forEach((val, idx) => {
+          d[meta[idx][0]] = val;
+        });
+      } else {
+        d = JSON.parse(data[0]);
+      }
       ts = microtime.now();
-      // push ts to results
       results[d.id].s = ts;
     } catch (e) {
       log.warn('unexpected message %s: %s', data, e);
     }
-    log.debug('sonicd client received %j in %s microseconds', data, ts - data[1]);
+    // log.debug('sonicd client received %j in %s microseconds', data, ts - data[1]);
   });
 
   stream.on('metadata', m => {
@@ -189,12 +217,12 @@ function startConsuming() {
   });
 
   consumer.on('message', (message) => {
-    const ts = microtime.now();
     try {
       const parsed = JSON.parse(message.value);
-      log.debug('consumer received %j in %s microseconds', message, ts - parsed.ts);
       const i = parsed.id;
+      const ts = microtime.now();
       results[i].c = ts;
+      // log.debug('consumer received %j in %s microseconds', message, ts - parsed.ts);
     } catch (e) {
       log.warn('unexpected message %s: %s', message, e);
     }
