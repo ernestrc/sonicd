@@ -19,7 +19,7 @@ trait SonicdPublisher {
 
   val buffer: mutable.Queue[SonicMessage]
 
-  private var meta: TypeMetadata = TypeMetadata(Vector.empty)
+  protected var meta: TypeMetadata = TypeMetadata(Vector.empty)
 
   def matchObject(filter: Map[String, JsValue]): Map[String, JsValue] ⇒ Boolean = (data: Map[String, JsValue]) ⇒ {
     filter.forall {

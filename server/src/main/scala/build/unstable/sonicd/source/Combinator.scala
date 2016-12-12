@@ -13,19 +13,27 @@ import build.unstable.sonicd.system.actor.SonicdController.SonicdQuery
 import spray.json._
 
 import scala.collection.mutable
+import scala.util.matching.Regex
 
 class Combinator(query: Query, actorContext: ActorContext, context: RequestContext)
-  extends SonicdSource(query, actorContext, context) {
+  extends SonicdSource(query, actorContext, context) with SonicdLogging {
 
   import Combinator._
   import build.unstable.sonic.JsonProtocol._
 
+  val placeholder = getOption[String]("placeholder")
+
   implicit val sonicdQueryJsonFormat: JsonFormat[SonicdQuery] = new RootJsonFormat[SonicdQuery] {
     override def read(json: JsValue): SonicdQuery = {
       val obj = json.asJsObject().fields
-      val query = obj.getOrElse("query", throw getException("query")).convertTo[String]
+      val q =
+        obj.getOrElse("query", throw getException("query")).convertTo[String]
+      val replaced: String = placeholder.map { place ⇒
+        val rgx = new Regex(place)
+        rgx.replaceAllIn(q, query.query)
+      }.getOrElse(q)
       val config: JsValue = obj.getOrElse("config", throw getException("config"))
-      SonicdQuery(new Query(None, Some(context.traceId), None, query, config))
+      SonicdQuery(new Query(None, Some(context.traceId), None, replaced, config))
     }
 
     override def write(obj: SonicdQuery): JsValue = ???
@@ -47,7 +55,6 @@ class Combinator(query: Query, actorContext: ActorContext, context: RequestConte
   assert(queries.nonEmpty, "expected at least one query")
   assert(queries.forall(_.priority >= 0), "'priority' field in query config must be a positive integer")
 
-  // TODO inject query into queries val inject = getOption[String]("placeholder")
   val bufferSize = getOption[Int]("buffer").getOrElse(256)
   val strategy = getOption[CombineStrategy]("strategy").getOrElse(MergeStrategy)
   val interleave = getOption[Boolean]("interleave").getOrElse(true)
@@ -93,7 +100,7 @@ object Combinator {
 class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
                       strategy: CombineStrategy, interleave: Boolean)
                      (implicit ctx: RequestContext, materializer: ActorMaterializer)
-  extends ActorPublisher[SonicMessage] with SonicdLogging {
+  extends ActorPublisher[SonicMessage] with SonicdLogging with SonicdPublisher {
 
   case object Ack
 
@@ -111,6 +118,10 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
     log.debug("starting combinator publisher of '{}'", ctx.traceId)
+  }
+
+  override def unhandled(message: Any): Unit = {
+    log.warning("recv undhandled message {}", message)
   }
 
 
@@ -134,8 +145,6 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
 
   /* STATE */
 
-  // TODO implement incremental meta
-  var bufferedMeta: Boolean = false
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var pendingAck: Boolean = false
   val deferredBuffer: mutable.Queue[SonicMessage] = mutable.Queue.empty
@@ -148,10 +157,10 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
   /* BEHAVIOUR */
 
   def commonReceive: Receive = {
-    case Completed ⇒ // TODO ???
+    case Completed ⇒
+      terminating(StreamCompleted.success)
     case Cancel ⇒
       log.debug("client canceled")
-      onComplete()
       context.stop(self)
   }
 
@@ -167,6 +176,13 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
     }
   }
 
+  def sendAckMaybe(upstream: ActorRef) {
+    if (totalDemand > 0) {
+      upstream ! Ack
+    } else {
+      pendingAck = true
+    }
+  }
 
   def materialized(upstream: ActorRef): Receive = commonReceive orElse {
     case Request(n) ⇒
@@ -176,24 +192,26 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
         pendingAck = false
       }
 
+    case (m: StreamStarted, _: Int) ⇒ upstream ! Ack //ignore
+    case (m: StreamCompleted, _: Int) ⇒ upstream ! Ack //TODO impl priorities
+    case (m: TypeMetadata, _: Int) ⇒
+      if (updateMeta(m)) {
+        buffer.enqueue(meta)
+        tryPushDownstream()
+      }
+      sendAckMaybe(upstream)
     case (m: SonicMessage, priority: Int) ⇒
       try {
-        if (streams > publishersN) saveSendersPriority(sender(), priority)
+        //if (streams > publishersN) saveSendersPriority(sender(), priority)
 
-        if (interleave || priority >= current) {
-          buffer.enqueue(m)
-        } else {
-          deferredBuffer.enqueue(m)
-        }
+        //if (interleave || priority >= current) {
+        buffer.enqueue(m)
+        //} else {
+        //  deferredBuffer.enqueue(m)
+        //}
 
         tryPushDownstream()
-      } finally {
-        if (totalDemand > 0) {
-          upstream ! Ack
-        } else {
-          pendingAck = true
-        }
-      }
+      } finally sendAckMaybe(upstream)
   }
 
   def waiting: Receive = commonReceive orElse {
@@ -206,7 +224,7 @@ class CombinatorActor(queries: List[CombinedQuery], bufferSize: Int,
       context.become(materialized(sender()))
   }
 
-  override def receive: Receive = {
+  override def receive: Receive = commonReceive orElse {
     case SubscriptionTimeoutExceeded ⇒
       log.info(s"no subscriber in within subs timeout $subscriptionTimeout")
       onCompleteThenStop()
