@@ -42,23 +42,13 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
   /* HELPERS */
 
-  def getSourceClass(query: Query): Try[Class[_]] = {
-    val clazzLoader = this.getClass.getClassLoader
-
-    Try(clazzLoader.loadClass(query.sonicdSourceClass))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.sonicdSourceClass)))
-      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.sonicdSourceClass)))
-  }
-
   def prepareMaterialization(handler: ActorRef, q: Query,
                              user: Option[ApiUser], clientAddress: Option[InetAddress]): Unit = {
     try {
       handled += 1L
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
-      val source = getSourceClass(query)
-        .getOrElse(throw new Exception(s"could not find ${query.sonicdSourceClass} in the classpath")).getConstructors()(0)
-        .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
+      val source = getDataSource(query, context, user)
 
       log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
@@ -160,7 +150,21 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
 object SonicdController {
 
-  implicit class SonicdQuery(query: Query) {
+  def getDataSource(query: Query, context: ActorContext, user: Option[ApiUser]): DataSource = {
+    getSourceClass(query)
+      .getOrElse(throw new Exception(s"could not find ${query.sonicdSourceClass} in the classpath")).getConstructors()(0)
+      .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
+  }
+
+  def getSourceClass(query: Query): Try[Class[_]] = {
+    val clazzLoader = this.getClass.getClassLoader
+
+    Try(clazzLoader.loadClass(query.sonicdSourceClass))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonic.server.source." + query.sonicdSourceClass)))
+      .orElse(Try(clazzLoader.loadClass("build.unstable.sonicd.source." + query.sonicdSourceClass)))
+  }
+
+  implicit class SonicdQuery(val query: Query) {
 
     //CAUTION: leaking this value outside of sonicd-server is a major security risk
     private[unstable] lazy val sonicdConfig: JsObject = query.config match {
