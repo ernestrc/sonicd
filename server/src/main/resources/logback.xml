@@ -23,7 +23,7 @@
             <providers>
                 <pattern>
                     <pattern>
-                        {"component":"sonicd","timestamp":"%d","thread":"%thread","level":"%level","logger":"%logger{35}","message": "%msg"}
+                      {"component":"sonicd","timestamp":"%d{ISO8601}","thread":"%thread","level":"%level","logger":"%logger{35}","message": "%msg"}
                     </pattern>
                 </pattern>
                 <mdc/>
@@ -44,7 +44,7 @@
         <appender-ref ref="JSON"/>
     </appender>
 
-    <root level="DEBUG">
+    <root level="TRACE">
         <appender-ref ref="STDOUT"/>
         <appender-ref ref="ASYNC"/>
     </root>

@@ -2,7 +2,7 @@ import com.typesafe.sbt.SbtGit.GitKeys._
 import sbt.Keys._
 import sbt._
 import sbtassembly.AssemblyKeys._
-import sbtassembly.{PathList, MergeStrategy}
+import sbtassembly.MergeStrategy
 import sbtbuildinfo.BuildInfoKeys._
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin._
@@ -11,8 +11,9 @@ import spray.revolver.RevolverPlugin._
 object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
-  val akkaV = "2.4.11"
-  val sonicdV = "0.6.8"
+  val akkaV = "2.4.14"
+  val sonicdV = "0.6.9"
+  val akkaHttpV = "10.0.0"
 
   val commonSettings = Seq(
     organization := "build.unstable",
@@ -67,13 +68,13 @@ object Build extends sbt.Build {
         Seq(
           //core
           "build.unstable" %% "sonic-core" % sonicdV,
-          "com.typesafe.akka" %% "akka-http-core" % akkaV,
+          "com.typesafe.akka" %% "akka-http-core" % akkaHttpV,
           "com.typesafe.akka" %% "akka-stream-kafka" % "0.13",
           "com.auth0" % "java-jwt" % "2.1.0",
           "net.logstash.logback" % "logstash-logback-encoder" % "4.7",
           "ch.qos.logback" % "logback-classic" % "1.1.7",
           "com.h2database" % "h2" % "1.3.175" % "test",
-          "com.typesafe.akka" %% "akka-http-testkit" % akkaV % "test",
+          "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpV % "test",
           "org.scalatest" %% "scalatest" % "2.2.5" % "test"
         )
       }

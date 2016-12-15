@@ -4,13 +4,24 @@ import akka.actor.{Actor, ActorRef, Props}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.scaladsl.Source
 import akka.testkit.{CallingThreadDispatcher, TestKitBase}
-import build.unstable.sonic.model.{QueryProgress, StreamCompleted, StreamStarted, TypeMetadata}
+import build.unstable.sonic.model._
 import org.reactivestreams.{Publisher, Subscriber}
 
 import scala.collection.mutable
 
 trait HandlerUtils {
   this: TestKitBase ⇒
+
+  def receiveProgress(pub: ActorRef, n: Int, check: QueryProgress ⇒ Unit = _ ⇒ ()): Unit = {
+    pub ! ActorPublisherMessage.Request(n)
+    val prog = receiveN(n).asInstanceOf[Seq[SonicMessage]]
+    prog.foreach { m ⇒
+      val progress = try m.asInstanceOf[QueryProgress] catch {
+        case e: Exception ⇒ throw new Exception(s"expected progress found: $m in: $prog")
+      }
+      check(progress)
+    }
+  }
 
   def expectQueryProgress(progress: Long,
                           status: QueryProgress.Status,
