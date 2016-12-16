@@ -111,12 +111,12 @@ class ComposerSpec(_system: ActorSystem)
       expectMsgType[OutputChunk] shouldBe out
 
       val out2 = OutputChunk(Vector(2))
-      pub ! ActorPublisherMessage.Request(2)
-      proxy1 ! out2
-      expectMsgType[OutputChunk] shouldBe out2
-
       val out3 = OutputChunk(Vector(0))
+      proxy1 ! out2
       proxy1 ! out3
+
+      pub ! ActorPublisherMessage.Request(2)
+      expectMsgType[OutputChunk] shouldBe out2
       expectMsgType[OutputChunk] shouldBe out3
 
       pub ! ActorPublisherMessage.Request(100)
@@ -263,10 +263,76 @@ class ComposerSpec(_system: ActorSystem)
       expectNoMsg()
 
       pub ! PoisonPill
+      expectMsg("complete")
+      expectTerminated(pub)
     }
 
-    // TODO
-    "provide stream priority re-ordering" in {
+    "provide message re-ordering by stream priority" in {
+      val query1 = Query.apply("", mockConfig, None)
+      val query2 = Query.apply("", mockConfig, None)
+      val query3 = Query.apply("", mockConfig, None)
+      val query4 = Query.apply("", mockConfig, None)
+      val queries =
+        ComposedQuery(query3, 7, Some("test3")) ::
+          ComposedQuery(query1, 10, Some("test1")) ::
+          ComposedQuery(query4, 0, Some("test4")) ::
+          ComposedQuery(query2, 7, Some("test2")) :: Nil
+      val pub = newPublisher(root, queries, Composer.MergeStrategy)
+
+      pub ! ActorPublisherMessage.Request(10)
+
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
+      val proxy3 = pub.underlyingActor.context.child("test3").get
+      val proxy4 = pub.underlyingActor.context.child("test4").get
+
+      expectStreamStarted()
+
+      proxy1 ! OutputChunk(Vector(1))
+      proxy2 ! OutputChunk(Vector(2))
+      proxy3 ! OutputChunk(Vector(3))
+      proxy4 ! OutputChunk(Vector(4))
+      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(1))
+      expectNoMsg()
+
+      val out1 = OutputChunk(Vector(10))
+      proxy1 ! out1
+      expectMsgType[OutputChunk] shouldBe out1
+
+      proxy1 ! StreamCompleted("", None)
+
+      // force CallingThreadDispatcher
+      pub ! ActorPublisherMessage.Request(1)
+
+      // allowedPriority should be 7 now
+      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(2))
+      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(3))
+      expectNoMsg()
+
+      proxy2 ! StreamCompleted("", None)
+
+      val out2 = OutputChunk(Vector(30))
+      proxy3 ! out2
+      expectMsgType[OutputChunk] shouldBe out2
+
+      proxy3 ! StreamCompleted("", None)
+
+      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(4))
+      val out3 = OutputChunk(Vector(40))
+      proxy4 ! out3
+      expectMsgType[OutputChunk] shouldBe out3
+
+      proxy4 ! StreamCompleted("", None)
+
+      expectDone(pub)
+    }
+
+    "if substream completes with error, it completes with error" in {
+      true shouldBe false
+    }
+
+    "should use auth to authorize client" in {
+      true shouldBe false
     }
   }
 }

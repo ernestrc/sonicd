@@ -1,5 +1,6 @@
 package build.unstable.sonicd.source
 
+import akka.actor.Status.Failure
 import akka.actor._
 import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
@@ -138,15 +139,6 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
     }
   }
 
-  def saveSendersPriority(sender: ActorRef, priority: Int): Unit = {
-    publishers.get(sender) match {
-      case None ⇒
-        publishersN += 1
-        publishers.update(sender, priority)
-      case _ ⇒
-    }
-  }
-
   implicit val priorityMessageOrdering =
     new Ordering[(Source[(build.unstable.sonic.model.SonicMessage, Int), akka.NotUsed], Int)] {
       override def compare(x: (Source[(build.unstable.sonic.model.SonicMessage, Int), akka.NotUsed], Int),
@@ -158,29 +150,29 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
     }
 
   def updateProgress(subStreamProgress: QueryProgress): Boolean =
-  subStreamProgress.status == QueryProgress.Running && {
-    val prog = 1.0 * subStreamProgress.progress / streams / subStreamProgress.total.getOrElse(100d) * 100
-    progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
-    true
-  }
+    subStreamProgress.status == QueryProgress.Running && {
+      val prog = 1.0 * subStreamProgress.progress / streamsLeft / subStreamProgress.total.getOrElse(100d) * 100
+      progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
+      true
+    }
 
 
   /* STATE */
 
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
+  val deferred = mutable.Queue.empty[(SonicMessage, Int)]
   var pendingAck: Boolean = false
-  val deferredBuffer: mutable.Queue[SonicMessage] = mutable.Queue.empty
-  val publishers: mutable.Map[ActorRef, Int] = mutable.Map.empty[ActorRef, Int]
-  var publishersN = 0
   var progress: QueryProgress = _
-  var streams: Int = _
-  var current: Int = _
+  var streamsLeft: Int = _
+  var streamsByPriority: mutable.Map[Int, Int] = _
+  var allowedPriority: Int = _
 
 
   /* BEHAVIOUR */
 
   def commonReceive: Receive = {
-    case Completed ⇒ terminating(StreamCompleted.success)
+    case Completed ⇒ context.become(terminating(StreamCompleted.success))
+    case Status.Failure(e) ⇒ context.become(terminating(StreamCompleted.error(ctx.traceId, e)))
     case Cancel ⇒
       log.debug("client canceled")
       context.stop(self)
@@ -213,36 +205,44 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
         upstream ! Ack
         pendingAck = false
       }
-
-    case (m: StreamStarted, priority: Int) ⇒ upstream ! Ack //ignore
-    case (m: StreamCompleted, priority: Int) ⇒
-      upstream ! Ack //TODO impl priorities
-      streams -= 1
-    case (m: QueryProgress, priority: Int) ⇒
-      if (updateProgress(m)) {
-        buffer.enqueue(progress)
-        tryPushDownstream()
+    case (m: SonicMessage, priority: Int) if priority >= allowedPriority ⇒
+      m match {
+        case c: StreamCompleted ⇒
+          try {
+            streamsLeft -= 1
+            val left = streamsByPriority(priority)
+            if (left == 1) {
+              if (streamsLeft > 0) {
+                streamsByPriority.remove(priority)
+                log.debug("changing allowed priority: previous allowed priority {}", allowedPriority)
+                allowedPriority = streamsByPriority.maxBy(_._1)._1
+                deferred.dequeueAll(_._2 == allowedPriority).foreach(materialized(upstream)(_))
+                log.debug("changing allowed priority: next allowed priority {}", allowedPriority)
+              } else context.become(terminating(StreamCompleted.success))
+            } else streamsByPriority.update(priority, left - 1)
+          } catch {
+            case e: Exception ⇒
+              context.become(terminating(StreamCompleted.error(e)))
+          } finally tryPushDownstream()
+        case p: QueryProgress ⇒
+          if (updateProgress(p)) {
+            buffer.enqueue(progress)
+            tryPushDownstream()
+          }
+        case t: TypeMetadata ⇒
+          if (updateMeta(t)) {
+            buffer.enqueue(meta.asInstanceOf[SonicMessage])
+            tryPushDownstream()
+          }
+        case o: OutputChunk ⇒
+          buffer.enqueue(m)
+          tryPushDownstream()
+        case _: StreamStarted ⇒ //ignore
       }
       sendAckMaybe(upstream)
-    case (m: TypeMetadata, priority: Int) ⇒
-      if (updateMeta(m)) {
-        buffer.enqueue(meta.asInstanceOf[SonicMessage])
-        tryPushDownstream()
-      }
+    case (m: SonicMessage, p: Int) ⇒
       sendAckMaybe(upstream)
-    case (m: OutputChunk, priority: Int) ⇒
-      try {
-        upstream ! Ack //TODO impl priorities
-        //if (streams > publishersN) saveSendersPriority(sender(), priority)
-
-        //if (priority >= current) {
-        buffer.enqueue(m)
-        //} else {
-        //  deferredBuffer.enqueue(m)
-        //}
-
-        tryPushDownstream()
-      } finally sendAckMaybe(upstream)
+      deferred.enqueue(m → p)
   }
 
   def waiting: Receive = commonReceive orElse {
@@ -261,7 +261,7 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
       onCompleteThenStop()
 
     case Request(n) ⇒
-      log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Attempt, "client requested first element")
+      log.tylog(Level.DEBUG, ctx.traceId, CombineSources, Variation.Attempt, "client requested first element")
       tryPushDownstream()
       try {
         val ps = queries.map { query ⇒
@@ -276,30 +276,35 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
         log.debug("sorted queries by priority {}", ps)
 
         // assign max priority as current(ly streaming)
-        current = ps.head._2
-        streams = ps.length
-        val sources = ps.map(_._1)
+        val (sources, _current) = ps.unzip
+        allowedPriority = _current.head
+        streamsLeft = ps.length
+        streamsByPriority = _current.foldLeft(mutable.Map.empty[Int, Int]) { (acc, el) ⇒
+          acc.updated(el, acc.getOrElse(el, 0) + 1)
+        }
+
+        log.trace("streams sources {}", sources)
+        log.trace("streams priorities {}", streamsByPriority)
 
         val merged = if (sources.length > 1) {
           val second = sources(1)
-          val tail = sources.slice(2, streams)
+          val tail = sources.slice(2, streamsLeft)
           log.debug("merging {}:{}:{}", sources.head, second, tail)
           Source.combine(sources.head, second, tail: _*)(if (strategy == ConcatStrategy) Concat(_) else Merge(_))
         } else sources.head
 
         log.debug("combined graphs: {}", merged)
-        // merged.to(Sink.foreach(m ⇒ log.trace(s"$m"))).run()
         merged.to(Sink.actorRefWithAck(self, Started, Ack, Completed)).run()
         context.become(waiting)
 
       } catch {
         case e: Exception ⇒
           context.become(terminating(StreamCompleted.error(e)))
-          log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Failure(e),
+          log.tylog(Level.DEBUG, ctx.traceId, CombineSources, Variation.Failure(e),
             "failed to build {} graph", strategy)
       }
 
-      log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Success,
+      log.tylog(Level.DEBUG, ctx.traceId, CombineSources, Variation.Success,
         "successfully built combined {} graph", strategy)
   }
 }

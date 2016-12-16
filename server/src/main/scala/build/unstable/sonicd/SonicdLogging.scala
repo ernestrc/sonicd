@@ -27,6 +27,6 @@ trait SonicdLogging extends TypedLogging {
 
   case object ParseHttpBody extends CallType
 
-  case object BuildComposedGraph extends CallType
+  case object CombineSources extends CallType
 
 }
