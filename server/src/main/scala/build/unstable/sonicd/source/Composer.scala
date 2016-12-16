@@ -225,9 +225,8 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
       }
       sendAckMaybe(upstream)
     case (m: TypeMetadata, priority: Int) ⇒
-      // TODO incremental meta
       if (updateMeta(m)) {
-        buffer.enqueue(meta)
+        buffer.enqueue(meta.asInstanceOf[SonicMessage])
         tryPushDownstream()
       }
       sendAckMaybe(upstream)

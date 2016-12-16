@@ -221,8 +221,48 @@ class ComposerSpec(_system: ActorSystem)
       }
     }
 
-    // TODO
     "provide incremental metadata when different streams have different schemas" in {
+      val query1 = Query.apply("10", mockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+      val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+        ComposedQuery(query2, 0, Some("test2")) :: Nil, Composer.MergeStrategy)
+
+      pub ! ActorPublisherMessage.Request(100)
+      expectStreamStarted()
+
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
+
+      val meta2 = TypeMetadata(Vector("test" → JsNumber(2)))
+      proxy2 ! meta2
+      expectTypeMetadata() shouldBe meta2
+
+      val meta = TypeMetadata(Vector("test" → JsString("2")))
+      proxy1 ! meta
+      expectTypeMetadata() shouldBe meta
+
+      // same meta, so it should not update
+      proxy1 ! meta
+      expectNoMsg()
+
+      // type change
+      proxy2 ! meta2
+      expectTypeMetadata() shouldBe meta2
+
+      // new field
+      val meta3 = TypeMetadata(Vector("test2" → JsNumber(2)))
+      proxy2 ! meta3
+      expectTypeMetadata() shouldBe TypeMetadata(Vector("test" → JsNumber(2), "test2" → JsNumber(2)))
+
+      // type change
+      proxy1 ! TypeMetadata(Vector("test" → JsNumber(2), "test2" → JsString("2")))
+      expectTypeMetadata() shouldBe TypeMetadata(Vector("test" → JsNumber(2), "test2" → JsString("2")))
+
+      // subset
+      proxy1 ! TypeMetadata(Vector("test" → JsNumber(2)))
+      expectNoMsg()
+
+      pub ! PoisonPill
     }
 
     // TODO
