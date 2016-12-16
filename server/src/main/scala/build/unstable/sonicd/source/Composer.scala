@@ -1,20 +1,20 @@
 package build.unstable.sonicd.source
 
-import akka.NotUsed
 import akka.actor._
-import akka.stream.{ActorMaterializer, Graph, SourceShape, UniformFanInShape}
+import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
 import akka.stream.actor.ActorPublisherMessage.{Cancel, Request, SubscriptionTimeoutExceeded}
 import akka.stream.scaladsl._
+import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.Composer.{ComposeStrategy, ComposedQuery, ConcatStrategy}
 import build.unstable.sonicd.system.actor.SonicdController
 import build.unstable.sonicd.system.actor.SonicdController.SonicdQuery
+import build.unstable.tylog.Variation
+import org.slf4j.event.Level
 import spray.json._
-import build.unstable.sonic.JsonProtocol._
 
-import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.matching.Regex
 
@@ -34,22 +34,18 @@ class Composer(query: Query, actorContext: ActorContext, context: RequestContext
 
   val bufferSize = getOption[Int]("buffer").getOrElse(256)
   val strategy = getOption[ComposeStrategy]("strategy").getOrElse(MergeStrategy)
-  val interleave = getOption[Boolean]("interleave").getOrElse(true)
-
-  // TODO
-  assert(interleave, "non-interleaved with priority is not implemented yet")
 
   val actorMaterializer = ActorMaterializer.create(actorContext)
 
   val publisher: Props = {
-    Props(classOf[ComposerPublisher], queries, bufferSize, strategy, interleave,
+    Props(classOf[ComposerPublisher], queries, bufferSize, strategy,
       context, actorMaterializer)
   }
 }
 
 object Composer {
 
-  case class ComposedQuery(query: SonicdQuery, priority: Int)
+  case class ComposedQuery(query: SonicdQuery, priority: Int, name: Option[String] = None)
 
   sealed trait ComposeStrategy
 
@@ -78,7 +74,8 @@ object Composer {
     new RootJsonFormat[ComposedQuery] {
       override def read(json: JsValue): ComposedQuery = {
         val fields = json.asJsObject().fields
-        val priority = fields.get("priority").map(_.convertTo[Int]).getOrElse(0)
+        val priority = fields.get("priority").flatMap(_.convertTo[Option[Int]]).getOrElse(0)
+        val name = fields.get("name").flatMap(_.convertTo[Option[String]])
         val obj = json.asJsObject().fields
         val q =
           obj.getOrElse("query", throw getException("query")).convertTo[String]
@@ -87,13 +84,14 @@ object Composer {
           rgx.replaceAllIn(q, query)
         }.getOrElse(q)
         val config: JsValue = obj.getOrElse("config", throw getException("config"))
-        ComposedQuery(SonicdQuery(new Query(None, Some(context.traceId), None, replaced, config)), priority)
+        ComposedQuery(SonicdQuery(new Query(None, Some(context.traceId), None, replaced, config)), priority, name)
       }
 
       override def write(obj: ComposedQuery): JsValue = {
         JsObject(Map(
           "priority" → JsNumber(obj.priority),
           "query" → JsString(obj.query.query.query),
+          "name" → obj.name.map(JsString.apply).getOrElse(JsNull),
           "config" → obj.query.query.config
         ))
       }
@@ -105,8 +103,7 @@ object Composer {
   }
 }
 
-class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int,
-                        strategy: ComposeStrategy, interleave: Boolean)
+class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy: ComposeStrategy)
                        (implicit ctx: RequestContext, materializer: ActorMaterializer)
   extends ActorPublisher[SonicMessage] with SonicdLogging with SonicdPublisher {
 
@@ -161,13 +158,11 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int,
     }
 
   def updateProgress(subStreamProgress: QueryProgress): Boolean =
-    subStreamProgress.status == QueryProgress.Running && {
-      // TODO val prog = 1.0 * subStreamProgress.progress / streams / subStreamProgress.total.getOrElse(100d) * 100
-      val prog = subStreamProgress.progress
-      progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
-      log.trace("computed new progress: {}", progress)
-      true
-    }
+  subStreamProgress.status == QueryProgress.Running && {
+    val prog = 1.0 * subStreamProgress.progress / streams / subStreamProgress.total.getOrElse(100d) * 100
+    progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
+    true
+  }
 
 
   /* STATE */
@@ -219,27 +214,29 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int,
         pendingAck = false
       }
 
-    case (_: StreamStarted, _: Int) ⇒ upstream ! Ack //ignore
-    case (_: StreamCompleted, _: Int) ⇒ upstream ! Ack //TODO impl priorities
-    case (p: QueryProgress, _: Int) ⇒
-      if (updateProgress(p)) {
+    case (m: StreamStarted, priority: Int) ⇒ upstream ! Ack //ignore
+    case (m: StreamCompleted, priority: Int) ⇒
+      upstream ! Ack //TODO impl priorities
+      streams -= 1
+    case (m: QueryProgress, priority: Int) ⇒
+      if (updateProgress(m)) {
         buffer.enqueue(progress)
         tryPushDownstream()
       }
       sendAckMaybe(upstream)
-    case (m: TypeMetadata, _: Int) ⇒
-      // TODO seems broken?
+    case (m: TypeMetadata, priority: Int) ⇒
+      // TODO incremental meta
       if (updateMeta(m)) {
         buffer.enqueue(meta)
         tryPushDownstream()
       }
       sendAckMaybe(upstream)
-    case (m: SonicMessage, priority: Int) ⇒
-      log.trace("recv message: {} with priority {} from {}", m, priority, sender())
+    case (m: OutputChunk, priority: Int) ⇒
       try {
+        upstream ! Ack //TODO impl priorities
         //if (streams > publishersN) saveSendersPriority(sender(), priority)
 
-        //if (interleave || priority >= current) {
+        //if (priority >= current) {
         buffer.enqueue(m)
         //} else {
         //  deferredBuffer.enqueue(m)
@@ -265,12 +262,14 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int,
       onCompleteThenStop()
 
     case Request(n) ⇒
+      log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Attempt, "client requested first element")
       tryPushDownstream()
-
       try {
         val ps = queries.map { query ⇒
           val source = SonicdController.getDataSource(query.query.query, context, ctx.user)
-          val ref = context.actorOf(source.publisher)
+          val ref = query.name
+            .map(n ⇒ context.actorOf(source.publisher, n))
+            .getOrElse(context.actorOf(source.publisher))
           Source.fromPublisher[SonicMessage](ActorPublisher.apply(ref))
             .map((_, query.priority)) → query.priority
         }.sorted
@@ -297,6 +296,11 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int,
       } catch {
         case e: Exception ⇒
           context.become(terminating(StreamCompleted.error(e)))
+          log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Failure(e),
+            "failed to build {} graph", strategy)
       }
+
+      log.tylog(Level.DEBUG, ctx.traceId, BuildComposedGraph, Variation.Success,
+        "successfully built combined {} graph", strategy)
   }
 }

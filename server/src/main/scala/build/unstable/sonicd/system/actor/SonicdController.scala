@@ -52,7 +52,7 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
       log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
-      val securityLevel = query.sonicdConfig.fields.get("security").map(_.convertTo[Int])
+      val securityLevel = query.sonicdConfig.fields.get("security").flatMap(_.convertTo[Option[Int]])
 
       if (isAuthorized(user, securityLevel, clientAddress)) {
         handler ! source.publisher

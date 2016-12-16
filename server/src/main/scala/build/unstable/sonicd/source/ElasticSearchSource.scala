@@ -28,12 +28,12 @@ object ElasticSearch {
     def read(json: JsValue): (String, Option[String], ESQuery) = {
       val obj = json.asJsObject
       val fields = obj.fields
-      val index = fields.get("_index").map(_.convertTo[String]).getOrElse("_all")
-      val typeHint = fields.get("_type").map(_.convertTo[String])
+      val index = fields.get("_index").flatMap(_.convertTo[Option[String]]).getOrElse("_all")
+      val typeHint = fields.get("_type").flatMap(_.convertTo[Option[String]])
 
       (index, typeHint,
-        ESQuery(fields.get("from").map(_.convertTo[Long]),
-          fields.get("size").map(_.convertTo[Long]), obj))
+        ESQuery(fields.get("from").flatMap(_.convertTo[Option[Long]]),
+          fields.get("size").flatMap(_.convertTo[Option[Long]]), obj))
     }
 
     def write(obj: ESQuery, from: Long, size: Long): JsValue = {
