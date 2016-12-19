@@ -152,8 +152,10 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
   def updateProgress(subStreamProgress: QueryProgress): Boolean =
     subStreamProgress.status == QueryProgress.Running && {
       val prog = 1.0 * subStreamProgress.progress / streamsLeft / subStreamProgress.total.getOrElse(100d) * 100
-      progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
-      true
+      !prog.isNaN && !prog.isInfinite && {
+        progress = QueryProgress(QueryProgress.Running, prog, Some(100d), Some("%"))
+        true
+      }
     }
 
 

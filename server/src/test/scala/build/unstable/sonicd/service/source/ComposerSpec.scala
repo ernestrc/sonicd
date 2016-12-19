@@ -429,8 +429,35 @@ class ComposerSpec(_system: ActorSystem)
       }
     }
 
-    "should compute valid query progress fields" in {
-      true shouldBe false
+    "should always compute valid query progress fields" in {
+      val query1 = Query.apply("10", mockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+      val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+        ComposedQuery(query2, 0, Some("test2")) :: Nil, Composer.MergeStrategy)
+
+      // force instantiate underlying publishers
+      pub ! ActorPublisherMessage.Request(1)
+
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
+
+      expectStreamStarted()
+
+      pub ! ActorPublisherMessage.Request(1)
+
+      proxy1 ! QueryProgress(QueryProgress.Running, Double.NaN, Some(10), Some("blah"))
+      expectNoMsg()
+
+      proxy2 ! QueryProgress(QueryProgress.Running, Double.PositiveInfinity, Some(0), None)
+      expectNoMsg()
+
+      proxy1 ! QueryProgress(QueryProgress.Running, 1, Some(10), Some("blah"))
+      expectMsgType[QueryProgress] shouldBe QueryProgress(QueryProgress.Running, 5.0d, Some(100d), Some("%"))
+
+      pub ! ActorPublisherMessage.Request(1)
+      proxy1 ! StreamCompleted("", None)
+      proxy2 ! StreamCompleted("", None)
+      expectDone(pub)
     }
   }
 }
