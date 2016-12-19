@@ -12,7 +12,7 @@ object Build extends sbt.Build {
 
   val scalaV = "2.11.8"
   val akkaV = "2.4.14"
-  val sonicdV = "0.6.9"
+  val sonicdV = "0.6.10"
   val akkaHttpV = "10.0.0"
 
   val commonSettings = Seq(

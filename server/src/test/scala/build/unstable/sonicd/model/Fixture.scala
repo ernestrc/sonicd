@@ -1,6 +1,7 @@
 package build.unstable.sonicd.model
 
 import java.io.File
+import java.net.InetAddress
 import java.nio.file.WatchEvent.Kind
 import java.nio.file.{Path, WatchEvent}
 

@@ -48,29 +48,17 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
       handled += 1L
       val queryId = handled
       val query = q.copy(query_id = Some(queryId))
-      val source = getDataSource(query, context, user)
+      val source = getDataSource(query, context, user, clientAddress)
 
       log.debug("successfully instantiated source {} for query with id '{}'", source, queryId)
 
-      val securityLevel = query.sonicdConfig.fields.get("security").flatMap(_.convertTo[Option[Int]])
-
-      if (isAuthorized(user, securityLevel, clientAddress)) {
+      if (isAuthorized(user, query.sourceSecurity, clientAddress)) {
         handler ! source.publisher
       } else handler ! Failure(new UnauthorizedException(user, clientAddress))
     } catch {
       case e: Exception ⇒
         log.error(e, "error when preparing stream materialization")
         handler ! Failure(e)
-    }
-  }
-
-  def isAuthorized(user: Option[ApiUser], security: Option[Int], clientAddress: Option[InetAddress]): Boolean = {
-    (user, security, clientAddress) match {
-      case (None, None, _) ⇒ true
-      case (Some(u), None, Some(a)) if u.allowedIps.isEmpty || u.allowedIps.get.contains(a) ⇒ true
-      case (Some(u), Some(s), a) if u.authorization >= s
-        && (u.allowedIps.isEmpty || (a.isDefined && u.allowedIps.get.contains(a.get))) ⇒ true
-      case _ ⇒ false
     }
   }
 
@@ -150,10 +138,23 @@ class SonicdController(authService: ActorRef, authenticationTimeout: Timeout) ex
 
 object SonicdController {
 
-  def getDataSource(query: Query, context: ActorContext, user: Option[ApiUser]): DataSource = {
+  def isAuthorized(user: Option[ApiUser], security: Option[Int], clientAddress: Option[InetAddress]): Boolean = {
+    (user, security, clientAddress) match {
+      case (None, None, _) ⇒ true
+      case (Some(u), None, a)
+        if u.allowedIps.isEmpty || (a.isDefined && u.allowedIps.get.contains(a.get)) ⇒ true
+      case (Some(u), Some(s), a)
+        if u.authorization >= s && (u.allowedIps.isEmpty || (a.isDefined && u.allowedIps.get.contains(a.get))) ⇒ true
+      case _ ⇒ false
+    }
+  }
+
+  def getDataSource(query: Query, context: ActorContext,
+                    user: Option[ApiUser], clientAddress: Option[InetAddress]): DataSource = {
     getSourceClass(query)
       .getOrElse(throw new Exception(s"could not find ${query.sonicdSourceClass} in the classpath")).getConstructors()(0)
-      .newInstance(query, context, RequestContext(query.traceId.get, user)).asInstanceOf[DataSource]
+      .newInstance(query, context, RequestContext(query.traceId.get, user, clientAddress))
+      .asInstanceOf[DataSource]
   }
 
   def getSourceClass(query: Query): Try[Class[_]] = {
@@ -165,6 +166,8 @@ object SonicdController {
   }
 
   implicit class SonicdQuery(val query: Query) {
+    private[unstable] lazy val sourceSecurity: Option[Int] =
+      sonicdConfig.fields.get("security").flatMap(_.convertTo[Option[Int]])
 
     //CAUTION: leaking this value outside of sonicd-server is a major security risk
     private[unstable] lazy val sonicdConfig: JsObject = query.config match {

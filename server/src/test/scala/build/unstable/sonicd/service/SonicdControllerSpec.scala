@@ -81,6 +81,24 @@ class SonicdControllerSpec(_system: ActorSystem) extends TestKit(_system)
       val done = expectMsgType[Failure[_]]
     }
 
+    "authorize queries on sources without security and users without a known address when user's allowedIps is empty" in {
+      val c = newActor
+      val config = """{"class" : "SyntheticSource"}""".parseJson.asJsObject
+      val claims = ApiKey("1", Mode.Read, 1, None, None).toJWTClaims("bandit")
+      val user = AuthenticationActor.fromJWTClaims(claims)
+      val auth = SonicdAuth(signer.sign(claims))
+      val syntheticQuery = Query("10", config, Some(auth)).copy(trace_id = Some("1234"))
+
+      c ! NewCommand(syntheticQuery, None)
+      val cmd = expectMsgType[ValidateToken]
+      assert(cmd.token == auth.token)
+
+      lastSender ! user
+      expectMsgType[Props]
+
+      c.underlyingActor.handled shouldBe 1
+    }
+
     "authorize queries on sources with security" in {
       val c = newActor
       val config = """{"class" : "SyntheticSource", "security" : 1}""".parseJson.asJsObject

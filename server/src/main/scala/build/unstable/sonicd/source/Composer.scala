@@ -10,7 +10,7 @@ import build.unstable.sonic.model._
 import build.unstable.sonicd.SonicdLogging
 import build.unstable.sonicd.source.Composer.{ComposeStrategy, ComposedQuery, ConcatStrategy}
 import build.unstable.sonicd.system.actor.SonicdController
-import build.unstable.sonicd.system.actor.SonicdController.SonicdQuery
+import build.unstable.sonicd.system.actor.SonicdController.{SonicdQuery, UnauthorizedException}
 import build.unstable.tylog.Variation
 import org.slf4j.event.Level
 import spray.json._
@@ -271,10 +271,16 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
       tryPushDownstream()
       try {
         val ps = queries.map { query ⇒
-          val source = SonicdController.getDataSource(query.query.query, context, ctx.user)
+          if (!SonicdController.isAuthorized(ctx.user, query.query.query.sourceSecurity, ctx.clientAddress))
+            throw new UnauthorizedException(ctx.user, ctx.clientAddress)
+
+          val source = SonicdController.getDataSource(
+            query.query.query, context, ctx.user, ctx.clientAddress)
+
           val ref = query.name
             .map(n ⇒ context.actorOf(source.publisher, n))
             .getOrElse(context.actorOf(source.publisher))
+
           Source.fromPublisher[SonicMessage](ActorPublisher.apply(ref))
             .map((_, query.priority)) → query.priority
         }.sorted

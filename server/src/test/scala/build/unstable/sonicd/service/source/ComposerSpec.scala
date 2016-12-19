@@ -10,7 +10,7 @@ import build.unstable.sonicd.model.Fixture._
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.Composer._
 import build.unstable.sonicd.source.{Composer, ComposerPublisher}
-import build.unstable.sonicd.system.actor.SonicdController.SonicdQuery
+import build.unstable.sonicd.system.actor.SonicdController.{SonicdQuery, UnauthorizedException}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
 
@@ -61,7 +61,7 @@ class ComposerSpec(_system: ActorSystem)
     ref
   }
 
-  "PrestoSource" should {
+  "ComposerSource" should {
 
     val root = """10001"""
     val mockConfig = JsObject(Map(
@@ -77,13 +77,9 @@ class ComposerSpec(_system: ActorSystem)
       // force instantiate underlying publishers
       pub ! ActorPublisherMessage.Request(1)
 
-      val proxy1 = pub.underlyingActor.context.child("test1")
-        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
-      val proxy2 = pub.underlyingActor.context.child("test2")
-        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
 
-      proxy1 ! StreamStarted
-      proxy2 ! StreamStarted
       expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
 
       pub ! ActorPublisherMessage.Request(1)
@@ -143,13 +139,9 @@ class ComposerSpec(_system: ActorSystem)
       // force instantiate underlying publishers
       pub ! ActorPublisherMessage.Request(1)
 
-      val proxy1 = pub.underlyingActor.context.child("test1")
-        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
-      val proxy2 = pub.underlyingActor.context.child("test2")
-        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
 
-      proxy1 ! StreamStarted
-      proxy2 ! StreamStarted
       expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
 
       pub ! ActorPublisherMessage.Request(2)
@@ -335,13 +327,9 @@ class ComposerSpec(_system: ActorSystem)
       // force instantiate underlying publishers
       pub ! ActorPublisherMessage.Request(1)
 
-      val proxy1 = pub.underlyingActor.context.child("test1")
-        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
-      val proxy2 = pub.underlyingActor.context.child("test2")
-        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
 
-      proxy1 ! StreamStarted
-      proxy2 ! StreamStarted
       expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
 
       pub ! ActorPublisherMessage.Request(2)
@@ -358,13 +346,9 @@ class ComposerSpec(_system: ActorSystem)
       // force instantiate underlying publishers
       pub ! ActorPublisherMessage.Request(1)
 
-      val proxy1 = pub.underlyingActor.context.child("test1")
-        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
-      val proxy2 = pub.underlyingActor.context.child("test2")
-        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
 
-      proxy1 ! StreamStarted
-      proxy2 ! StreamStarted
       expectStreamStarted()
 
       pub ! ActorPublisherMessage.Request(100)
@@ -395,13 +379,9 @@ class ComposerSpec(_system: ActorSystem)
       // force instantiate underlying publishers
       pub ! ActorPublisherMessage.Request(1)
 
-      val proxy1 = pub.underlyingActor.context.child("test1")
-        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
-      val proxy2 = pub.underlyingActor.context.child("test2")
-        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy1 = pub.underlyingActor.context.child("test1").get
+      val proxy2 = pub.underlyingActor.context.child("test2").get
 
-      proxy1 ! StreamStarted
-      proxy2 ! StreamStarted
       expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
 
       pub ! ActorPublisherMessage.Request(100)
@@ -413,7 +393,43 @@ class ComposerSpec(_system: ActorSystem)
       expectDone(pub, success = false)
     }
 
-    "should use auth to authorize client" in {
+    "should authorize client" in {
+      val securedMockConfig = JsObject(Map(
+        "class" → JsString("build.unstable.sonicd.service.MockSource"),
+        "security" → JsNumber(50)
+      ))
+      val query1 = Query.apply("10", securedMockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+
+      {
+        val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+          ComposedQuery(query2, 1, Some("test2")) :: Nil, Composer.MergeStrategy)
+
+        pub ! ActorPublisherMessage.Request(2)
+        expectStreamStarted()
+
+        val complete = expectDone(pub, success = false)
+        complete.error.get shouldBe a[UnauthorizedException]
+      }
+
+      {
+        val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+          ComposedQuery(query2, 1, Some("test2")) :: Nil, Composer.MergeStrategy,
+          context = RequestContext("1", Some(testUser.copy(authorization = 50))))
+
+        pub ! ActorPublisherMessage.Request(5)
+
+        val proxy1 = pub.underlyingActor.context.child("test1").get
+        val proxy2 = pub.underlyingActor.context.child("test2").get
+        expectStreamStarted()
+
+        proxy1 ! StreamCompleted("", None)
+        proxy2 ! StreamCompleted("", None)
+        expectDone(pub)
+      }
+    }
+
+    "should compute valid query progress fields" in {
       true shouldBe false
     }
   }
