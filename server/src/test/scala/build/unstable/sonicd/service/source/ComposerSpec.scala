@@ -48,7 +48,7 @@ class ComposerSpec(_system: ActorSystem)
     val mockConfig = JsObject(
       Map(
         "strategy" → strategy.toJson,
-        "buffer" → JsNumber(bufferSize),
+        "buffer-size" → JsNumber(bufferSize),
         "queries" → queries.toJson,
         "fail-fast" → JsBoolean(failFast)
       )
@@ -59,10 +59,6 @@ class ComposerSpec(_system: ActorSystem)
     ActorPublisher(ref).subscribe(subs)
     watch(ref)
     ref
-  }
-
-  def completeSimpleStream() = {
-
   }
 
   "PrestoSource" should {
@@ -391,7 +387,30 @@ class ComposerSpec(_system: ActorSystem)
     }
 
     "should throw buffer overflow if reached max buffer size" in {
-      true shouldBe false
+      val query1 = Query.apply("10", mockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+      val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+        ComposedQuery(query2, 1, Some("test2")) :: Nil, Composer.MergeStrategy, bufferSize = 2)
+
+      // force instantiate underlying publishers
+      pub ! ActorPublisherMessage.Request(1)
+
+      val proxy1 = pub.underlyingActor.context.child("test1")
+        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy2 = pub.underlyingActor.context.child("test2")
+        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+
+      proxy1 ! StreamStarted
+      proxy2 ! StreamStarted
+      expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
+
+      pub ! ActorPublisherMessage.Request(100)
+
+      proxy1 ! OutputChunk(Vector(1))
+      proxy1 ! OutputChunk(Vector(2))
+      proxy1 ! OutputChunk(Vector(3))
+
+      expectDone(pub, success = false)
     }
 
     "should use auth to authorize client" in {

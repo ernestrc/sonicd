@@ -32,7 +32,7 @@ class Composer(query: Query, actorContext: ActorContext, context: RequestContext
   assert(queries.nonEmpty, "expected at least one query in `queries` property")
   assert(queries.forall(_.priority >= 0), "'priority' field in query config must be an unsigned integer")
 
-  val bufferSize = getOption[Int]("buffer").getOrElse(256)
+  val bufferSize = getOption[Int]("buffer-size").getOrElse(2048)
   val strategy = getOption[ComposeStrategy]("strategy").getOrElse(MergeStrategy)
   val failFast = getOption[Boolean]("fail-fast").getOrElse(true)
 
@@ -245,6 +245,10 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
     case (m: SonicMessage, p: Int) ⇒
       sendAckMaybe(upstream)
       deferred.enqueue(m → p)
+      if (deferred.size > bufferSize) {
+        val e = new Exception(s"reached deferred buffer limit of $bufferSize")
+        context.become(terminating(StreamCompleted.error(e)))
+      }
   }
 
   def waiting: Receive = commonReceive orElse {
