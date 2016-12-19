@@ -47,7 +47,7 @@ trait HandlerUtils {
   def expectDone(pub: ActorRef, success: Boolean = true): StreamCompleted = {
     val d = expectMsgType[StreamCompleted]
     if (success) assert(d.success)
-    else assert(!d.success)
+    else assert(!d.success, s"unexpected stream completion: success=$success")
 
     expectMsg("complete") //sent by ImplicitSubscriber
     expectTerminated(pub)

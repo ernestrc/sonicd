@@ -39,6 +39,7 @@ class ComposerSpec(_system: ActorSystem)
 
   def newPublisher(q: String, queries: List[ComposedQuery],
                    strategy: ComposeStrategy,
+                   failFast: Boolean = true,
                    bufferSize: Int = 256,
                    placeholder: Option[String] = None,
                    context: RequestContext = testCtx,
@@ -48,7 +49,8 @@ class ComposerSpec(_system: ActorSystem)
       Map(
         "strategy" → strategy.toJson,
         "buffer" → JsNumber(bufferSize),
-        "queries" → queries.toJson
+        "queries" → queries.toJson,
+        "fail-fast" → JsBoolean(failFast)
       )
     )
     val query = new Query(Some(1L), Some("traceId"), None, q, mockConfig)
@@ -221,7 +223,7 @@ class ComposerSpec(_system: ActorSystem)
       }
     }
 
-    "provide incremental metadata when different streams have different schemas" in {
+    "provide incremental metadata" in {
       val query1 = Query.apply("10", mockConfig, None)
       val query2 = Query.apply("10", mockConfig, None)
       val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
@@ -305,8 +307,9 @@ class ComposerSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1)
 
       // allowedPriority should be 7 now
-      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(2))
-      expectMsgType[OutputChunk] shouldBe OutputChunk(Vector(3))
+      val msgs = receiveN(2)
+      msgs should contain(OutputChunk(Vector(2)))
+      msgs should contain(OutputChunk(Vector(3)))
       expectNoMsg()
 
       proxy2 ! StreamCompleted("", None)
@@ -327,7 +330,67 @@ class ComposerSpec(_system: ActorSystem)
       expectDone(pub)
     }
 
-    "if substream completes with error, it completes with error" in {
+    "if substream completes with error, and failfast is TRUE it propagates failure to stream" in {
+      val query1 = Query.apply("10", mockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+      val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+        ComposedQuery(query2, 0, Some("test2")) :: Nil, Composer.MergeStrategy)
+
+      // force instantiate underlying publishers
+      pub ! ActorPublisherMessage.Request(1)
+
+      val proxy1 = pub.underlyingActor.context.child("test1")
+        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy2 = pub.underlyingActor.context.child("test2")
+        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+
+      proxy1 ! StreamStarted
+      proxy2 ! StreamStarted
+      expectStreamStarted() // 1 only as concat should not set publisher to active until first source is completed
+
+      pub ! ActorPublisherMessage.Request(2)
+      proxy2 ! StreamCompleted.error(new Exception("boom"))
+
+      expectDone(pub, success = false)
+    }
+    "if substream completes with error and failFast is FALSE it doesn't propagate failure" in {
+      val query1 = Query.apply("10", mockConfig, None)
+      val query2 = Query.apply("10", mockConfig, None)
+      val pub = newPublisher(root, ComposedQuery(query1, 0, Some("test1")) ::
+        ComposedQuery(query2, 0, Some("test2")) :: Nil, Composer.MergeStrategy, failFast = false)
+
+      // force instantiate underlying publishers
+      pub ! ActorPublisherMessage.Request(1)
+
+      val proxy1 = pub.underlyingActor.context.child("test1")
+        .getOrElse(throw new Exception(s"test1 not found in: ${pub.underlyingActor.context.children}"))
+      val proxy2 = pub.underlyingActor.context.child("test2")
+        .getOrElse(throw new Exception(s"test2 not found in: ${pub.underlyingActor.context.children}"))
+
+      proxy1 ! StreamStarted
+      proxy2 ! StreamStarted
+      expectStreamStarted()
+
+      pub ! ActorPublisherMessage.Request(100)
+      proxy2 ! StreamCompleted.error(new Exception("boom"))
+
+      val meta = TypeMetadata(Vector("test" → JsNumber(1)))
+      proxy1 ! meta
+      expectTypeMetadata() shouldBe meta
+
+      proxy1 ! QueryProgress(QueryProgress.Running, 1, Some(10), Some("blah"))
+      expectMsgType[QueryProgress] shouldBe QueryProgress(QueryProgress.Running, 10.0d, Some(100d), Some("%"))
+
+      val out3 = OutputChunk(Vector(0))
+      proxy1 ! out3
+      expectMsgType[OutputChunk] shouldBe out3
+
+      proxy1 ! StreamCompleted("", None)
+
+      expectDone(pub)
+    }
+
+    "should throw buffer overflow if reached max buffer size" in {
       true shouldBe false
     }
 

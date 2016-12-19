@@ -1,6 +1,5 @@
 package build.unstable.sonicd.source
 
-import akka.actor.Status.Failure
 import akka.actor._
 import akka.stream.ActorMaterializer
 import akka.stream.actor.ActorPublisher
@@ -35,11 +34,12 @@ class Composer(query: Query, actorContext: ActorContext, context: RequestContext
 
   val bufferSize = getOption[Int]("buffer").getOrElse(256)
   val strategy = getOption[ComposeStrategy]("strategy").getOrElse(MergeStrategy)
+  val failFast = getOption[Boolean]("fail-fast").getOrElse(true)
 
   val actorMaterializer = ActorMaterializer.create(actorContext)
 
   val publisher: Props = {
-    Props(classOf[ComposerPublisher], queries, bufferSize, strategy,
+    Props(classOf[ComposerPublisher], queries, bufferSize, strategy, failFast,
       context, actorMaterializer)
   }
 }
@@ -104,8 +104,8 @@ object Composer {
   }
 }
 
-class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy: ComposeStrategy)
-                       (implicit ctx: RequestContext, materializer: ActorMaterializer)
+class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy: ComposeStrategy,
+                        failFast: Boolean)(implicit ctx: RequestContext, materializer: ActorMaterializer)
   extends ActorPublisher[SonicMessage] with SonicdLogging with SonicdPublisher {
 
   case object Ack
@@ -207,6 +207,8 @@ class ComposerPublisher(queries: List[ComposedQuery], bufferSize: Int, strategy:
       }
     case (m: SonicMessage, priority: Int) if priority >= allowedPriority ⇒
       m match {
+        case c: StreamCompleted if failFast && c.error.isDefined ⇒
+          context.become(terminating(StreamCompleted.error(c.error.get)))
         case c: StreamCompleted ⇒
           try {
             streamsLeft -= 1
