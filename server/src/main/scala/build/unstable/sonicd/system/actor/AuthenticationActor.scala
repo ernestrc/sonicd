@@ -64,7 +64,7 @@ class AuthenticationActor(apiKeys: List[ApiKey], secret: String,
             throw e
         }
       }
-    }.getOrElse(Failure(new AuthenticationException(s"invalid api-key: $key")))
+    }.getOrElse(Failure(new AuthenticationException(s"invalid api-key")))
   }
 
   override def receive: Receive = {
