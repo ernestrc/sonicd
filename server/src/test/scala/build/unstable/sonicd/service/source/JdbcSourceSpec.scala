@@ -101,7 +101,7 @@ class JdbcSourceSpec(_system: ActorSystem)
       runQuery("select count(*) from test_commit") { stmt ⇒
         val rs = stmt.getResultSet
         rs.next()
-        rs.getInt(1) shouldBe 1
+        rs.getInt(1) shouldBe 0
       }
       runQuery("drop table test_commit;")()
       testConnectionOpen()
@@ -147,28 +147,6 @@ class JdbcSourceSpec(_system: ActorSystem)
       expectMsg(OutputChunk(Vector("1234")))
       pub ! ActorPublisherMessage.Request(1)
       expectDone(pub)
-    }
-
-    "run multiple statements but rollback/not commit if one of them fails" in {
-      runQuery("create table roll(id VARCHAR);")()
-      val pub = newPublisher(
-        "insert into roll VALUES ('1');" +
-          "-- COMMENT insert into roll VALUES ('1');" +
-          "insert into ROCK VALUES ('2');" +
-          "insert into roll VALUES ('2');" +
-          "insert into roll VALUES ('4');")
-
-      pub ! ActorPublisherMessage.Request(1)
-      expectMsgPF() {
-        case d: StreamCompleted ⇒ assert(d.error.nonEmpty)
-      }
-      expectMsg("complete")
-      expectTerminated(pub)
-      runQuery("select count(*) from roll") { stmt ⇒
-        val rs = stmt.getResultSet
-        rs.next()
-        rs.getInt(1) shouldBe 0
-      }
     }
 
     "close connection after running one statement" in {

@@ -29,6 +29,9 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
   lazy val jdbcConnectionsActor = actorContext.child(JdbcConnectionsHandler.actorName).getOrElse {
     actorContext.actorOf(jdbcConnectionsProps, JdbcConnectionsHandler.actorName)
   }
+  // some sources are inherently read-only and drivers often don't support
+  // setting readOnly mode or autoCommit = false
+  val ignoreUserMode: Boolean = getOption[Boolean]("ignore-user-mode").getOrElse(false)
   val user: String = getOption[String]("user").getOrElse("sonicd")
   val initializationStmts: List[String] = getOption[List[String]]("pre").getOrElse(Nil)
   val password: String = getOption[String]("password").getOrElse("")
@@ -40,7 +43,7 @@ class JdbcSource(query: Query, actorContext: ActorContext, context: RequestConte
 
   lazy val publisher: Props = Props(classOf[JdbcPublisher],
     query.query, dbUrl, user, password, driver,
-    executorProps, jdbcConnectionsActor, initializationStmts, context)
+    executorProps, jdbcConnectionsActor, initializationStmts, ignoreUserMode, context)
     .withDispatcher("akka.actor.jdbc-dispatcher")
 
 }
@@ -64,7 +67,8 @@ class JdbcPublisher(query: String,
                     driver: String,
                     executorProps: (Connection, Statement) ⇒ Props,
                     connections: ActorRef,
-                    initializationStmts: List[String])
+                    initializationStmts: List[String],
+                    ignoreUserMode: Boolean)
                    (implicit ctx: RequestContext)
   extends ActorPublisher[SonicMessage] with SonicdLogging {
 
@@ -108,6 +112,7 @@ class JdbcPublisher(query: String,
 
   /* STATE */
 
+  val canWrite = ctx.user.exists(_.mode.canWrite)
   var handle: JdbcHandle = null
   var isDone: Boolean = false
 
@@ -131,6 +136,20 @@ class JdbcPublisher(query: String,
     case j@JdbcHandle(conn, stmt) ⇒
       log.tylog(Level.DEBUG, ctx.traceId, GetJdbcHandle, Variation.Success, "received jdbc handle")
       handle = j
+      if (!canWrite && !ignoreUserMode) {
+        try conn.setReadOnly(true)
+        catch {
+          case e: Exception ⇒
+            log.warning(s"failed to set connection to read-only: $e. trying to set autoCommit to false..")
+            try conn.setAutoCommit(false)
+            catch {
+              case e: Exception ⇒
+                log.warning(s"failed to disable connection autoCommit: $e")
+                throw new Exception(
+                  "driver doesn't support setAutoCommit or setReadOnly but user doesn't have write access")
+            }
+        }
+      }
       val executor = context.actorOf(executorProps(conn, stmt))
       context.watch(executor)
       context.become(streaming(executor))
@@ -227,7 +246,6 @@ class JdbcExecutor(query: String,
     }
   }
 
-  val canWrite = ctx.user.exists(_.mode.canWrite)
   val classLoader = this.getClass.getClassLoader
 
 
@@ -329,18 +347,6 @@ class JdbcExecutor(query: String,
         self ! Request(n - 1L)
         context.become(streaming())
       } else {
-        if (canWrite && !conn.getAutoCommit) {
-          log.debug("user has write access and auto-commit is false. Committing now...")
-          conn.commit()
-        } else if (!canWrite && !conn.getAutoCommit) {
-          log.warning("user tried to run update statements but this token doesn't grant write access")
-        } else if (canWrite) {
-          log.debug("user has write access and auto-commit was true")
-        } else if (!canWrite) {
-          // should never happen
-          val e = new Exception("connection's autoCommit was true but user should not have write access")
-          log.error(e, "unable to enforce source permissions")
-        }
         context.parent ! TypeMetadata(Vector.empty) //n at least will be 1
         if (n - 1 > 0) terminate(StreamCompleted.success)
         else context.become({
@@ -382,15 +388,6 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
           log.debug("registered driver {}", driver)
           val c = DriverManager.getConnection(url, user, password)
           log.debug("created new connection {}", c)
-          try {
-            c.setAutoCommit(false)
-            if (c.getAutoCommit) {
-              throw new Exception(s"$driver ignored setAutoCommit method")
-            }
-          } catch {
-            case e: Exception ⇒
-              log.warning("{} doesn't support setting auto-commit to false: {}", driver, e)
-          }
           c
         }
         var stmt: Statement = null
