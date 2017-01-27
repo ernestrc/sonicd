@@ -12,8 +12,10 @@ Sonicd is a data streaming gateway that abstracts over data source connectors an
 - **PrestoSource**: non-blocking streaming connector for [Facebook's Presto](https://prestodb.io/).
 - **ElasticSearchSource**: non-blocking streaming connector for [ElasticSearch](https://www.elastic.co/products/elasticsearch)
 - **JdbcSource**: JDBC connector for any database with a JDBC driver implementation (tested with Hive, Redshift, H2, MySQL, PostgreSQL).
-- **ZuoraObjectQueryLanguageSource**: SOAP streaming connector for [ZOQL](https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/M_Zuora_Object_Query_Language).
-- **LocalJsonStreamSource**: stream changes in local JSON files to, for example, build rich regression tests of your server-side components.
+- **ZuoraObjectQueryLanguageSource**: Zuora's SOAP API [ZOQL](https://knowledgecenter.zuora.com/DC_Developers/SOAP_API/M_Zuora_Object_Query_Language) streaming connector.
+- **LocalJsonStreamSource**: stream changes in local JSON files.
+- **KafkaSource**: Apache Kafka connector with simple DSL to select/filter streams efficiently.
+- **Composer**: Combine in a single Sonic stream, any of the previous sources.
 
 # Deploy
 Check [server/src/main/resources/reference.conf](server/src/main/resources/reference.conf) for a config reference and `docker run -d -v ${CONFIG_DIR}:/etc/sonicd:ro -p 9111:9111 -p 10001:10001 xarxa6/sonicd;`.
