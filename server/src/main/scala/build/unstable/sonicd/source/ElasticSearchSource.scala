@@ -1,6 +1,7 @@
 package build.unstable.sonicd.source
 
 import akka.actor._
+import akka.event.Logging.LogLevel
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.stream.actor.ActorPublisher
@@ -120,7 +121,7 @@ class ElasticSearchPublisher(traceId: String,
                              supervisor: ActorRef,
                              watermark: Long)
                             (implicit ctx: RequestContext)
-  extends ActorPublisher[SonicMessage] with SonicdLogging {
+  extends ActorPublisher[SonicMessage] with SonicdPublisher with SonicdLogging {
 
   import akka.stream.actor.ActorPublisherMessage._
 
@@ -128,13 +129,13 @@ class ElasticSearchPublisher(traceId: String,
 
   @throws[Exception](classOf[Exception])
   override def postStop(): Unit = {
-    log.info( "stopping ES publisher {}", traceId)
+    log.info("stopping ES publisher {}", traceId)
     context unwatch supervisor
   }
 
   @throws[Exception](classOf[Exception])
   override def preStart(): Unit = {
-    log.debug( "starting ES publisher {}", traceId)
+    log.debug("starting ES publisher {}", traceId)
     context watch supervisor
   }
 
@@ -142,8 +143,10 @@ class ElasticSearchPublisher(traceId: String,
   /* HELPERS */
 
   def nextRequest: HttpRequestCommand = {
-    val entity: RequestEntity = HttpEntity.Strict.apply(ContentTypes.`application/json`,
-      ByteString(ElasticSearch.ESQueryJsonFormat.write(query, nextFrom, nextSize).compactPrint, ByteString.UTF_8))
+    val payload: String = ElasticSearch.ESQueryJsonFormat.write(query, nextFrom, nextSize).compactPrint
+    log.trace("sending query: {}", payload)
+    val entity: RequestEntity =
+      HttpEntity.Strict.apply(ContentTypes.`application/json`, ByteString(payload, ByteString.UTF_8))
     val httpRequest = HttpRequest.apply(HttpMethods.POST, uri, entity = entity)
     HttpRequestCommand(traceId, httpRequest)
   }
@@ -164,10 +167,8 @@ class ElasticSearchPublisher(traceId: String,
 
   def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
 
-  def getTypeMetadata(hits: ElasticSearch.Hits): Option[TypeMetadata] = {
-    hits.hits.headOption.map { hit ⇒
-      TypeMetadata(hit._source.fields.toVector)
-    }
+  def getTypeMetadata(hit: ElasticSearch.Hit): TypeMetadata = {
+    TypeMetadata(hit._source.fields.toVector)
   }
 
   val uri = typeHint.map(t ⇒ s"/$index/$t/_search").getOrElse(s"/$index/_search")
@@ -177,7 +178,6 @@ class ElasticSearchPublisher(traceId: String,
   /* STATE */
 
   var target = limit
-  var bufferedMeta: Boolean = false
   val buffer: mutable.Queue[SonicMessage] = mutable.Queue(StreamStarted(ctx.traceId))
   var nextSize = if (limit > 0) Math.min(limit, querySize) else querySize
   var nextFrom = query.extractedFrom.getOrElse(0L)
@@ -212,15 +212,13 @@ class ElasticSearchPublisher(traceId: String,
       fetched += nhits
       if (target < 0L) target = r.hits.total
 
-      //extract type metadata
-      if (!bufferedMeta) {
-        getTypeMetadata(r.hits).foreach { meta ⇒
+      r.hits.hits.foreach { h ⇒
+        val extracted = getTypeMetadata(h)
+        if (updateMeta(extracted)) {
           buffer.enqueue(meta)
-          bufferedMeta = true
         }
+        buffer.enqueue(alignOutput(h._source.fields, meta))
       }
-
-      r.hits.hits.foreach(h ⇒ buffer.enqueue(OutputChunk(h._source.fields.values.to[Vector])))
 
       if (nhits < nextSize || fetched == target) {
         log.tylog(Level.INFO, traceId, ExecuteStatement, Variation.Success, "fetched {} documents", fetched)

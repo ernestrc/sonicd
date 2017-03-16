@@ -19,8 +19,8 @@ import scala.concurrent.duration._
 
 class ElasticSearchSourceSpec(_system: ActorSystem)
   extends TestKit(_system) with WordSpecLike
-  with Matchers with BeforeAndAfterAll with ImplicitSender
-  with ImplicitSubscriber with HandlerUtils {
+    with Matchers with BeforeAndAfterAll with ImplicitSender
+    with ImplicitSubscriber with HandlerUtils {
 
   import Fixture._
 
@@ -112,6 +112,37 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       completeSimpleStream(pub)
 
       pub ! ActorPublisherMessage.Request(1)
+      expectDone(pub)
+    }
+
+    "emit metadata if schema changes" in {
+      val querySize = 100
+      val pub = newPublisher(query1, querySize = querySize)
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsgType[HttpRequestCommand]
+
+      expectStreamStarted()
+      pub ! ActorPublisherMessage.Request(1000)
+
+      val hit1Data = """{"a": "b"}""".parseJson.asJsObject
+      val hit1 = ElasticSearch.Hit("", "", "", 0, hit1Data)
+      val hit2Data = """{"s": "b"}""".parseJson.asJsObject
+      val hit2 = ElasticSearch.Hit("", "", "", 0, hit2Data)
+
+      pub ! getQueryResults(Vector(hit1, hit1, hit2))
+      val meta1 = expectTypeMetadata()
+      expectMsg(OutputChunk(Vector("b")))
+
+      // same schema
+      expectMsg(OutputChunk(Vector("b")))
+
+      // diff schema
+      val meta2 = expectTypeMetadata()
+      assert(meta1.typesHint != meta2.typesHint)
+      assert(meta2.typesHint.contains(("a", JsString("b"))))
+      assert(meta2.typesHint.contains(("s", JsString("b"))))
+      expectMsg(OutputChunk(Vector[JsValue](JsNull, JsString("b"))))
+
       expectDone(pub)
     }
 
@@ -241,7 +272,8 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
     "chunkify requests to elastic search" in {
       val querySize = 10
-      val watermark = 0 //no query ahead
+      val watermark = 0
+      //no query ahead
       val pub = newPublisher(query1, querySize = querySize, watermark = watermark)
 
       //query has totalHits 100 but returned was 10 (as requested with querySize)
@@ -256,7 +288,8 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
     "chunkify requests to elastic search when user sets a 'from'" in {
       val querySize = 10
-      val watermark = 0 //no query ahead
+      val watermark = 0
+      //no query ahead
       val userSetFrom = 5
       val pub = newPublisher(queryWithFrom, querySize = querySize, watermark = watermark)
 
@@ -271,9 +304,12 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
 
     "if user sets limit to be bigger than our desired fetch size, it should chunkify fetching" in {
       val queryWithSize = """{"query":{"term":{"event_source":{"value":"raven"}}},"size":50}"""
-      val userSetSize = 50 //user's desired size
-      val querySize = 10 //our desired size
-      val watermark = 0 //no query ahead
+      val userSetSize = 50
+      //user's desired size
+      val querySize = 10
+      //our desired size
+      val watermark = 0
+      //no query ahead
       val pub = newPublisher(queryWithSize, querySize = querySize, watermark = watermark)
 
       //query has totalHits 100 but returned was 10 (as requested with querySize)
@@ -288,7 +324,8 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
     "queryAhead depending on buffer size and configured watermark" in {
       val queryWithSize = """{"query":{"term":{"event_source":{"value":"raven"}}},"size":10}"""
       val querySize = 4
-      val watermark = 2 //query when buffer is smaller than 5
+      val watermark = 2
+      //query when buffer is smaller than 5
       val pub = newPublisher(queryWithSize, querySize = querySize, watermark = watermark)
 
       //query has totalHits 100 but returned was 10 (as requested with querySize)
