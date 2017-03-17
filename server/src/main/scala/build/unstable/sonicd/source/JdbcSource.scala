@@ -287,9 +287,7 @@ class JdbcExecutor(query: String,
               catch {
                 case e: Exception ⇒ extractValue(str)(JsString.apply)
               }
-            case JdbcPublisher.Else ⇒
-              log.warning("could not assign jdbc class to JsValue: {}", typeHint)
-              extractValue(rs.getString(pos))(JsString.apply)
+            case JdbcPublisher.Else ⇒ extractValue(rs.getString(pos))(JsString.apply)
           }
           if (rs.wasNull) {
             data.append(JsNull)
@@ -338,7 +336,9 @@ class JdbcExecutor(query: String,
                 JsNumber(0.0) → JdbcPublisher.Dec
               case num if Try(classLoader.loadClass(num).getSuperclass.equals(classOf[Number])).getOrElse(false) ⇒
                 JsNumber(0) → JdbcPublisher.Num
-              case e ⇒ JsString(rsmd.getColumnClassName(i)) → JdbcPublisher.Else
+              case e ⇒
+                log.warning("could not assign jdbc class {}; defaulting to string", e)
+                JsString(e) → JdbcPublisher.Else
             }
             (columns :+ ((rsmd.getColumnLabel(i), typeHint)), met :+ clazz)
         }
