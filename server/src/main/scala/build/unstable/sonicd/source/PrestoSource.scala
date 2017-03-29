@@ -63,7 +63,7 @@ class PrestoSupervisor(val masterUrl: String, val port: Int)
   lazy val extraHeaders: Seq[HttpHeader] = scala.collection.immutable.Seq(Presto.Headers.SOURCE)
 
   override def cancelRequestFromResult(t: Presto.QueryResults): Option[HttpRequest] =
-    t.partialCancelUri.map { uri ⇒
+    t.nextUri.map { uri ⇒
       HttpRequest(HttpMethods.DELETE, uri)
     }
 }
