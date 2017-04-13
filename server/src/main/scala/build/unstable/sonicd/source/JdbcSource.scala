@@ -267,7 +267,6 @@ class JdbcExecutor(query: String,
         var pos = 1
         while (pos <= classMeta.size) {
           val typeHint = classMeta(pos - 1)
-          log.debug("inspecting jdbc type {} to find suitable JsValue type", typeHint)
           val value = typeHint match {
             case JdbcPublisher.Str ⇒ extractValue(rs.getString(pos))(JsString.apply)
             case JdbcPublisher.Bool ⇒
@@ -394,24 +393,25 @@ class JdbcConnectionsHandler extends Actor with SonicdLogging {
         //try to set streaming properties for each driver
         try {
           if (driver == "org.postgresql.Driver" && isQuery) {
-            log.debug("setting streaming properties for PostgreSQL")
+            conn.setAutoCommit(false)
             stmt = conn.createStatement(
               ResultSet.TYPE_FORWARD_ONLY,
               ResultSet.CONCUR_READ_ONLY,
               ResultSet.FETCH_FORWARD
             )
             stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
+            log.info("set streaming properties for PostgreSQL")
           } else if (driver == "com.mysql.jdbc.Driver" && isQuery) {
-            log.debug("setting streaming properties for MySQL")
             stmt = conn.createStatement(
               ResultSet.TYPE_FORWARD_ONLY,
               ResultSet.CONCUR_READ_ONLY
             )
             stmt.setFetchSize(Integer.MIN_VALUE)
+            log.info("set streaming properties for MySQL")
           } else if (isQuery) {
-            log.debug("setting streaming properties for driver")
             stmt = conn.createStatement()
             stmt.setFetchSize(SonicdConfig.JDBC_FETCHSIZE)
+            log.info("set streaming properties for driver")
           } else {
             stmt = conn.createStatement()
           }
