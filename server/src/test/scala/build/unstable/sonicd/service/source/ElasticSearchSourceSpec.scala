@@ -146,6 +146,52 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       expectDone(pub)
     }
 
+    "emit metadata even if hits is 0" in {
+      val querySize = 100
+      val query = """{"query":{"term":{"event_source":{"value":"raven"}}}}"""
+      val pub = newPublisher(query, querySize = querySize)
+      pub ! ActorPublisherMessage.Request(1000)
+      expectMsgType[HttpRequestCommand]
+      expectStreamStarted()
+
+      pub ! getQueryResults(Vector.empty)
+      val meta = expectTypeMetadata()
+      assert(meta.typesHint.isEmpty)
+      expectDone(pub)
+    }
+
+    "emit metadata even if hits is 0 and use stored_fields or fields in query" in {
+      val querySize = 100
+
+      {
+        val query = """{"stored_fields":["a", "b"], "query":{"term":{"event_source":{"value":"raven"}}}}"""
+        val pub = newPublisher(query, querySize = querySize)
+        pub ! ActorPublisherMessage.Request(1000)
+        expectMsgType[HttpRequestCommand]
+        expectStreamStarted()
+
+        pub ! getQueryResults(Vector.empty)
+        val meta = expectTypeMetadata()
+        assert(meta.typesHint.contains(("a", JsNull)))
+        assert(meta.typesHint.contains(("b", JsNull)))
+        expectDone(pub)
+      }
+
+      {
+        val query = """{"fields":["a", "b"], "query":{"term":{"event_source":{"value":"raven"}}}}"""
+        val pub = newPublisher(query, querySize = querySize)
+        pub ! ActorPublisherMessage.Request(1000)
+        expectMsgType[HttpRequestCommand]
+        expectStreamStarted()
+
+        pub ! getQueryResults(Vector.empty)
+        val meta = expectTypeMetadata()
+        assert(meta.typesHint.contains(("a", JsNull)))
+        assert(meta.typesHint.contains(("b", JsNull)))
+        expectDone(pub)
+      }
+    }
+
     "if query does not have an index, uri index should be set to _all" in {
       val pub = newPublisher(query1)
       pub ! ActorPublisherMessage.Request(1)

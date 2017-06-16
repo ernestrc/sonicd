@@ -18,6 +18,7 @@ import spray.json._
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration, _}
+import scala.util.Try
 
 object ElasticSearch {
   def getSupervisorName(nodeUrl: String, port: Int): String = s"elasticsearch_${nodeUrl}_$port"
@@ -199,6 +200,14 @@ class ElasticSearchPublisher(traceId: String,
     }
   }
 
+  def getSelect(query: ESQuery): Vector[String] = {
+    val payload = query.payload.fields
+    val fields = payload.get("stored_fields").orElse(payload.get("fields"))
+    fields
+      .flatMap(f ⇒ Try(f.convertTo[Vector[String]]).toOption)
+      .getOrElse(Vector.empty)
+  }
+
   def materialized: Receive = commonReceive orElse {
 
     case Request(n) ⇒
@@ -211,6 +220,15 @@ class ElasticSearchPublisher(traceId: String,
       resultsPending = false
       fetched += nhits
       if (target < 0L) target = r.hits.total
+
+      // emit artificial TypeMetadata to conform to sonic protocol
+      if (r.hits.total == 0) {
+        val select = getSelect(query)
+        // no need to use updateMeta as if hits is 0 we only
+        // get here once and complete stream
+        meta = TypeMetadata(select.map(i ⇒ i → JsNull))
+        buffer.enqueue(meta)
+      }
 
       r.hits.hits.foreach { h ⇒
         val extracted = getTypeMetadata(h)
