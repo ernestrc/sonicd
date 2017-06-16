@@ -53,7 +53,7 @@ object ElasticSearch {
 
   case class Shards(total: Int, successful: Int, failed: Int)
 
-  case class Hit(_index: String, _type: String, _id: String, _score: Float, _source: JsObject)
+  case class Hit(_index: String, _type: String, _id: String, _score: Float, _source: Option[JsObject])
 
   case class Hits(total: Long, max_score: Float, hits: Vector[Hit])
 
@@ -169,7 +169,7 @@ class ElasticSearchPublisher(traceId: String,
   def shouldQueryAhead: Boolean = watermark > 0 && buffer.length < watermark
 
   def getTypeMetadata(hit: ElasticSearch.Hit): TypeMetadata = {
-    TypeMetadata(hit._source.fields.toVector)
+    TypeMetadata(hit._source.map(_.fields.toVector).getOrElse(Vector.empty))
   }
 
   val uri = typeHint.map(t ⇒ s"/$index/$t/_search").getOrElse(s"/$index/_search")
@@ -222,7 +222,7 @@ class ElasticSearchPublisher(traceId: String,
       if (target < 0L) target = r.hits.total
 
       // emit artificial TypeMetadata to conform to sonic protocol
-      if (r.hits.total == 0) {
+      if (r.hits.total == 0 || r.hits.hits.forall(_._source.isEmpty)) {
         val select = getSelect(query)
         // no need to use updateMeta as if hits is 0 we only
         // get here once and complete stream
@@ -235,7 +235,8 @@ class ElasticSearchPublisher(traceId: String,
         if (updateMeta(extracted)) {
           buffer.enqueue(meta)
         }
-        buffer.enqueue(alignOutput(h._source.fields, meta))
+        // ignore if hit doesn't contain _source
+        h._source.foreach(f ⇒ buffer.enqueue(alignOutput(f.fields, meta)))
       }
 
       if (nhits < nextSize || fetched == target) {

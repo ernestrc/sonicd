@@ -6,7 +6,6 @@ import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.{ActorMaterializer, ActorMaterializerSettings}
 import akka.testkit.{CallingThreadDispatcher, ImplicitSender, TestActorRef, TestKit}
 import build.unstable.sonic.JsonProtocol._
-import build.unstable.sonic._
 import build.unstable.sonic.model.{OutputChunk, Query, RequestContext, TypeMetadata}
 import build.unstable.sonicd.model._
 import build.unstable.sonicd.source.http.HttpSupervisor.HttpRequestCommand
@@ -66,7 +65,7 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
   val defaultHitValue = defaultHit.fields.head._2
 
   def getHit(data: JsObject = defaultHit) =
-    ElasticSearch.Hit("", "", "", 10.0f, data)
+    ElasticSearch.Hit("", "", "", 10.0f, Some(data))
 
   val query1 = """{"query":{"term":{"event_source":{"value":"raven"}}}}"""
   val queryWithType = """{"_type": "complicatedType", "query":{"term":{"event_source":{"value":"raven"}}}}"""
@@ -125,9 +124,9 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       pub ! ActorPublisherMessage.Request(1000)
 
       val hit1Data = """{"a": "b"}""".parseJson.asJsObject
-      val hit1 = ElasticSearch.Hit("", "", "", 0, hit1Data)
+      val hit1 = ElasticSearch.Hit("", "", "", 0, Some(hit1Data))
       val hit2Data = """{"s": "b"}""".parseJson.asJsObject
-      val hit2 = ElasticSearch.Hit("", "", "", 0, hit2Data)
+      val hit2 = ElasticSearch.Hit("", "", "", 0, Some(hit2Data))
 
       pub ! getQueryResults(Vector(hit1, hit1, hit2))
       val meta1 = expectTypeMetadata()
@@ -143,6 +142,22 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
       assert(meta2.typesHint.contains(("s", JsString("b"))))
       expectMsg(OutputChunk(Vector[JsValue](JsNull, JsString("b"))))
 
+      expectDone(pub)
+    }
+
+    "ignore hit if _source is null" in {
+      val querySize = 100
+      val query = """{"query":{"term":{"event_source":{"value":"raven"}}}}"""
+      val pub = newPublisher(query, querySize = querySize)
+      pub ! ActorPublisherMessage.Request(1000)
+      expectMsgType[HttpRequestCommand]
+      expectStreamStarted()
+
+      val hit1 = ElasticSearch.Hit("", "", "", 10.0f, None)
+
+      pub ! getQueryResults(Vector(hit1))
+      val meta = expectTypeMetadata()
+      assert(meta.typesHint.isEmpty)
       expectDone(pub)
     }
 
