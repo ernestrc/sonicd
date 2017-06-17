@@ -205,6 +205,20 @@ class ElasticSearchSourceSpec(_system: ActorSystem)
         assert(meta.typesHint.contains(("b", JsNull)))
         expectDone(pub)
       }
+
+      {
+        val query = """{"_source":["a", "b"], "query":{"term":{"event_source":{"value":"raven"}}}}"""
+        val pub = newPublisher(query, querySize = querySize)
+        pub ! ActorPublisherMessage.Request(1000)
+        expectMsgType[HttpRequestCommand]
+        expectStreamStarted()
+
+        pub ! getQueryResults(Vector.empty)
+        val meta = expectTypeMetadata()
+        assert(meta.typesHint.contains(("a", JsNull)))
+        assert(meta.typesHint.contains(("b", JsNull)))
+        expectDone(pub)
+      }
     }
 
     "if query does not have an index, uri index should be set to _all" in {

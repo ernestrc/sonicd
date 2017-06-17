@@ -202,8 +202,9 @@ class ElasticSearchPublisher(traceId: String,
 
   def getSelect(query: ESQuery): Vector[String] = {
     val payload = query.payload.fields
-    val fields = payload.get("stored_fields").orElse(payload.get("fields"))
-    fields
+    payload.get("stored_fields")
+      .orElse(payload.get("fields"))
+      .orElse(payload.get("_source"))
       .flatMap(f ⇒ Try(f.convertTo[Vector[String]]).toOption)
       .getOrElse(Vector.empty)
   }
