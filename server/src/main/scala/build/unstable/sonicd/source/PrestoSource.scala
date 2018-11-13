@@ -22,24 +22,25 @@ import scala.concurrent.duration.{Duration, _}
 class PrestoSource(query: Query, actorContext: ActorContext, context: RequestContext)
   extends SonicdSource(query, actorContext, context) {
 
-  def prestoSupervisorProps(masterUrl: String, masterPort: Int): Props =
-    Props(classOf[PrestoSupervisor], masterUrl, masterPort)
+  def prestoSupervisorProps(masterUrl: String, masterPort: Int, debug: Boolean): Props =
+    Props(classOf[PrestoSupervisor], masterUrl, masterPort, debug)
 
   val masterUrl: String = getConfig[String]("url")
   val masterPort: Int = getOption[Int]("port").getOrElse(8889)
+  val debug: Boolean = getOption[Boolean]("debug").getOrElse(false)
 
   val supervisorName = Presto.getSupervisorName(masterUrl)
 
   def getSupervisor(name: String): ActorRef = {
     actorContext.child(name).getOrElse {
-      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort, debug), supervisorName)
     }
   }
 
   lazy val publisher: Props = {
     //if no presto supervisor has been initialized yet for this presto cluster, initialize one
     val prestoSupervisor = actorContext.child(supervisorName).getOrElse {
-      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort), supervisorName)
+      actorContext.actorOf(prestoSupervisorProps(masterUrl, masterPort, debug), supervisorName)
     }
 
     Props(classOf[PrestoPublisher], query.traceId.get, query.query, prestoSupervisor,
@@ -49,10 +50,8 @@ class PrestoSource(query: Query, actorContext: ActorContext, context: RequestCon
   }
 }
 
-class PrestoSupervisor(val masterUrl: String, val port: Int)
+class PrestoSupervisor(val masterUrl: String, val port: Int, val debug: Boolean)
   extends HttpSupervisor[Presto.QueryResults] {
-
-  lazy val debug: Boolean = false
 
   lazy val poolSettings: ConnectionPoolSettings = ConnectionPoolSettings(SonicdConfig.PRESTO_CONNECTION_POOL_SETTINGS)
 
