@@ -10,6 +10,7 @@ import build.unstable.sonic.JsonProtocol._
 import build.unstable.sonicd.source.http.HttpSupervisor._
 import build.unstable.sonicd.{Sonicd, SonicdLogging}
 import build.unstable.tylog.Variation
+import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import spray.json._
 
@@ -54,6 +55,8 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
   //debug flag to output raw payloads
   def debug: Boolean
 
+  private lazy val httpLogger = LoggerFactory.getLogger("http-log")
+
 
   /* HELPERS */
 
@@ -66,10 +69,10 @@ abstract class HttpSupervisor[T <: Traceable] extends Actor with SonicdLogging {
       .map(_.data.decodeString("UTF-8"))
       .andThen {
         case Success(body) ⇒
-          val msg = if (debug) s"decoded utf8 body: $body" else ""
-          log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Success, msg)
+          if (debug) httpLogger.debug(body)
+          log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Success, "size: {}", body.length)
           log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Attempt, "")
-        case Failure(e) ⇒ log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Failure(e), "failed to download entity")
+        case Failure(e) ⇒ log.tylog(Level.DEBUG, traceId, DownloadHttpBody, Variation.Failure(e),"failed to download entity")
       }.map(_.parseJson.convertTo[S]).andThen {
       case Success(parsed) ⇒ log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Success, "parsed http body")
       case Failure(e) ⇒ log.tylog(Level.DEBUG, traceId, ParseHttpBody, Variation.Attempt,

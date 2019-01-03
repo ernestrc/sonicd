@@ -264,6 +264,17 @@ class PrestoSourceSpec(_system: ActorSystem)
         val cmd = expectMsgType[HttpRequestCommand]
         assert(cmd.request._2.toString().endsWith("6"))
 
+        pub ! QueryResults("", "", None, Some("http://7"),
+          Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000), None, None, None)
+      }
+
+      pub ! ActorPublisherMessage.Request(1)
+      expectMsg(QueryProgress(QueryProgress.Finished, 0, Some(1000), Some("splits")))
+
+      {
+        val cmd = expectMsgType[HttpRequestCommand]
+        assert(cmd.request._2.toString().endsWith("7"))
+        // no nextUri indicates EOS
         pub ! QueryResults("", "", None, None,
           Some(defaultColumns), None, stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000), None, None, None)
       }
@@ -353,7 +364,7 @@ class PrestoSourceSpec(_system: ActorSystem)
 
       expectMsgType[HttpRequestCommand]
 
-      pub ! QueryResults("", "", None, Some("http://3"),
+      pub ! QueryResults("", "", None, None,
         Some(defaultColumns), Some(defaultData),
         stats1.copy(state = "FINISHED", completedSplits = 1000, totalSplits = 1000),
         None, None, None)

@@ -208,7 +208,9 @@ class PrestoPublisher(traceId: String, query: String,
           buffer.enqueue(QueryProgress(QueryProgress.Finished, totalSplits - completedSplits, Some(totalSplits), units))
           r.data.foreach(d ⇒ d.foreach(va ⇒ buffer.enqueue(OutputChunk(va))))
           log.tylog(Level.INFO, traceId, callType, Variation.Success, r.stats.state)
-          context.become(terminating(done = StreamCompleted.success))
+          if (r.nextUri.isEmpty) {
+            context.become(terminating(done = StreamCompleted.success))
+          }
 
         case "FAILED" ⇒
           val error = r.error.get
