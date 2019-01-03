@@ -210,6 +210,8 @@ class PrestoPublisher(traceId: String, query: String,
           log.tylog(Level.INFO, traceId, callType, Variation.Success, r.stats.state)
           if (r.nextUri.isEmpty) {
             context.become(terminating(done = StreamCompleted.success))
+          } else {
+            tryPullUpstream()
           }
 
         case "FAILED" ⇒
